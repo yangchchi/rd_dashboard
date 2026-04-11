@@ -1,0 +1,43 @@
+{
+  "id": "conflict_detector_tech_spec_1",
+  "pluginKey": "@official-plugins/ai-text-to-json",
+  "pluginVersion": "1.0.18",
+  "name": "技术规格冲突检测器",
+  "description": "检测技术规格文档与现有系统逻辑的冲突，生成结构化冲突报告",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "tech_spec_content": {
+        "type": "string",
+        "description": "待检测的技术规格文档内容"
+      },
+      "existing_system_logic": {
+        "type": "string",
+        "description": "现有系统的逻辑规则和设计说明"
+      }
+    },
+    "required": [
+      "tech_spec_content",
+      "existing_system_logic"
+    ]
+  },
+  "formValue": {
+    "prompt": "你是一位资深的系统架构冲突检测专家，拥有丰富的技术规格评审和系统兼容性分析经验。\n\n请对比以下技术规格文档和现有系统逻辑，检测其中存在的所有逻辑冲突：\n\n技术规格文档内容：\n{{input.tech_spec_content}}\n\n现有系统逻辑：\n{{input.existing_system_logic}}\n\n检测要求：\n1. 全面扫描所有可能的冲突点，包括但不限于接口定义不一致、数据格式不兼容、业务逻辑矛盾、性能指标冲突、安全规则违背等\n2. 每个冲突需要明确说明冲突类型、具体位置、冲突描述和可行的修改建议\n3. 如果没有检测到冲突，返回空数组\n4. 确保检测结果准确客观，避免误判",
+    "jsonStructure": [
+      {
+        "paramType": "Array",
+        "paramDescription": "冲突列表，items schema: {conflict_type: string(冲突类型，如接口冲突/数据格式冲突/业务逻辑冲突等), position: string(冲突位置，如技术规格第3章第2节/现有系统接口V2 getUserInfo), description: string(冲突详细描述), suggestion: string(修改建议)}",
+        "name": "conflict_list"
+      }
+    ],
+    "modelID": "87",
+    "modelParams": {
+      "maxTokens": 8192,
+      "temperature": 0.1
+    }
+  },
+  "createdAt": 1775620932333,
+  "updatedAt": 1775620932333,
+  "createdBy": 6944703071284903963
+}

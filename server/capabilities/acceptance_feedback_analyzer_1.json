@@ -1,0 +1,27 @@
+{
+  "id": "acceptance_feedback_analyzer_1",
+  "pluginKey": "@official-plugins/ai-text-summary",
+  "pluginVersion": "1.0.4",
+  "name": "验收反馈分析器",
+  "description": "基于验收反馈文本，自动分析功能偏差问题，提炼优化方向，生成可落地的改进建议，流式输出结果。",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "acceptance_feedback": {
+        "type": "string",
+        "description": "待分析的验收反馈完整文本"
+      }
+    },
+    "required": [
+      "acceptance_feedback"
+    ]
+  },
+  "formValue": {
+    "content": "{{input.acceptance_feedback}}",
+    "requirement": "请扮演专业的软件验收分析师，对输入的验收反馈进行深度分析，输出内容包含三个部分：1. 功能偏差分析：梳理验收中发现的与需求不符的问题点，按严重程度排序；2. 优化方向：针对每个问题提出具体的改进思路和方向；3. 落地建议：给出可执行的整改优先级和实施建议。要求结构清晰，语言专业，结论明确。"
+  },
+  "createdAt": 1775620929317,
+  "updatedAt": 1775620929317,
+  "createdBy": 6944703071284903963
+}

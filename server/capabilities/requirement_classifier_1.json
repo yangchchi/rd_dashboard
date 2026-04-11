@@ -1,0 +1,74 @@
+{
+  "id": "requirement_classifier_1",
+  "pluginKey": "@official-plugins/ai-categorization",
+  "pluginVersion": "1.0.12",
+  "name": "需求分类与优先级识别器",
+  "description": "对需求文本进行自动分类和优先级识别，分类包含功能需求/技术需求/体验需求，优先级分为P0/P1/P2/P3",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "requirement_text": {
+        "type": "string",
+        "description": "待分类的需求文本内容"
+      },
+      "additional_rules": {
+        "description": "自定义分类规则（可选）",
+        "type": "string"
+      }
+    },
+    "required": [
+      "requirement_text"
+    ]
+  },
+  "formValue": {
+    "customRequirements": "请先对需求进行分类：功能需求是指新功能、特性需求；技术需求是指技术架构、性能、稳定性等相关需求；体验需求是指用户体验、交互优化等相关需求。然后评估优先级：P0为最高优先级，紧急必须立即处理；P1为高优先级，重要需要优先处理；P2为中优先级，可按计划处理；P3为低优先级，可延后处理。请返回一个分类结果，格式为【分类-优先级】。{{input.additional_rules}}",
+    "modelID": "87",
+    "modelParams": {
+      "maxTokens": 8192,
+      "temperature": 0.5
+    },
+    "textToBeCategorized": "{{input.requirement_text}}",
+    "categories": [
+      {
+        "name": "功能需求-P0"
+      },
+      {
+        "name": "功能需求-P1"
+      },
+      {
+        "name": "功能需求-P2"
+      },
+      {
+        "name": "功能需求-P3"
+      },
+      {
+        "name": "技术需求-P0"
+      },
+      {
+        "name": "技术需求-P1"
+      },
+      {
+        "name": "技术需求-P2"
+      },
+      {
+        "name": "技术需求-P3"
+      },
+      {
+        "name": "体验需求-P0"
+      },
+      {
+        "name": "体验需求-P1"
+      },
+      {
+        "name": "体验需求-P2"
+      },
+      {
+        "name": "体验需求-P3"
+      }
+    ]
+  },
+  "createdAt": 1775620932464,
+  "updatedAt": 1775620932464,
+  "createdBy": 6944703071284903963
+}

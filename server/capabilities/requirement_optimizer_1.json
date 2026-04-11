@@ -1,0 +1,29 @@
+{
+  "id": "requirement_optimizer_1",
+  "pluginKey": "@official-plugins/ai-text-generate",
+  "pluginVersion": "1.0.12",
+  "name": "需求优化总结",
+  "description": "基于清晰、可落地、无歧义原则优化原始用户需求表述，输出简洁专业的执行级描述。",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "requirement_text": {
+        "type": "string",
+        "description": "待优化的原始需求文本（纯文本）"
+      }
+    },
+    "required": ["requirement_text"]
+  },
+  "formValue": {
+    "modelID": "87",
+    "modelParams": {
+      "maxTokens": 1024,
+      "temperature": 0.4
+    },
+    "prompt": "你是一名资深的产品经理，请你基于清晰、可落地、无歧义原则，对原始用户需求进行优化：\n1.提炼核心诉求，剔除模糊、冗余表述\n2.明确使用场景、目标对象、预期效果\n3.补充关键约束条件（时间、风格、格式、平台、禁忌）\n4.将模糊指令转化为具体、可执行的操作要求\n5.优化后语言简洁专业，逻辑通顺，便于直接执行，字数不超过200字\n\n请直接输出优化后的需求正文，不要输出标题、编号列表或任何前缀说明。\n\n原始用户需求：\n{{input.requirement_text}}"
+  },
+  "createdAt": 1775620932464,
+  "updatedAt": 1775620932464,
+  "createdBy": 0
+}

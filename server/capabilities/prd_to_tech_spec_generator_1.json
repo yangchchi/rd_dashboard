@@ -1,0 +1,35 @@
+{
+  "id": "prd_to_tech_spec_generator_1",
+  "pluginKey": "@official-plugins/ai-text-generate",
+  "pluginVersion": "1.0.12",
+  "name": "PRD转技术规格说明书生成器",
+  "description": "基于输入的产品需求文档(PRD)内容，自动生成包含功能规格和技术规格的技术说明书草稿，采用流式输出模式。",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "prd_content": {
+        "type": "string",
+        "description": "产品需求文档(PRD)完整内容"
+      },
+      "additional_requirements": {
+        "type": "string",
+        "description": "额外生成要求（可选）"
+      }
+    },
+    "required": [
+      "prd_content"
+    ]
+  },
+  "formValue": {
+    "modelID": "87",
+    "modelParams": {
+      "maxTokens": 8192,
+      "temperature": 0.5
+    },
+    "prompt": "你是一位资深的技术架构师，拥有丰富的软件系统设计和技术文档编写经验。\n\n请基于以下提供的PRD内容，生成一份完整的技术规格说明书草稿：\nPRD内容：\n{{input.prd_content}}\n\n生成要求：\n1. 文档结构必须包含但不限于以下部分：\n   - 文档概述（目的、范围、读者、术语定义）\n   - 功能规格说明：\n     * 功能需求列表\n     * 核心业务流程说明\n     * 用户场景描述\n     * 异常处理要求\n   - 技术规格说明：\n     * 整体架构设计\n     * 模块划分与职责定义\n     * 接口设计（输入输出、错误码）\n     * 数据结构设计\n     * 关键技术选型与依据\n     * 非功能需求（性能、安全、可用性等）\n   - 实施建议（开发排期建议、测试要点、上线风险评估）\n\n2. 内容要求：\n   - 准确对应PRD中的所有需求点，无遗漏\n   - 技术方案具备可行性和可落地性\n   - 逻辑清晰，层次分明，使用专业技术术语但保持可读性\n   - 对于不确定的部分可以标注\"待确认\"并给出建议方案\n\n3. 格式要求：\n   - 使用Markdown格式编写\n   - 采用层级标题（#、##、###等）组织内容\n   - 适当使用列表、表格等形式提升可读性\n\n额外要求：\n{{input.additional_requirements}}\n\n请开始生成："
+  },
+  "createdAt": 1775620935328,
+  "updatedAt": 1775620935328,
+  "createdBy": 6944703071284903963
+}

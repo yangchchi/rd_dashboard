@@ -1,0 +1,658 @@
+/**
+ * Blur 分层（与 macOS / Vercel 玻璃层级一致：浅层控件 / 顶栏 / 侧栏与主面板）
+ */
+/* 默认深色（无 preference / 旧浏览器回退）；浅色由下方 media 覆盖 */
+:root {
+  color-scheme: dark;
+  --blur-glass-10: 10px;
+  --blur-glass-20: 20px;
+  --blur-glass-40: 40px;
+  --glass-saturate: 180%;
+  --noise-opacity: 0.042;
+
+  /* next/font 注入 --font-geist-sans / --font-geist-mono（见 app/layout.tsx） */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: ui-serif, Georgia, Cambria, 'Times New Roman', serif;
+  --font-mono: var(--font-geist-mono), 'JetBrains Mono', 'Fira Code', ui-monospace,
+    monospace;
+  --radius: 1rem;
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+
+  /* Status colors — six-stage workflow（深浅共用） */
+  --status-backlog: hsl(220 9% 46%);
+  --status-prd: hsl(217 91% 60%);
+  --status-spec: hsl(243 75% 59%);
+  --status-ai: hsl(270 60% 55%);
+  --status-pending: hsl(25 95% 53%);
+  --status-released: hsl(142 71% 45%);
+
+  --chart-1: hsl(217 91% 60%);
+  --chart-2: hsl(187 92% 43%);
+  --chart-3: hsl(243 75% 59%);
+  --chart-4: hsl(258 90% 66%);
+  --chart-5: hsl(347 77% 50%);
+
+  --button-outline: rgba(255, 255, 255, 0.1);
+  --badge-outline: rgba(255, 255, 255, 0.05);
+  --opaque-button-border-intensity: -8;
+  --elevate-1: rgba(255, 255, 255, 0.03);
+  --elevate-2: rgba(255, 255, 255, 0.08);
+
+  --glass-blur: var(--blur-glass-40);
+  --glass-border: hsl(210 40% 98% / 0.09);
+  --glass-highlight: hsl(210 40% 98% / 0.06);
+  --glass-hover-shine: linear-gradient(
+    118deg,
+    transparent 34%,
+    hsl(210 40% 98% / 0.14) 49%,
+    transparent 62%
+  );
+
+  --background: hsl(222 47% 7%);
+  --foreground: hsl(210 40% 98%);
+  --card: hsl(222 47% 11% / 0.55);
+  --card-foreground: hsl(210 40% 98%);
+  --popover: hsl(222 47% 11% / 0.72);
+  --popover-foreground: hsl(210 40% 98%);
+  --primary: hsl(217 91% 60%);
+  --primary-foreground: hsl(210 40% 98%);
+  --secondary: hsl(222 30% 16% / 0.6);
+  --secondary-foreground: hsl(210 40% 98%);
+  --muted: hsl(222 25% 18% / 0.5);
+  --muted-foreground: hsl(215 16% 62%);
+  --accent: hsl(222 35% 18% / 0.65);
+  --accent-foreground: hsl(210 40% 98%);
+  --info: hsl(187 92% 43%);
+  --info-foreground: hsl(222 47% 11%);
+  --destructive: hsl(0 84% 60%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(142 71% 45%);
+  --success-foreground: hsl(222 47% 11%);
+  --warning: hsl(38 92% 50%);
+  --warning-foreground: hsl(222 47% 11%);
+  --border: hsl(214 32% 91% / 0.12);
+  --input: hsl(214 32% 91% / 0.14);
+  --ring: hsl(217 91% 60%);
+
+  --sidebar: hsl(222 47% 11% / 0.48);
+  --sidebar-foreground: hsl(210 40% 98%);
+  --sidebar-primary: hsl(217 91% 60%);
+  --sidebar-primary-foreground: hsl(210 40% 98%);
+  --sidebar-accent: hsl(222 40% 18% / 0.55);
+  --sidebar-accent-foreground: hsl(210 40% 98%);
+  /* 与顶栏 .glass-sticky-header 底边（--glass-border）一致，避免侧栏分隔线偏暗 */
+  --sidebar-border: var(--glass-border);
+  --sidebar-ring: hsl(217 91% 60%);
+
+  --primary-border: hsl(from hsl(217 91% 60%) h s calc(l + var(--opaque-button-border-intensity)));
+  --secondary-border: hsl(from hsl(240 4% 16%) h s calc(l + var(--opaque-button-border-intensity)));
+  --destructive-border: hsl(from hsl(0 84% 60%) h s calc(l + var(--opaque-button-border-intensity)));
+  --accent-border: hsl(from hsl(240 4% 16%) h s calc(l + var(--opaque-button-border-intensity)));
+  --muted-border: hsl(from hsl(240 4% 16%) h s calc(l + var(--opaque-button-border-intensity)));
+
+  --shadow-x: 0px;
+  --shadow-y: 0px;
+  --shadow-blur: 0px;
+  --shadow-spread: 0px;
+  --shadow-opacity: 0;
+  --shadow-color: transparent;
+  --shadow-2xs: 0 1px 0 hsl(0 0% 100% / 0.04);
+  --shadow-xs: 0 1px 2px hsl(0 0% 0% / 0.35);
+  --shadow-sm:
+    0 0 0 1px hsl(210 40% 98% / 0.05),
+    0 4px 24px -4px hsl(0 0% 0% / 0.38),
+    0 18px 44px -16px hsl(0 0% 0% / 0.35);
+  --shadow:
+    0 0 0 1px hsl(210 40% 98% / 0.05),
+    0 8px 32px -8px hsl(0 0% 0% / 0.42),
+    0 28px 56px -20px hsl(0 0% 0% / 0.38);
+  --shadow-md:
+    0 0 0 1px hsl(210 40% 98% / 0.06),
+    0 12px 40px -12px hsl(0 0% 0% / 0.45),
+    0 36px 64px -24px hsl(0 0% 0% / 0.4);
+  --shadow-lg:
+    0 0 0 1px hsl(210 40% 98% / 0.06),
+    0 24px 48px -16px hsl(0 0% 0% / 0.48),
+    0 48px 80px -28px hsl(0 0% 0% / 0.42);
+  --shadow-xl: var(--shadow-lg);
+  --shadow-2xl: var(--shadow-lg);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --button-outline: rgba(0, 0, 0, 0.08);
+    --badge-outline: rgba(0, 0, 0, 0.05);
+    --opaque-button-border-intensity: -8;
+    --elevate-1: rgba(0, 0, 0, 0.04);
+    --elevate-2: rgba(0, 0, 0, 0.09);
+
+    --glass-blur: var(--blur-glass-40);
+    --glass-border: hsl(222 47% 11% / 0.09);
+    --glass-highlight: hsl(0 0% 100% / 0.65);
+    --glass-hover-shine: linear-gradient(
+      118deg,
+      transparent 36%,
+      hsl(0 0% 100% / 0.55) 48%,
+      transparent 58%
+    );
+
+    --background: hsl(210 20% 98%);
+    --foreground: hsl(222 47% 11%);
+    --card: hsl(0 0% 100% / 0.78);
+    --card-foreground: hsl(222 47% 11%);
+    --popover: hsl(0 0% 100% / 0.92);
+    --popover-foreground: hsl(222 47% 11%);
+    --primary: hsl(217 91% 50%);
+    --primary-foreground: hsl(210 40% 98%);
+    --secondary: hsl(222 14% 96% / 0.95);
+    --secondary-foreground: hsl(222 47% 11%);
+    --muted: hsl(222 14% 94% / 0.9);
+    --muted-foreground: hsl(215 16% 42%);
+    --accent: hsl(222 14% 93% / 0.95);
+    --accent-foreground: hsl(222 47% 11%);
+    --info: hsl(187 92% 38%);
+    --info-foreground: hsl(210 40% 98%);
+    --destructive: hsl(0 72% 51%);
+    --destructive-foreground: hsl(0 0% 100%);
+    --success: hsl(142 71% 40%);
+    --success-foreground: hsl(210 40% 98%);
+    --warning: hsl(38 92% 45%);
+    --warning-foreground: hsl(222 47% 11%);
+    --border: hsl(214 32% 88%);
+    --input: hsl(214 32% 88%);
+    --ring: hsl(217 91% 50%);
+
+    --sidebar: hsl(0 0% 100% / 0.72);
+    --sidebar-foreground: hsl(222 47% 11%);
+    --sidebar-primary: hsl(217 91% 50%);
+    --sidebar-primary-foreground: hsl(210 40% 98%);
+    --sidebar-accent: hsl(222 14% 94% / 0.95);
+    --sidebar-accent-foreground: hsl(222 47% 11%);
+    --sidebar-border: hsl(214 32% 90%);
+    --sidebar-ring: hsl(217 91% 50%);
+
+    --primary-border: hsl(from hsl(217 91% 50%) h s calc(l + var(--opaque-button-border-intensity)));
+    --secondary-border: hsl(from hsl(222 14% 96%) h s calc(l + var(--opaque-button-border-intensity)));
+    --destructive-border: hsl(from hsl(0 72% 51%) h s calc(l + var(--opaque-button-border-intensity)));
+    --accent-border: hsl(from hsl(222 14% 93%) h s calc(l + var(--opaque-button-border-intensity)));
+    --muted-border: hsl(from hsl(222 14% 94%) h s calc(l + var(--opaque-button-border-intensity)));
+
+    --shadow-x: 0px;
+    --shadow-y: 0px;
+    --shadow-blur: 0px;
+    --shadow-spread: 0px;
+    --shadow-opacity: 0;
+    --shadow-color: transparent;
+    /* Vercel Dashboard 式：发丝描边 + 大半径低不透明度弥散（非单层 box-shadow） */
+    --shadow-2xs: 0 1px 0 hsl(0 0% 100% / 0.9) inset;
+    --shadow-xs:
+      0 0 0 1px hsl(222 47% 11% / 0.06),
+      0 1px 2px hsl(222 47% 11% / 0.04);
+    --shadow-sm:
+      0 0 0 1px hsl(222 47% 11% / 0.06),
+      0 2px 8px -2px hsl(222 47% 11% / 0.06),
+      0 12px 32px -12px hsl(222 47% 11% / 0.1);
+    --shadow:
+      0 0 0 1px hsl(222 47% 11% / 0.06),
+      0 4px 16px -4px hsl(222 47% 11% / 0.08),
+      0 20px 48px -16px hsl(222 47% 11% / 0.1);
+    --shadow-md:
+      0 0 0 1px hsl(222 47% 11% / 0.07),
+      0 8px 24px -8px hsl(222 47% 11% / 0.1),
+      0 28px 56px -20px hsl(222 47% 11% / 0.12);
+    --shadow-lg:
+      0 0 0 1px hsl(222 47% 11% / 0.08),
+      0 12px 40px -12px hsl(222 47% 11% / 0.12),
+      0 40px 72px -24px hsl(222 47% 11% / 0.14);
+    --shadow-xl: var(--shadow-lg);
+    --shadow-2xl: var(--shadow-lg);
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+}
+
+::selection {
+  background-color: hsl(217 91% 60% / 0.35);
+  color: hsl(210 40% 98%);
+}
+
+/**
+ * App shell: 动态渐变 mesh + 固定 noise 层（随 prefers-color-scheme 切换）
+ */
+.app-shell {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--background);
+  background-image:
+    radial-gradient(ellipse 130% 90% at 50% -35%, hsl(217 91% 60% / 0.18), transparent 58%),
+    radial-gradient(ellipse 100% 70% at 100% 0%, hsl(243 75% 59% / 0.11), transparent 52%),
+    radial-gradient(ellipse 80% 60% at 0% 85%, hsl(187 92% 43% / 0.08), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 50% 120%, hsl(270 60% 55% / 0.06), transparent 50%);
+  background-attachment: fixed;
+}
+
+@media (prefers-color-scheme: light) {
+  .app-shell {
+    background-image:
+      radial-gradient(ellipse 120% 80% at 50% -30%, hsl(217 91% 60% / 0.09), transparent 55%),
+      radial-gradient(ellipse 90% 60% at 100% 0%, hsl(243 75% 59% / 0.06), transparent 50%),
+      radial-gradient(ellipse 70% 50% at 0% 100%, hsl(187 92% 43% / 0.05), transparent 52%);
+  }
+}
+
+.app-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--noise-opacity);
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='n' x='0' y='0'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+
+@media (prefers-color-scheme: light) {
+  .app-shell::before {
+    mix-blend-mode: multiply;
+    opacity: 0.028;
+  }
+}
+
+.app-shell > * {
+  position: relative;
+  z-index: 1;
+}
+
+/**
+ * 主内容区：极淡点阵（浅色用深蓝点，深色用浅点）
+ */
+.rd-content-canvas {
+  background-image: radial-gradient(
+    hsl(210 40% 98% / 0.04) 1px,
+    transparent 1px
+  );
+  background-size: 24px 24px;
+  background-position: 0 0;
+}
+
+@media (prefers-color-scheme: light) {
+  .rd-content-canvas {
+    background-image: radial-gradient(
+      hsl(222 47% 11% / 0.06) 1px,
+      transparent 1px
+    );
+  }
+}
+
+.glass-sticky-header {
+  background: color-mix(in oklab, var(--background) 58%, transparent);
+  backdrop-filter: blur(var(--blur-glass-20)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--blur-glass-20)) saturate(var(--glass-saturate));
+  border-bottom: 1px solid var(--glass-border);
+  box-shadow:
+    0 1px 0 0 color-mix(in oklab, var(--foreground) 6%, transparent),
+    var(--shadow-xs);
+}
+
+/* Sidebar inner + mobile sheet: 最高一档 blur（40） */
+[data-slot="sidebar-inner"],
+[data-mobile="true"][data-sidebar="sidebar"] {
+  background: color-mix(in oklab, var(--sidebar) 88%, transparent) !important;
+  backdrop-filter: blur(var(--blur-glass-40)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--blur-glass-40)) saturate(var(--glass-saturate));
+  border-color: var(--sidebar-border) !important;
+  box-shadow:
+    inset 0 1px 0 0 var(--glass-highlight),
+    var(--shadow-xs);
+}
+
+/**
+ * List / filter / table shells — blur-20 主面、blur-10 内嵌行
+ */
+.rd-surface-card {
+  @apply rounded-2xl border border-border bg-card;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(var(--blur-glass-20)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--blur-glass-20)) saturate(var(--glass-saturate));
+  box-shadow: var(--shadow-sm);
+}
+
+.rd-surface-card-hover {
+  @apply transition-[border-color,box-shadow,background-color] duration-200 hover:border-border hover:bg-card;
+}
+
+.rd-surface-card-hover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--glass-hover-shine);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+  pointer-events: none;
+}
+
+.rd-surface-card-hover:hover::after {
+  opacity: 1;
+}
+
+.rd-surface-inset {
+  @apply rounded-lg border border-border bg-muted;
+  backdrop-filter: blur(var(--blur-glass-10)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--blur-glass-10)) saturate(160%);
+}
+
+.rd-list-row {
+  @apply flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:border-border hover:bg-card;
+  backdrop-filter: blur(var(--blur-glass-10)) saturate(150%);
+  -webkit-backdrop-filter: blur(var(--blur-glass-10)) saturate(150%);
+}
+
+.rd-input-glass {
+  @apply border text-foreground transition-colors placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-0;
+  border-color: var(--input);
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+}
+
+.rd-input-glass:focus-visible {
+  background: color-mix(in oklab, var(--foreground) 7%, transparent);
+}
+
+.rd-select-glass {
+  @apply border text-foreground transition-colors hover:border-border;
+  border-color: var(--input);
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+}
+
+.rd-select-glass:hover {
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.rd-select-content {
+  @apply rounded-2xl border border-border text-foreground;
+  background: color-mix(in oklab, var(--popover) 94%, transparent);
+  backdrop-filter: blur(var(--blur-glass-20)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--blur-glass-20)) saturate(var(--glass-saturate));
+  box-shadow: var(--shadow-md);
+}
+
+.rd-select-item {
+  @apply text-foreground focus:bg-accent focus:text-accent-foreground;
+}
+
+.rd-page-title {
+  @apply text-2xl font-semibold tracking-tight text-foreground;
+  text-wrap: balance;
+}
+
+.rd-page-desc {
+  @apply max-w-2xl text-balance text-sm leading-relaxed text-muted-foreground;
+}
+
+/** 列表区标题左侧图标 — 轻微渐变 + 内高光 */
+.rd-list-section-icon {
+  @apply flex size-10 items-center justify-center rounded-xl border border-border;
+  background: linear-gradient(
+    145deg,
+    hsl(217 91% 60% / 0.38) 0%,
+    hsl(243 75% 59% / 0.22) 100%
+  );
+  box-shadow:
+    0 0 24px hsl(217 91% 60% / 0.14),
+    inset 0 1px 0 0 color-mix(in oklab, var(--foreground) 18%, transparent);
+}
+
+/**
+ * Ant Design Table inside .rd-surface-card — match macOS frosted list (需求列表)
+ */
+.rd-surface-card .ant-table-wrapper .ant-table {
+  background: transparent !important;
+}
+
+.rd-surface-card .ant-table-wrapper .ant-table-container {
+  background: transparent !important;
+}
+
+.rd-surface-card .ant-table-thead > tr > th {
+  background: color-mix(in oklab, var(--muted) 80%, transparent) !important;
+  backdrop-filter: blur(var(--blur-glass-20)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--blur-glass-20)) saturate(var(--glass-saturate));
+  border-bottom: 1px solid var(--border) !important;
+  color: var(--muted-foreground) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
+}
+
+.rd-surface-card .ant-table-tbody > tr > td {
+  background: transparent !important;
+  border-color: color-mix(in oklab, var(--border) 85%, transparent) !important;
+}
+
+.rd-surface-card .ant-table-tbody > tr.ant-table-row:hover > td {
+  background: color-mix(in oklab, var(--foreground) 5%, transparent) !important;
+}
+
+.rd-surface-card .ant-table-tbody > tr.ant-table-row-selected > td {
+  background: color-mix(in oklab, var(--primary) 12%, transparent) !important;
+}
+
+.rd-surface-card .ant-pagination {
+  margin: 1rem 0 0 !important;
+}
+
+.rd-surface-card .ant-pagination .ant-pagination-item,
+.rd-surface-card .ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+.rd-surface-card .ant-pagination .ant-pagination-next .ant-pagination-item-link {
+  background: color-mix(in oklab, var(--muted) 70%, transparent) !important;
+  border-color: var(--border) !important;
+  backdrop-filter: blur(var(--blur-glass-10));
+  -webkit-backdrop-filter: blur(var(--blur-glass-10));
+}
+
+.rd-surface-card .ant-pagination .ant-pagination-item-active {
+  border-color: color-mix(in oklab, var(--primary) 45%, transparent) !important;
+  background: color-mix(in oklab, var(--primary) 12%, transparent) !important;
+}
+
+.rd-surface-card .ant-checkbox .ant-checkbox-inner {
+  background: color-mix(in oklab, var(--foreground) 6%, transparent) !important;
+  border-color: var(--border) !important;
+}
+
+/**
+ * shadcn Table inside .rd-surface-card — PRD 列表等同视觉
+ */
+.rd-surface-card [data-slot="table-header"] {
+  backdrop-filter: blur(var(--blur-glass-20)) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--blur-glass-20)) saturate(160%);
+}
+
+.rd-surface-card [data-slot="table-head"] {
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--muted) 80%, transparent);
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rd-surface-card [data-slot="table-row"] {
+  border-color: color-mix(in oklab, var(--border) 85%, transparent);
+  transition: background-color 0.15s ease;
+}
+
+.rd-surface-card [data-slot="table-row"]:hover {
+  background: color-mix(in oklab, var(--foreground) 5%, transparent) !important;
+}
+
+/**
+ * Using the elevate system.
+ * Automatic contrast adjustment.
+ *
+ * <element className="hover-elevate" />
+ * <element className="active-elevate-2" />
+ *
+ * // Using the tailwind utility when a data attribute is "on"
+ * <element className="toggle-elevate data-[state=on]:toggle-elevated" />
+ * // Or manually controlling the toggle state
+ * <element className="toggle-elevate toggle-elevated" />
+ *
+ * Elevation systems have to handle many states.
+ * - not-hovered, vs. hovered vs. active  (three mutually exclusive states)
+ * - toggled or not
+ * - focused or not (this is not handled with these utilities)
+ *
+ * Even without handling focused or not, this is six possible combinations that
+ * need to be distinguished from eachother visually.
+ */
+/* Hide ugly search cancel button in Chrome until we can style it properly */
+input[type="search"]::-webkit-search-cancel-button {
+    @apply hidden;
+  }
+
+  /* Placeholder styling for contentEditable div */
+  [contenteditable][data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: var(--muted-foreground);
+    pointer-events: none;
+  }
+
+  /* .no-default-hover-elevate/no-default-active-elevate is an escape hatch so consumers of
+   * buttons/badges can remove the automatic brightness adjustment on interactions
+   * and program their own. */
+  .no-default-hover-elevate {}
+  .no-default-active-elevate {}
+
+
+  /**
+   * Toggleable backgrounds go behind the content. Hoverable/active goes on top.
+   * This way they can stack/compound. Both will overlap the parent's borders!
+   * So borders will be automatically adjusted both on toggle, and hover/active,
+   * and they will be compounded.
+   */
+  .toggle-elevate::before,
+  .toggle-elevate-2::before {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    /*border-radius: inherit;   match rounded corners */
+    border-radius: inherit;
+    z-index: -1;
+    /* sits behind content but above backdrop */
+  }
+
+  .toggle-elevate.toggle-elevated::before {
+    background-color: var(--elevate-2);
+  }
+
+  /* If there's a 1px border, adjust the inset so that it covers that parent's border */
+  .border.toggle-elevate::before {
+    inset: -1px;
+  }
+
+  /* Does not work on elements with overflow:hidden! */
+  .hover-elevate:not(.no-default-hover-elevate),
+  .active-elevate:not(.no-default-active-elevate),
+  .hover-elevate-2:not(.no-default-hover-elevate),
+  .active-elevate-2:not(.no-default-active-elevate) {
+    position: relative;
+    z-index: 0;
+  }
+
+  .hover-elevate:not(.no-default-hover-elevate)::after,
+  .active-elevate:not(.no-default-active-elevate)::after,
+  .hover-elevate-2:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:not(.no-default-active-elevate)::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    /*border-radius: inherit;   match rounded corners */
+    border-radius: inherit;
+    z-index: 999;
+    /* sits in front of content */
+  }
+
+  .hover-elevate:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-1);
+  }
+
+  .hover-elevate-2:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-2);
+  }
+
+  /* If there's a 1px border, adjust the inset so that it covers that parent's border */
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate-2:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate-2:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
+    inset: -1px;
+  }
