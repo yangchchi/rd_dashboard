@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { getCurrentUser } from '@/lib/auth';
+import { getCurrentUser, onStoredUserUpdated } from '@/lib/auth';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -26,17 +26,16 @@ import {
   Paperclip,
 } from 'lucide-react';
 import { logger } from '@/lib/logger';
-import { usePrdsList, useRequirement, useSpecsList, useAcceptRequirementTask } from '@/lib/rd-hooks';
+import {
+  usePrdsList,
+  useRequirement,
+  useSpecsList,
+  useAcceptRequirementTask,
+  useAcceptanceRecords,
+  usePipelineTasksList,
+} from '@/lib/rd-hooks';
 import type { IRequirement } from '@/lib/rd-types';
-
-interface IHistoryItem {
-  id: string;
-  stage: string;
-  action: string;
-  operator: string;
-  timestamp: string;
-  comment?: string;
-}
+import { buildRequirementFlowHistory, type IFlowHistoryItem } from '@/lib/requirement-flow-history';
 
 interface IRelatedDoc {
   id: string;
@@ -46,15 +45,6 @@ interface IRelatedDoc {
   updatedAt: string;
   url?: string;
 }
-
-const mockHistory: IHistoryItem[] = [
-  { id: '1', stage: '需求池', action: '需求创建', operator: 'user-001', timestamp: '2024-01-10T08:30:00Z', comment: '提交初始需求' },
-  { id: '2', stage: 'PRD编写中', action: '进入PRD阶段', operator: 'user-002', timestamp: '2024-01-12T10:15:00Z', comment: '需求评审通过，开始PRD编写' },
-  { id: '3', stage: 'PRD编写中', action: 'PRD完成', operator: 'user-002', timestamp: '2024-01-18T16:45:00Z', comment: 'PRD文档已完成，等待技术评审' },
-  { id: '4', stage: '规格说明书', action: '进入规格阶段', operator: 'user-003', timestamp: '2024-01-20T09:00:00Z', comment: '技术评审通过，开始规格说明书编写' },
-  { id: '5', stage: '规格说明书', action: '规格完成', operator: 'user-003', timestamp: '2024-01-28T11:30:00Z', comment: '技术规格已确定，Machine-Readable格式已生成' },
-  { id: '6', stage: 'AI开发中', action: '进入AI开发', operator: 'system', timestamp: '2024-02-01T14:20:00Z', comment: 'AI开始自动生成代码' },
-];
 
 // 状态配置
 const statusConfig: Record<string, { label: string; color: string; bgColor: string; icon: React.ElementType }> = {
@@ -97,6 +87,31 @@ const getStatusColor = (status: string) => {
   return colorMap[status] || 'bg-slate-500';
 };
 
+const LEGACY_USER_ROLE_KEY = '__global_rd_userRole';
+
+/** 与权限角色 role_pm / role_tm 对齐；无 accessRoleId 时回退到原型里的 session 角色 */
+function getAcceptTaskActorFlags(): { isPmActor: boolean; isTmActor: boolean } {
+  const u = getCurrentUser();
+  const accessRoleId = u?.accessRoleId?.trim() || null;
+  let legacy: string | null = null;
+  if (typeof window !== 'undefined') {
+    try {
+      legacy = sessionStorage.getItem(LEGACY_USER_ROLE_KEY);
+    } catch {
+      legacy = null;
+    }
+  }
+  const isPmActor =
+    accessRoleId === 'role_pm' ||
+    accessRoleId === 'role_admin' ||
+    (accessRoleId == null && legacy === 'pm');
+  const isTmActor =
+    accessRoleId === 'role_tm' ||
+    accessRoleId === 'role_admin' ||
+    (accessRoleId == null && legacy === 'tm');
+  return { isPmActor, isTmActor };
+}
+
 const RequirementDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -104,18 +119,28 @@ const RequirementDetailPage: React.FC = () => {
   const { data: requirement, isLoading: reqLoading } = useRequirement(id);
   const { data: prds = [] } = usePrdsList();
   const { data: specs = [] } = useSpecsList();
-  const [history, setHistory] = useState<IHistoryItem[]>([]);
+  const { data: acceptanceRecords = [] } = useAcceptanceRecords();
+  const { data: pipelineTasks = [] } = usePipelineTasksList();
+  const [history, setHistory] = useState<IFlowHistoryItem[]>([]);
   const [relatedDocs, setRelatedDocs] = useState<IRelatedDoc[]>([]);
-  const [stakeholderRole, setStakeholderRole] = useState<string | null>(null);
+  const [authVersion, setAuthVersion] = useState(0);
   const loading = reqLoading;
 
   useEffect(() => {
-    setStakeholderRole(sessionStorage.getItem('__global_rd_userRole'));
+    const bump = () => setAuthVersion((v) => v + 1);
+    const offUser = onStoredUserUpdated(bump);
+    const onFocus = () => bump();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      offUser();
+      window.removeEventListener('focus', onFocus);
+    };
   }, []);
 
   useEffect(() => {
     if (!id || !requirement) {
       setRelatedDocs([]);
+      setHistory([]);
       return;
     }
     const related: IRelatedDoc[] = [];
@@ -139,9 +164,18 @@ const RequirementDetailPage: React.FC = () => {
         updatedAt: spec.updatedAt,
       });
     }
-    setHistory(mockHistory);
+    setHistory(
+      buildRequirementFlowHistory(
+        requirement,
+        prd,
+        spec,
+        pipelineTasks,
+        acceptanceRecords,
+        getCurrentUser()
+      )
+    );
     setRelatedDocs(related);
-  }, [id, requirement, prds, specs]);
+  }, [id, requirement, prds, specs, pipelineTasks, acceptanceRecords]);
 
   const handleBack = () => {
     router.push('/requirements');
@@ -201,22 +235,24 @@ const RequirementDetailPage: React.FC = () => {
   const statusInfo = statusConfig[requirement.status];
   const priorityInfo = priorityConfig[requirement.priority];
   const StatusIcon = statusInfo?.icon || Clock;
+  void authVersion;
   const authUser = getCurrentUser();
+  const { isPmActor, isTmActor } = getAcceptTaskActorFlags();
   const tags = (requirement as IRequirement & { tags?: string[] }).tags;
 
-  const canAcceptPm =
-    stakeholderRole === 'pm' &&
-    !requirement.pm &&
-    Boolean(authUser?.id) &&
-    requirement.submitter !== authUser?.id &&
-    (!requirement.pmCandidateUserId || requirement.pmCandidateUserId === authUser?.id);
+  const pmClaimed =
+    Boolean(requirement.pm) || (requirement.taskAcceptances ?? []).some((r) => r.role === 'pm');
+  const tmClaimed =
+    Boolean(requirement.tm) || (requirement.taskAcceptances ?? []).some((r) => r.role === 'tm');
+  const pmAcceptance = (requirement.taskAcceptances ?? []).find((r) => r.role === 'pm');
+  const tmAcceptance = (requirement.taskAcceptances ?? []).find((r) => r.role === 'tm');
+  const submitterDisplay = requirement.submitterName?.trim() || requirement.submitter;
+  const pmDisplay = pmAcceptance?.userName?.trim() || requirement.pm;
+  const tmDisplay = tmAcceptance?.userName?.trim() || requirement.tm;
 
-  const canAcceptTm =
-    stakeholderRole === 'tm' &&
-    !requirement.tm &&
-    Boolean(authUser?.id) &&
-    requirement.submitter !== authUser?.id &&
-    (!requirement.tmCandidateUserId || requirement.tmCandidateUserId === authUser?.id);
+  const canAcceptPm = isPmActor && !pmClaimed && Boolean(authUser?.id);
+
+  const canAcceptTm = isTmActor && !tmClaimed && Boolean(authUser?.id);
 
   const handleAcceptPm = async () => {
     if (!authUser?.id) return;
@@ -227,7 +263,7 @@ const RequirementDetailPage: React.FC = () => {
         userId: authUser.id,
         userName: authUser.name || authUser.username,
       });
-      toast.success('已领取产品经理任务');
+      toast.success(`已接受任务，已登记为本需求的产品经理`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '领取失败');
     }
@@ -242,7 +278,7 @@ const RequirementDetailPage: React.FC = () => {
         userId: authUser.id,
         userName: authUser.name || authUser.username,
       });
-      toast.success('已领取技术经理任务');
+      toast.success(`已接受任务，已登记为本需求的技术经理`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '领取失败');
     }
@@ -329,22 +365,47 @@ const RequirementDetailPage: React.FC = () => {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-6">
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">提交人</p>
-                  <UserDisplay value={[requirement.submitter]} size="small" />
+                  <span className="text-sm text-foreground">{submitterDisplay || '—'}</span>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">产品经理</p>
-                  {requirement.pm ? (
-                    <UserDisplay value={[requirement.pm]} size="small" />
+                  {pmDisplay ? (
+                    <span className="text-sm text-foreground">{pmDisplay}</span>
                   ) : (
-                    <span className="text-sm text-muted-foreground">待领取</span>
+                    <div className="space-y-2">
+                      <span className="text-sm text-muted-foreground block">待领取</span>
+                      {canAcceptPm ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => void handleAcceptPm()}
+                          disabled={acceptTask.isPending}
+                        >
+                          接受任务
+                        </Button>
+                      ) : null}
+                    </div>
                   )}
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">技术经理</p>
-                  {requirement.tm ? (
-                    <UserDisplay value={[requirement.tm]} size="small" />
+                  {tmDisplay ? (
+                    <span className="text-sm text-foreground">{tmDisplay}</span>
                   ) : (
-                    <span className="text-sm text-muted-foreground">待领取</span>
+                    <div className="space-y-2">
+                      <span className="text-sm text-muted-foreground block">待领取</span>
+                      {canAcceptTm ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => void handleAcceptTm()}
+                          disabled={acceptTask.isPending}
+                        >
+                          接受任务
+                        </Button>
+                      ) : null}
+                    </div>
                   )}
                 </div>
                 <div>
@@ -375,29 +436,9 @@ const RequirementDetailPage: React.FC = () => {
                 </div>
               </div>
               {(canAcceptPm || canAcceptTm) && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {canAcceptPm ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => void handleAcceptPm()}
-                      disabled={acceptTask.isPending}
-                    >
-                      接受产品经理任务（{pmCoins} 金币）
-                    </Button>
-                  ) : null}
-                  {canAcceptTm ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => void handleAcceptTm()}
-                      disabled={acceptTask.isPending}
-                    >
-                      接受技术经理任务（{tmCoins} 金币）
-                    </Button>
-                  ) : null}
-                </div>
+                <p className="mt-4 text-xs text-muted-foreground">
+                  产品经理、技术经理可在本页点击「接受任务」，系统会自动回填对应负责人字段。
+                </p>
               )}
             </CardContent>
           </Card>
@@ -516,9 +557,11 @@ const RequirementDetailPage: React.FC = () => {
                       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                         <div>
                           <p className="text-sm font-medium">{item.action}</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {item.stage} · <UserDisplay value={[item.operator]} size="small" showLabel />
-                          </p>
+                          <div className="text-xs text-muted-foreground mt-1 flex flex-wrap items-center gap-x-1 gap-y-1">
+                            <span>{item.stage}</span>
+                            <span aria-hidden>·</span>
+                            <UserDisplay value={item.operator} size="small" showLabel />
+                          </div>
                           {item.comment && (
                             <p className="text-xs text-muted-foreground mt-2 bg-muted p-2 rounded">
                               {item.comment}

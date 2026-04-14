@@ -10,7 +10,7 @@ export type Priority = 'P0' | 'P1' | 'P2' | 'P3';
 export type Role = 'stakeholder' | 'pm' | 'tm';
 export type ReviewStatus = 'draft' | 'reviewing' | 'approved' | 'rejected';
 export type SpecStatus = 'draft' | 'reviewing' | 'approved';
-export type OrgSpecLanguage = 'java' | 'python' | 'go' | 'node' | 'react' | 'vue' | 'typescript';
+export type { OrgSpecLanguage, IOrgLanguageSpec, IOrganizationSpecConfig } from '@shared/org-spec-defaults';
 
 /** 任务领取记录；金币在需求「已发布」后对领取人生效 */
 export interface ITaskAcceptanceRecord {
@@ -23,6 +23,8 @@ export interface ITaskAcceptanceRecord {
 }
 
 /** 产品目录（结构化元数据；需求里的「所属产品」可与 name 对齐） */
+export type ProductLifecycleStatus = 'active' | 'archived';
+
 export interface IProduct {
   id: string;
   name: string;
@@ -31,8 +33,11 @@ export interface IProduct {
   sandboxUrl?: string;
   productionUrl?: string;
   gitUrl?: string;
+  status?: ProductLifecycleStatus;
   createdAt: string;
   updatedAt: string;
+  createdBy?: string;
+  updatedBy?: string;
 }
 
 export interface IRequirement {
@@ -63,6 +68,8 @@ export interface IRequirement {
   updatedAt: string;
   submitterName?: string;
   aiCategory?: string;
+  createdBy?: string;
+  updatedBy?: string;
 }
 
 export interface IFeature {
@@ -87,6 +94,8 @@ export interface IPrd {
   createdAt?: string;
   updatedAt: string;
   reviews?: IReviewRecord[];
+  createdBy?: string;
+  updatedBy?: string;
 }
 
 export interface IApiDef {
@@ -130,26 +139,8 @@ export interface ISpecification {
   createdAt: string;
   updatedAt: string;
   reviews?: IReviewRecord[];
-}
-
-export interface IOrgLanguageSpec {
-  language: OrgSpecLanguage;
-  displayName: string;
-  enabled: boolean;
-  styleGuide: string[];
-  mustFollow: string[];
-  forbidden: string[];
-  toolchain: string[];
-  testing: string[];
-}
-
-export interface IOrganizationSpecConfig {
-  id: string;
-  orgName: string;
-  version: number;
-  defaultLanguage: OrgSpecLanguage;
-  updatedAt: string;
-  languages: Record<OrgSpecLanguage, IOrgLanguageSpec>;
+  createdBy?: string;
+  updatedBy?: string;
 }
 
 export interface IReviewRecord {
@@ -171,7 +162,11 @@ export interface IAcceptanceRecord {
   };
   feedback: string;
   result: 'approved' | 'rejected';
+  status?: 'approved' | 'rejected';
   createdAt: string;
+  updatedAt?: string;
+  createdBy?: string;
+  updatedBy?: string;
 }
 
 export interface IUser {
@@ -181,6 +176,10 @@ export interface IUser {
   name?: string;
   email?: string;
   phone?: string;
+  /** 头像地址（https 或 data:image 等，仅存于本机登录态时可由个人设置写入） */
+  avatarUrl?: string;
+  /** 与「角色定义」中的角色 id 对应，用于菜单/页面/按钮级权限 */
+  accessRoleId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -227,15 +226,27 @@ export interface IPipelineQualityMetrics {
   testPassRate: number;
 }
 
+/** 提交到 Git 的单个文档（用于在流水线页拼 Web 链接） */
+export interface IPipelinePublishedDocument {
+  path: string;
+  kind: 'prd' | 'fs' | 'ts';
+  id: string;
+  title: string;
+}
+
 export interface IPipelineMeta {
   name?: string;
   gitUrl?: string;
+  /** 沙箱环境访问地址（常从产品目录带入） */
+  sandboxUrl?: string;
   branch?: string;
   triggerMode?: 'manual' | 'push' | 'schedule';
   priority?: 'P0' | 'P1' | 'P2' | 'P3';
   remarks?: string;
   prdIds?: string[];
   specIds?: string[];
+  /** 本次提交写入仓库的文档清单（由 pipeline-git publish 返回） */
+  publishedDocuments?: IPipelinePublishedDocument[];
 }
 
 export interface IGitCommitRecord {
@@ -269,4 +280,6 @@ export interface IPipelineTask {
   commitStore?: IPipelineCommitStore;
   createdAt?: string;
   updatedAt?: string;
+  createdBy?: string;
+  updatedBy?: string;
 }

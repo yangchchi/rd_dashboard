@@ -2,7 +2,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -18,7 +17,6 @@ const OrgSpecConfigPage: React.FC = () => {
 
   const [config, setConfig] = useState<IOrganizationSpecConfig | null>(null);
   const [selectedLanguage, setSelectedLanguage] = useState<OrgSpecLanguage>('typescript');
-  const [orgName, setOrgName] = useState('');
 
   const selectedSpec = useMemo(() => {
     if (!config) return null;
@@ -28,12 +26,10 @@ const OrgSpecConfigPage: React.FC = () => {
   useEffect(() => {
     if (loadedOrg) {
       setConfig(loadedOrg as IOrganizationSpecConfig);
-      setOrgName((loadedOrg as IOrganizationSpecConfig).orgName);
       setSelectedLanguage((loadedOrg as IOrganizationSpecConfig).defaultLanguage);
     } else {
       const def = createDefaultOrgSpecConfig();
       setConfig(def);
-      setOrgName(def.orgName);
       setSelectedLanguage(def.defaultLanguage);
     }
   }, [loadedOrg]);
@@ -61,14 +57,10 @@ const OrgSpecConfigPage: React.FC = () => {
 
   const handleSave = () => {
     if (!config) return;
-    if (!orgName.trim()) {
-      toast.error('组织名称不能为空');
-      return;
-    }
     void saveOrg
       .mutateAsync({
         ...config,
-        orgName: orgName.trim(),
+        orgName: config.orgName.trim() || '默认组织',
         updatedAt: new Date().toISOString(),
       })
       .then(() => toast.success('组织级规格配置已保存'));
@@ -78,7 +70,6 @@ const OrgSpecConfigPage: React.FC = () => {
     const def = createDefaultOrgSpecConfig();
     void saveOrg.mutateAsync(def).then(() => {
       setConfig(def);
-      setOrgName(def.orgName);
       setSelectedLanguage(def.defaultLanguage);
       toast.success('已恢复默认语言规范');
     });
@@ -88,9 +79,9 @@ const OrgSpecConfigPage: React.FC = () => {
     <div className="w-full max-w-[1400px] mx-auto space-y-6">
       <section className="w-full flex items-center justify-between">
         <div>
-          <h1 className="rd-page-title">组织规格配置（Org Spec）</h1>
+          <h1 className="rd-page-title">组织编码规范（对齐 OpenSpec SDD）</h1>
           <p className="rd-page-desc mt-1">
-            统一组织内多语言编码规范与技术约束，供 AI 生成代码、规格校验时引用（与「插件配置」中的大模型任务相互独立）
+            每条规则独立、可检查：先规格/场景/任务，再实现与验证。供 AI 与 CI 引用；与「插件配置」中的模型任务相互独立。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -102,7 +93,7 @@ const OrgSpecConfigPage: React.FC = () => {
         <Card className="lg:col-span-1">
           <CardHeader>
             <CardTitle>语言列表</CardTitle>
-            <CardDescription>初始化主流语言规范，可按组织要求二次调整</CardDescription>
+            <CardDescription>默认模板已按 SDD 编排；启用语言即纳入生成与校验上下文</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="max-h-[420px] overflow-y-auto space-y-2 pr-1">
@@ -128,41 +119,13 @@ const OrgSpecConfigPage: React.FC = () => {
                 );
               })}
             </div>
-
-            {config && (
-              <div className="space-y-2 pt-2">
-                <div className="space-y-2">
-                  <Label>组织名称</Label>
-                  <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="请输入组织名称" />
-                </div>
-                <div className="space-y-2">
-                  <Label>默认语言</Label>
-                  <select
-                    className="w-full p-2 border rounded-md bg-card"
-                    value={config.defaultLanguage}
-                    onChange={(e) =>
-                      setConfig({
-                        ...config,
-                        defaultLanguage: e.target.value as OrgSpecLanguage,
-                      })
-                    }
-                  >
-                    {Object.values(config.languages).map((item) => (
-                      <option key={item.language} value={item.language}>
-                        {item.displayName}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            )}
           </CardContent>
         </Card>
 
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>配置详情</CardTitle>
-            <CardDescription>每行一条规则，保存后将用于规格文档生成与约束输出</CardDescription>
+            <CardDescription>每行一条、短句、无编号嵌套；保存后注入 AI 提示与组织级校验</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             {!selectedSpec ? null : (
@@ -182,6 +145,7 @@ const OrgSpecConfigPage: React.FC = () => {
 
                 <div className="space-y-2">
                   <Label>编码风格（styleGuide）</Label>
+                  <p className="text-xs text-muted-foreground">格式、命名、文档与模块形态</p>
                   <Textarea
                     value={joinList(selectedSpec.styleGuide)}
                     onChange={(e) => updateListField('styleGuide', e.target.value)}
@@ -191,6 +155,7 @@ const OrgSpecConfigPage: React.FC = () => {
 
                 <div className="space-y-2">
                   <Label>必须遵循（mustFollow）</Label>
+                  <p className="text-xs text-muted-foreground">架构、SDD 对齐、可观测与安全基线</p>
                   <Textarea
                     value={joinList(selectedSpec.mustFollow)}
                     onChange={(e) => updateListField('mustFollow', e.target.value)}
@@ -200,6 +165,7 @@ const OrgSpecConfigPage: React.FC = () => {
 
                 <div className="space-y-2">
                   <Label>禁止项（forbidden）</Label>
+                  <p className="text-xs text-muted-foreground">反模式，满足任一条即视为不合规</p>
                   <Textarea
                     value={joinList(selectedSpec.forbidden)}
                     onChange={(e) => updateListField('forbidden', e.target.value)}
@@ -209,6 +175,7 @@ const OrgSpecConfigPage: React.FC = () => {
 
                 <div className="space-y-2">
                   <Label>工具链（toolchain）</Label>
+                  <p className="text-xs text-muted-foreground">语言版本、包管理、静态分析与门禁</p>
                   <Textarea
                     value={joinList(selectedSpec.toolchain)}
                     onChange={(e) => updateListField('toolchain', e.target.value)}
@@ -218,6 +185,7 @@ const OrgSpecConfigPage: React.FC = () => {
 
                 <div className="space-y-2">
                   <Label>测试要求（testing）</Label>
+                  <p className="text-xs text-muted-foreground">与任务/场景挂钩的自动化验证与 CI</p>
                   <Textarea
                     value={joinList(selectedSpec.testing)}
                     onChange={(e) => updateListField('testing', e.target.value)}
@@ -229,7 +197,16 @@ const OrgSpecConfigPage: React.FC = () => {
 
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground">
-                提示：当前模板已初始化 `Java / Python / Go / Node.js / React / Vue / TypeScript` 七类语言约束。
+                参考{' '}
+                <a
+                  className="text-primary underline-offset-4 hover:underline"
+                  href="https://github.com/Fission-AI/OpenSpec"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  OpenSpec
+                </a>
+                ：默认覆盖 Java / Python / Go / Node.js / React / Vue / TypeScript；恢复默认可载入最新模板文案。
               </p>
             </div>
 

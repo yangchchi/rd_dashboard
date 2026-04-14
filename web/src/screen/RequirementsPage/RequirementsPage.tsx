@@ -129,7 +129,7 @@ const RequirementsPage: React.FC = () => {
 
   return (
     <>
-      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6">
+      <div className="flex w-full flex-col gap-6">
         {/* 页头 — 与 PRD 管理页同一结构 */}
         <section className="w-full">
           <div className="flex flex-wrap items-center justify-between gap-4">
@@ -173,7 +173,7 @@ const RequirementsPage: React.FC = () => {
 
         {/* Filter Card */}
         <section className="w-full">
-          <div className="rd-surface-card rd-surface-card-hover p-6">
+          <div className="rd-surface-card rd-surface-card-hover px-4 py-4 sm:px-5 sm:py-4">
             <div className="flex flex-wrap items-center gap-4">
               <div className="relative flex min-w-[280px] flex-1 items-center gap-2">
                 <Search className="pointer-events-none absolute left-4 h-4 text-muted-foreground" />
@@ -231,7 +231,7 @@ const RequirementsPage: React.FC = () => {
         {viewMode === 'list' ? (
         <section className="w-full">
           <div className="rd-surface-card overflow-hidden">
-            <div className="flex items-center justify-between border-b border-white/10 p-6">
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
               <div className="flex items-center gap-3">
                 <div className="rd-list-section-icon">
                   <List className="h-5 w-5 text-primary" />
@@ -282,7 +282,7 @@ const RequirementsPage: React.FC = () => {
                   </Empty>
                 </div>
               ) : (
-                <div className="overflow-x-auto px-6 pb-6 pt-4">
+                <div className="overflow-x-auto px-4 pb-5 pt-2 sm:px-5">
                   {loading ? (
                     <p className="py-8 text-center text-sm text-muted-foreground">加载中…</p>
                   ) : (

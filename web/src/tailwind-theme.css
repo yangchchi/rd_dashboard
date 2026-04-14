@@ -120,7 +120,8 @@
 }
 
 @media (prefers-color-scheme: light) {
-  :root {
+  /** 无手动主题类时跟随系统；`next-themes` 会在 html 上设置 `.light` / `.dark` */
+  :root:not(.dark):not(.light) {
     color-scheme: light;
     --button-outline: rgba(0, 0, 0, 0.08);
     --badge-outline: rgba(0, 0, 0, 0.05);
@@ -209,6 +210,96 @@
     --shadow-xl: var(--shadow-lg);
     --shadow-2xl: var(--shadow-lg);
   }
+}
+
+/** 在深色系统偏好下强制浅色（与上方 media 块变量保持一致） */
+:root.light {
+  color-scheme: light;
+  --button-outline: rgba(0, 0, 0, 0.08);
+  --badge-outline: rgba(0, 0, 0, 0.05);
+  --opaque-button-border-intensity: -8;
+  --elevate-1: rgba(0, 0, 0, 0.04);
+  --elevate-2: rgba(0, 0, 0, 0.09);
+
+  --glass-blur: var(--blur-glass-40);
+  --glass-border: hsl(222 47% 11% / 0.09);
+  --glass-highlight: hsl(0 0% 100% / 0.65);
+  --glass-hover-shine: linear-gradient(
+    118deg,
+    transparent 36%,
+    hsl(0 0% 100% / 0.55) 48%,
+    transparent 58%
+  );
+
+  --background: hsl(210 20% 98%);
+  --foreground: hsl(222 47% 11%);
+  --card: hsl(0 0% 100% / 0.78);
+  --card-foreground: hsl(222 47% 11%);
+  --popover: hsl(0 0% 100% / 0.92);
+  --popover-foreground: hsl(222 47% 11%);
+  --primary: hsl(217 91% 50%);
+  --primary-foreground: hsl(210 40% 98%);
+  --secondary: hsl(222 14% 96% / 0.95);
+  --secondary-foreground: hsl(222 47% 11%);
+  --muted: hsl(222 14% 94% / 0.9);
+  --muted-foreground: hsl(215 16% 42%);
+  --accent: hsl(222 14% 93% / 0.95);
+  --accent-foreground: hsl(222 47% 11%);
+  --info: hsl(187 92% 38%);
+  --info-foreground: hsl(210 40% 98%);
+  --destructive: hsl(0 72% 51%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --success: hsl(142 71% 40%);
+  --success-foreground: hsl(210 40% 98%);
+  --warning: hsl(38 92% 45%);
+  --warning-foreground: hsl(222 47% 11%);
+  --border: hsl(214 32% 88%);
+  --input: hsl(214 32% 88%);
+  --ring: hsl(217 91% 50%);
+
+  --sidebar: hsl(0 0% 100% / 0.72);
+  --sidebar-foreground: hsl(222 47% 11%);
+  --sidebar-primary: hsl(217 91% 50%);
+  --sidebar-primary-foreground: hsl(210 40% 98%);
+  --sidebar-accent: hsl(222 14% 94% / 0.95);
+  --sidebar-accent-foreground: hsl(222 47% 11%);
+  --sidebar-border: hsl(214 32% 90%);
+  --sidebar-ring: hsl(217 91% 50%);
+
+  --primary-border: hsl(from hsl(217 91% 50%) h s calc(l + var(--opaque-button-border-intensity)));
+  --secondary-border: hsl(from hsl(222 14% 96%) h s calc(l + var(--opaque-button-border-intensity)));
+  --destructive-border: hsl(from hsl(0 72% 51%) h s calc(l + var(--opaque-button-border-intensity)));
+  --accent-border: hsl(from hsl(222 14% 93%) h s calc(l + var(--opaque-button-border-intensity)));
+  --muted-border: hsl(from hsl(222 14% 94%) h s calc(l + var(--opaque-button-border-intensity)));
+
+  --shadow-x: 0px;
+  --shadow-y: 0px;
+  --shadow-blur: 0px;
+  --shadow-spread: 0px;
+  --shadow-opacity: 0;
+  --shadow-color: transparent;
+  --shadow-2xs: 0 1px 0 hsl(0 0% 100% / 0.9) inset;
+  --shadow-xs:
+    0 0 0 1px hsl(222 47% 11% / 0.06),
+    0 1px 2px hsl(222 47% 11% / 0.04);
+  --shadow-sm:
+    0 0 0 1px hsl(222 47% 11% / 0.06),
+    0 2px 8px -2px hsl(222 47% 11% / 0.06),
+    0 12px 32px -12px hsl(222 47% 11% / 0.1);
+  --shadow:
+    0 0 0 1px hsl(222 47% 11% / 0.06),
+    0 4px 16px -4px hsl(222 47% 11% / 0.08),
+    0 20px 48px -16px hsl(222 47% 11% / 0.1);
+  --shadow-md:
+    0 0 0 1px hsl(222 47% 11% / 0.07),
+    0 8px 24px -8px hsl(222 47% 11% / 0.1),
+    0 28px 56px -20px hsl(222 47% 11% / 0.12);
+  --shadow-lg:
+    0 0 0 1px hsl(222 47% 11% / 0.08),
+    0 12px 40px -12px hsl(222 47% 11% / 0.12),
+    0 40px 72px -24px hsl(222 47% 11% / 0.14);
+  --shadow-xl: var(--shadow-lg);
+  --shadow-2xl: var(--shadow-lg);
 }
 
 @theme inline {

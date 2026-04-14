@@ -26,3 +26,28 @@ export function clearAuthSession(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
 }
+
+const USER_UPDATED_EVENT = 'rd-auth-user-updated';
+
+export function updateStoredCurrentUser(
+  updates: Partial<Pick<IUser, 'name' | 'email' | 'phone' | 'avatarUrl' | 'accessRoleId'>>
+): IUser | null {
+  if (typeof window === 'undefined') return null;
+  const current = getCurrentUser();
+  if (!current) return null;
+  const next: IUser = {
+    ...current,
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  };
+  localStorage.setItem(USER_KEY, JSON.stringify(next));
+  window.dispatchEvent(new Event('storage'));
+  window.dispatchEvent(new CustomEvent(USER_UPDATED_EVENT));
+  return next;
+}
+
+export function onStoredUserUpdated(listener: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  window.addEventListener(USER_UPDATED_EVENT, listener);
+  return () => window.removeEventListener(USER_UPDATED_EVENT, listener);
+}

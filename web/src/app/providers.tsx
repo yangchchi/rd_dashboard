@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ErrorBoundary } from 'react-error-boundary';
 import { Toaster } from '@/components/ui/sonner';
+import { ThemeProvider } from '@/components/theme-provider';
 import { useState } from 'react';
 
 function ErrorFallback({
@@ -38,11 +39,13 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <ErrorBoundary FallbackComponent={ErrorFallback}>
-        {children}
-        <Toaster />
-      </ErrorBoundary>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <ErrorBoundary FallbackComponent={ErrorFallback}>
+          {children}
+          <Toaster />
+        </ErrorBoundary>
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }

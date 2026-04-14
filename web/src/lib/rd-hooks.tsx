@@ -21,12 +21,20 @@ export const rdKeys = {
   orgSpec: ['rd', 'orgSpec'] as const,
   acceptance: ['rd', 'acceptance'] as const,
   pipelineTasks: ['rd', 'pipeline-tasks'] as const,
+  products: ['rd', 'products'] as const,
 };
 
 export function useRequirementsList() {
   return useQuery({
     queryKey: rdKeys.requirements,
     queryFn: () => rdApi.listRequirements(),
+  });
+}
+
+export function useProductsList() {
+  return useQuery({
+    queryKey: rdKeys.products,
+    queryFn: () => rdApi.listProducts(),
   });
 }
 
@@ -62,8 +70,9 @@ export function useAcceptRequirementTask() {
         userId: args.userId,
         userName: args.userName,
       }),
-    onSuccess: () => {
+    onSuccess: (_data, args) => {
       void qc.invalidateQueries({ queryKey: rdKeys.requirements });
+      void qc.invalidateQueries({ queryKey: [...rdKeys.requirements, args.requirementId] });
     },
   });
 }
@@ -118,8 +127,8 @@ export function useDeletePrd() {
 export function useSubmitPrdReview() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { prdId: string; reviewer?: string; comment?: string }) =>
-      rdApi.submitPrdForReview(args.prdId, args.reviewer, args.comment),
+    mutationFn: (args: { prdId: string; reviewer?: string; comment?: string; actorUserId?: string }) =>
+      rdApi.submitPrdForReview(args.prdId, args.reviewer, args.comment, args.actorUserId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rdKeys.prds });
     },
@@ -134,7 +143,8 @@ export function useReviewPrd() {
       status: 'approved' | 'rejected';
       reviewer?: string;
       comment?: string;
-    }) => rdApi.reviewPrd(args.prdId, args.status, args.reviewer, args.comment),
+      actorUserId?: string;
+    }) => rdApi.reviewPrd(args.prdId, args.status, args.reviewer, args.comment, args.actorUserId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rdKeys.prds });
       void qc.invalidateQueries({ queryKey: rdKeys.requirements });
@@ -181,8 +191,8 @@ export function useDeleteSpec() {
 export function useSubmitSpecReview() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { specId: string; reviewer?: string; comment?: string }) =>
-      rdApi.submitSpecForReview(args.specId, args.reviewer, args.comment),
+    mutationFn: (args: { specId: string; reviewer?: string; comment?: string; actorUserId?: string }) =>
+      rdApi.submitSpecForReview(args.specId, args.reviewer, args.comment, args.actorUserId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rdKeys.specs });
     },
@@ -192,8 +202,8 @@ export function useSubmitSpecReview() {
 export function useApproveSpec() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { specId: string; reviewer?: string; comment?: string }) =>
-      rdApi.approveSpec(args.specId, args.reviewer, args.comment),
+    mutationFn: (args: { specId: string; reviewer?: string; comment?: string; actorUserId?: string }) =>
+      rdApi.approveSpec(args.specId, args.reviewer, args.comment, args.actorUserId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rdKeys.specs });
       void qc.invalidateQueries({ queryKey: rdKeys.requirements });
@@ -204,8 +214,8 @@ export function useApproveSpec() {
 export function useRejectSpec() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { specId: string; reviewer?: string; comment?: string }) =>
-      rdApi.rejectSpec(args.specId, args.reviewer, args.comment),
+    mutationFn: (args: { specId: string; reviewer?: string; comment?: string; actorUserId?: string }) =>
+      rdApi.rejectSpec(args.specId, args.reviewer, args.comment, args.actorUserId),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rdKeys.specs });
     },

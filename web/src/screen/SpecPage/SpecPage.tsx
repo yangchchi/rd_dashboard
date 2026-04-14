@@ -25,6 +25,7 @@ import {
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import { Streamdown } from '@/components/ui/streamdown';
 import { capabilityClient } from '@/lib/capability-client';
+import { getCurrentUser } from '@/lib/auth';
 import { useApproveSpec, useDeleteSpec, usePrdsList, useRejectSpec, useSpecsList, useSubmitSpecReview } from '@/lib/rd-hooks';
 import { mapSpecsToListRows, type ISpecListRow } from '@/lib/spec-list-mapper';
 import { toast } from 'sonner';
@@ -154,22 +155,25 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
 
   const handleApproveSpec = (specId: string) => {
     const comment = window.prompt('请输入审核通过意见（可选）') || undefined;
+    const actorUserId = getCurrentUser()?.id;
     void approveSpecMutation
-      .mutateAsync({ specId, reviewer: '技术经理', comment })
+      .mutateAsync({ specId, reviewer: '技术经理', comment, actorUserId })
       .then(() => toast.success('规格审核已通过，需求已进入AI开发阶段'));
   };
 
   const handleRejectSpec = (specId: string) => {
     const comment = window.prompt('请输入驳回原因（建议填写）') || undefined;
+    const actorUserId = getCurrentUser()?.id;
     void rejectSpecMutation
-      .mutateAsync({ specId, reviewer: '技术经理', comment })
+      .mutateAsync({ specId, reviewer: '技术经理', comment, actorUserId })
       .then(() => toast.success('规格已驳回并退回草稿'));
   };
 
   const handleSubmitReview = (specId: string) => {
     const comment = window.prompt('请输入提交审核说明（可选）') || undefined;
+    const actorUserId = getCurrentUser()?.id;
     void submitSpecReviewMutation
-      .mutateAsync({ specId, reviewer: '技术经理', comment })
+      .mutateAsync({ specId, reviewer: '技术经理', comment, actorUserId })
       .then(() => toast.success('规格已提交审核'));
   };
 

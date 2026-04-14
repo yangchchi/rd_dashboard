@@ -250,7 +250,7 @@ const PluginConfigPage: React.FC = () => {
                 </TabsContent>
                 <TabsContent value="logs" className="mt-4">
                   <p className="text-sm text-muted-foreground leading-relaxed">
-                    运行日志由业务侧与网关记录；本页为本地提示词与模型配置，不展示历史调用日志。可在「AI开发监控」等页面查看任务级信息。
+                    运行日志由业务侧与网关记录；本页为本地提示词与模型配置，不展示历史调用日志。可在「流水线」等页面查看任务级信息。
                   </p>
                 </TabsContent>
               </Tabs>

@@ -35,6 +35,8 @@ import {
   useUpsertRequirement,
   useDeletePrd,
 } from '@/lib/rd-hooks';
+import { getCurrentUser } from '@/lib/auth';
+import { rdAuditCreate, rdAuditUpdate } from '@/lib/rd-actor';
 import { capabilityClient } from '@/lib/capability-client';
 import { parsePrdMarkdownSections } from '@/lib/prd-markdown';
 import { cn } from '@/lib/utils';
@@ -229,6 +231,9 @@ const PRDPage: React.FC = () => {
       const newId = `prd-${Date.now()}`;
       const now = new Date().toISOString();
 
+      const actor = getCurrentUser();
+      const authorLabel = (actor?.name?.trim() || actor?.username?.trim() || '').trim() || '匿名';
+
       await upsertPrd.mutateAsync({
         id: newId,
         requirementId: requirement.id,
@@ -240,14 +245,16 @@ const PRDPage: React.FC = () => {
         nonFunctional: '',
         status: 'draft',
         version: 1,
-        author: '当前用户',
+        author: authorLabel,
         createdAt: now,
         updatedAt: now,
+        ...rdAuditCreate(),
       });
       await upsertRequirement.mutateAsync({
         ...requirement,
         status: 'prd_writing',
         updatedAt: now,
+        ...rdAuditUpdate(),
       });
 
       toast.success('PRD生成成功');
@@ -279,23 +286,28 @@ const PRDPage: React.FC = () => {
 
   const handleSubmitReview = (prdId: string) => {
     const comment = window.prompt('请输入提交审核说明（可选）') || undefined;
-    void submitPrdReview.mutateAsync({ prdId, reviewer: '产品经理', comment }).then(() => {
-      toast.success('PRD已提交审核');
-    });
+    const actorUserId = getCurrentUser()?.id;
+    void submitPrdReview
+      .mutateAsync({ prdId, reviewer: '产品经理', comment, actorUserId })
+      .then(() => {
+        toast.success('PRD已提交审核');
+      });
   };
 
   const handleApprove = (prdId: string) => {
     const comment = window.prompt('请输入审核通过意见（可选）') || undefined;
+    const actorUserId = getCurrentUser()?.id;
     void reviewPrd.mutate(
-      { prdId, status: 'approved', reviewer: '技术经理', comment },
+      { prdId, status: 'approved', reviewer: '技术经理', comment, actorUserId },
       { onSuccess: () => toast.success('PRD审核已通过') }
     );
   };
 
   const handleReject = (prdId: string) => {
     const comment = window.prompt('请输入驳回原因（建议填写）') || undefined;
+    const actorUserId = getCurrentUser()?.id;
     void reviewPrd.mutate(
-      { prdId, status: 'rejected', reviewer: '技术经理', comment },
+      { prdId, status: 'rejected', reviewer: '技术经理', comment, actorUserId },
       { onSuccess: () => toast.success('PRD已驳回') }
     );
   };
@@ -325,7 +337,7 @@ const PRDPage: React.FC = () => {
 
   return (
     <>
-      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-6">
+      <div className="flex w-full flex-col gap-6">
         {/* 页面标题 */}
         <section className="w-full">
           <div className="flex items-center justify-between">
@@ -422,7 +434,7 @@ const PRDPage: React.FC = () => {
         <section className="w-full">
           <div className="rd-surface-card rd-surface-card-hover px-4 py-4 sm:px-5 sm:py-4">
             <div className="flex flex-wrap items-center gap-4">
-              <div className="relative flex min-w-[280px] flex-1 max-w-sm">
+              <div className="relative flex min-w-[280px] flex-1">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   placeholder="搜索PRD标题或关联需求..."

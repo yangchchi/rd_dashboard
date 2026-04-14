@@ -32,6 +32,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { rdAuditCreate, rdAuditUpdate } from '@/lib/rd-actor';
 import { rdApi } from '@/lib/rd-api';
 import type { IProduct } from '@/lib/rd-types';
 import { toast } from 'sonner';
@@ -114,6 +115,8 @@ const ProductManagementPage: React.FC = () => {
     setSubmitting(true);
     try {
       const id = editingId ?? newProductId();
+      const audit = editingId ? rdAuditUpdate() : rdAuditCreate();
+      const existing = products.find((p) => p.id === id);
       await rdApi.upsertProduct({
         id,
         name,
@@ -122,6 +125,8 @@ const ProductManagementPage: React.FC = () => {
         sandboxUrl: form.sandboxUrl.trim() || undefined,
         productionUrl: form.productionUrl.trim() || undefined,
         gitUrl: form.gitUrl.trim() || undefined,
+        status: existing?.status ?? 'active',
+        ...audit,
       });
       toast.success(editingId ? '产品已更新' : '产品已创建');
       setDialogOpen(false);

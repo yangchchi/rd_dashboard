@@ -10,27 +10,48 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { UserDisplay } from '@/components/business-ui/user-display';
 import { LayoutDashboard, Filter, Plus, ChevronDown, Trophy } from 'lucide-react';
 import { useRequirementsList } from '@/lib/rd-hooks';
 import type { IRequirement } from '@/lib/rd-types';
 
 const LEADERBOARD_TOP = 10;
 
-function buildRanking(
+type LeaderboardActor = { id?: string | null; name?: string | null };
+type LeaderboardRow = { actorKey: string; actorLabel: string; count: number; coins: number };
+
+function normalizeActorLabel(actor: LeaderboardActor): string {
+  const n = actor.name?.trim();
+  if (n) return n;
+  const id = actor.id?.trim();
+  if (!id) return '未知用户';
+  return id;
+}
+
+function normalizeActorKey(actor: LeaderboardActor): string {
+  const id = actor.id?.trim();
+  const name = actor.name?.trim();
+  return id ? `id:${id}` : `name:${name || '未知用户'}`;
+}
+
+function buildRankingAgg(
   reqs: IRequirement[],
-  pick: (r: IRequirement) => string | undefined | null
-): { userId: string; count: number }[] {
-  const map = new Map<string, number>();
+  pickActor: (r: IRequirement) => LeaderboardActor | null,
+  coinsFor: (r: IRequirement) => number
+): LeaderboardRow[] {
+  const map = new Map<string, { label: string; count: number; coins: number }>();
   for (const r of reqs) {
-    const k = pick(r);
-    if (k == null || !String(k).trim()) continue;
-    const id = String(k).trim();
-    map.set(id, (map.get(id) ?? 0) + 1);
+    const actor = pickActor(r);
+    if (!actor) continue;
+    const actorKey = normalizeActorKey(actor);
+    const actorLabel = normalizeActorLabel(actor);
+    const cur = map.get(actorKey) ?? { label: actorLabel, count: 0, coins: 0 };
+    cur.count += 1;
+    cur.coins += coinsFor(r);
+    map.set(actorKey, cur);
   }
   return Array.from(map.entries())
-    .map(([userId, count]) => ({ userId, count }))
-    .sort((a, b) => b.count - a.count)
+    .map(([actorKey, v]) => ({ actorKey, actorLabel: v.label, count: v.count, coins: v.coins }))
+    .sort((a, b) => b.count - a.count || b.coins - a.coins)
     .slice(0, LEADERBOARD_TOP);
 }
 
@@ -39,6 +60,42 @@ function rankBadgeClass(rank: number): string {
   if (rank === 2) return 'bg-slate-400/15 text-slate-600 dark:text-slate-300 border-slate-400/30';
   if (rank === 3) return 'bg-orange-700/15 text-orange-700 dark:text-orange-400 border-orange-600/25';
   return 'bg-muted/50 text-muted-foreground border-border';
+}
+
+function LeaderboardTable({ rows, emptyLabel }: { rows: LeaderboardRow[]; emptyLabel: string }) {
+  if (rows.length === 0) {
+    return <p className="px-4 py-8 text-center text-sm text-muted-foreground">{emptyLabel}</p>;
+  }
+  return (
+    <>
+      <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2 text-xs font-medium text-muted-foreground">
+        <span className="w-7 shrink-0" aria-hidden />
+        <span className="min-w-0 flex-1">用户</span>
+        <span className="w-12 shrink-0 text-right tabular-nums">需求数量</span>
+        <span className="w-14 shrink-0 text-right tabular-nums">金币数量</span>
+      </div>
+      <ul className="divide-y divide-border/60">
+        {rows.map((row, i) => (
+          <li key={row.actorKey} className="flex items-center gap-2 px-4 py-3 text-sm">
+            <span
+              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border text-xs font-bold tabular-nums ${rankBadgeClass(i + 1)}`}
+            >
+              {i + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-sm text-foreground">{row.actorLabel}</span>
+            </div>
+            <span className="w-12 shrink-0 text-right font-mono text-sm font-semibold tabular-nums text-foreground">
+              {row.count}
+            </span>
+            <span className="w-14 shrink-0 text-right font-mono text-sm font-semibold tabular-nums text-amber-700 dark:text-amber-400">
+              {row.coins}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
 }
 
 interface IKanbanColumn {
@@ -81,15 +138,36 @@ const DashboardPage: React.FC = () => {
   };
 
   const rankingSubmitters = useMemo(
-    () => buildRanking(filteredRequirements, (r) => r.submitter),
+    () =>
+      buildRankingAgg(
+        filteredRequirements,
+        (r) => ({ id: r.submitter, name: r.submitterName }),
+        (r) => Number(r.bountyPoints ?? 0) || 0
+      ),
     [filteredRequirements]
   );
   const rankingPm = useMemo(
-    () => buildRanking(filteredRequirements, (r) => r.pm),
+    () =>
+      buildRankingAgg(
+        filteredRequirements,
+        (r) => {
+          const rec = (r.taskAcceptances ?? []).find((x) => x.role === 'pm');
+          return { id: r.pm, name: rec?.userName };
+        },
+        (r) => (r.status === 'released' ? Number(r.pmCoins ?? 0) || 0 : 0)
+      ),
     [filteredRequirements]
   );
   const rankingTm = useMemo(
-    () => buildRanking(filteredRequirements, (r) => r.tm),
+    () =>
+      buildRankingAgg(
+        filteredRequirements,
+        (r) => {
+          const rec = (r.taskAcceptances ?? []).find((x) => x.role === 'tm');
+          return { id: r.tm, name: rec?.userName };
+        },
+        (r) => (r.status === 'released' ? Number(r.tmCoins ?? 0) || 0 : 0)
+      ),
     [filteredRequirements]
   );
 
@@ -244,108 +322,40 @@ const DashboardPage: React.FC = () => {
             <div>
               <h2 className="text-lg font-semibold tracking-tight text-foreground">需求排行榜</h2>
               <p className="text-sm text-muted-foreground">
-                与上方统计共用当前筛选；按各自关联的需求条数降序（最多各展示 {LEADERBOARD_TOP} 名）
+                与上方统计共用当前筛选；按需求条数降序，金币列实时累加（提交人累计设定金币；PM/TM
+                仅统计已发布需求的角色份额）。最多各展示 {LEADERBOARD_TOP} 名。
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <Card className="rd-surface-card rd-surface-card-hover overflow-hidden border-border">
+          <div className="grid w-full min-w-0 gap-6 [grid-template-columns:repeat(auto-fit,minmax(min(100%,17.5rem),1fr))]">
+            <Card className="rd-surface-card rd-surface-card-hover min-w-0 overflow-hidden border-border">
               <CardHeader className="border-b border-border/80 pb-3">
                 <CardTitle className="text-base">提交人</CardTitle>
-                <CardDescription>作为提交人的需求数量</CardDescription>
+                <CardDescription>每条需求计 1；金币为 bounty 累计</CardDescription>
               </CardHeader>
               <CardContent className="p-0">
-                {rankingSubmitters.length === 0 ? (
-                  <p className="px-4 py-8 text-center text-sm text-muted-foreground">暂无数据</p>
-                ) : (
-                  <ul className="divide-y divide-border/60">
-                    {rankingSubmitters.map((row, i) => (
-                      <li
-                        key={row.userId}
-                        className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
-                      >
-                        <div className="flex min-w-0 flex-1 items-center gap-3">
-                          <span
-                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border text-xs font-bold tabular-nums ${rankBadgeClass(i + 1)}`}
-                          >
-                            {i + 1}
-                          </span>
-                          <UserDisplay value={[row.userId]} size="small" />
-                        </div>
-                        <span className="shrink-0 font-mono text-sm font-semibold tabular-nums text-foreground">
-                          {row.count}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <LeaderboardTable rows={rankingSubmitters} emptyLabel="暂无数据" />
               </CardContent>
             </Card>
 
-            <Card className="rd-surface-card rd-surface-card-hover overflow-hidden border-border">
+            <Card className="rd-surface-card rd-surface-card-hover min-w-0 overflow-hidden border-border">
               <CardHeader className="border-b border-border/80 pb-3">
                 <CardTitle className="text-base">产品经理</CardTitle>
-                <CardDescription>担任 PM 的需求数量</CardDescription>
+                <CardDescription>已发布需求累计 PM 份额金币</CardDescription>
               </CardHeader>
               <CardContent className="p-0">
-                {rankingPm.length === 0 ? (
-                  <p className="px-4 py-8 text-center text-sm text-muted-foreground">暂无已认领 PM 的需求</p>
-                ) : (
-                  <ul className="divide-y divide-border/60">
-                    {rankingPm.map((row, i) => (
-                      <li
-                        key={row.userId}
-                        className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
-                      >
-                        <div className="flex min-w-0 flex-1 items-center gap-3">
-                          <span
-                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border text-xs font-bold tabular-nums ${rankBadgeClass(i + 1)}`}
-                          >
-                            {i + 1}
-                          </span>
-                          <UserDisplay value={[row.userId]} size="small" />
-                        </div>
-                        <span className="shrink-0 font-mono text-sm font-semibold tabular-nums text-foreground">
-                          {row.count}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <LeaderboardTable rows={rankingPm} emptyLabel="暂无已认领 PM 的需求" />
               </CardContent>
             </Card>
 
-            <Card className="rd-surface-card rd-surface-card-hover overflow-hidden border-border">
+            <Card className="rd-surface-card rd-surface-card-hover min-w-0 overflow-hidden border-border">
               <CardHeader className="border-b border-border/80 pb-3">
                 <CardTitle className="text-base">技术经理</CardTitle>
-                <CardDescription>担任 TM 的需求数量</CardDescription>
+                <CardDescription>已发布需求累计 TM 份额金币</CardDescription>
               </CardHeader>
               <CardContent className="p-0">
-                {rankingTm.length === 0 ? (
-                  <p className="px-4 py-8 text-center text-sm text-muted-foreground">暂无已认领 TM 的需求</p>
-                ) : (
-                  <ul className="divide-y divide-border/60">
-                    {rankingTm.map((row, i) => (
-                      <li
-                        key={row.userId}
-                        className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
-                      >
-                        <div className="flex min-w-0 flex-1 items-center gap-3">
-                          <span
-                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border text-xs font-bold tabular-nums ${rankBadgeClass(i + 1)}`}
-                          >
-                            {i + 1}
-                          </span>
-                          <UserDisplay value={[row.userId]} size="small" />
-                        </div>
-                        <span className="shrink-0 font-mono text-sm font-semibold tabular-nums text-foreground">
-                          {row.count}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <LeaderboardTable rows={rankingTm} emptyLabel="暂无已认领 TM 的需求" />
               </CardContent>
             </Card>
           </div>

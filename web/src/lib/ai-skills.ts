@@ -223,7 +223,7 @@ PRD 文档如下：
   code_review_assistant: {
     id: 'code_review_assistant',
     name: '代码审查助手',
-    description: '对代码片段或差异做质量与风险摘要，辅助 AI 开发监控环节。',
+    description: '对代码片段或差异做质量与风险摘要，辅助流水线环节。',
     provider: 'ark',
     model: 'deepseek-v3-2-251201',
     stream: true,

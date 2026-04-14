@@ -17,6 +17,8 @@ import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyCont
 import { FileSearch, CheckCircle, XCircle, RotateCcw, ExternalLink, MessageSquare, History, AlertCircle, Star, Send } from 'lucide-react';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import { toast } from 'sonner';
+import { getCurrentUser } from '@/lib/auth';
+import { rdAuditUpdate } from '@/lib/rd-actor';
 import type { IAcceptanceRecord as IStoreAcceptanceRecord } from '@/lib/mock-data-store';
 import {
   useAcceptanceRecords,
@@ -139,22 +141,29 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
   const submitAcceptance = (approved: boolean) => {
     if (!selectedRequirement) return;
     
+    const now = new Date().toISOString();
+    const actorId = getCurrentUser()?.id?.trim() || currentProfile.user_id?.trim();
+    const reviewerId = actorId || currentProfile.name || 'unknown';
     const newRecord: IAcceptanceRecord = {
       id: `acc-${Date.now()}`,
       requirementId: selectedRequirement.id,
-      reviewer: currentProfile.name || '未知用户',
+      reviewer: reviewerId,
       scores,
       feedback,
       result: approved ? 'approved' : 'rejected',
-      createdAt: new Date().toISOString(),
+      status: approved ? 'approved' : 'rejected',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: reviewerId,
+      updatedBy: reviewerId,
     };
 
     void addAcceptanceRecord.mutateAsync(newRecord).then(() => {
-      const now = new Date().toISOString();
       return upsertRequirement.mutateAsync({
         ...selectedRequirement,
         status: approved ? 'released' : 'pending_acceptance',
         updatedAt: now,
+        ...rdAuditUpdate(),
       });
     }).then(() => {
       toast.success(approved ? '验收已通过' : '验收已驳回');
@@ -173,6 +182,7 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
         ...selectedRequirement,
         status: 'prd_writing',
         updatedAt: new Date().toISOString(),
+        ...rdAuditUpdate(),
       })
       .then(() => toast.success('RFC变更申请已发起，需求已回退至PRD阶段'));
     setIsRFCDialogOpen(false);

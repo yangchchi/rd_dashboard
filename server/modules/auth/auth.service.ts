@@ -12,6 +12,7 @@ export interface IUserRow {
   fullName?: string | null;
   email?: string | null;
   phone?: string | null;
+  accessRoleId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -23,6 +24,8 @@ export interface IUserView {
   name?: string;
   email?: string;
   phone?: string;
+  /** 前端 RBAC 角色 id（存于 localStorage 策略中的角色定义） */
+  accessRoleId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -59,6 +62,7 @@ export class AuthService implements OnModuleInit {
     const fullName = row.full_name ?? row.fullName;
     const email = row.email;
     const phone = row.phone;
+    const accessRoleId = row.access_role_id ?? row.accessRoleId;
     return {
       id: row.id as string,
       username: row.username as string,
@@ -70,6 +74,10 @@ export class AuthService implements OnModuleInit {
         typeof email === 'string' && email.trim() !== '' ? email.trim() : undefined,
       phone:
         typeof phone === 'string' && phone.trim() !== '' ? phone.trim() : undefined,
+      accessRoleId:
+        typeof accessRoleId === 'string' && accessRoleId.trim() !== ''
+          ? accessRoleId.trim()
+          : null,
       createdAt: this.toIso(row.created_at ?? row.createdAt),
       updatedAt: this.toIso(row.updated_at ?? row.updatedAt),
     };
@@ -84,6 +92,12 @@ export class AuthService implements OnModuleInit {
       fullName: (row.full_name as string | null | undefined) ?? null,
       email: (row.email as string | null | undefined) ?? null,
       phone: (row.phone as string | null | undefined) ?? null,
+      accessRoleId:
+        typeof row.access_role_id === 'string'
+          ? row.access_role_id.trim() || null
+          : typeof row.accessRoleId === 'string'
+            ? row.accessRoleId.trim() || null
+            : null,
       createdAt: v.createdAt,
       updatedAt: v.updatedAt,
     };
@@ -118,6 +132,9 @@ export class AuthService implements OnModuleInit {
     await this.db.execute(sql`
       ALTER TABLE rd_users ADD COLUMN IF NOT EXISTS phone TEXT;
     `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_users ADD COLUMN IF NOT EXISTS access_role_id TEXT;
+    `);
   }
 
   async ensureDefaultAdmin(): Promise<void> {
@@ -136,7 +153,7 @@ export class AuthService implements OnModuleInit {
 
   async listUsers(): Promise<IUserView[]> {
     const result = await this.db.execute(sql`
-      SELECT id, username, full_name, email, phone, created_at, updated_at
+      SELECT id, username, full_name, email, phone, access_role_id, created_at, updated_at
       FROM rd_users ORDER BY created_at DESC;
     `);
     const rows = this.rowsFromExecute(result);
@@ -146,7 +163,7 @@ export class AuthService implements OnModuleInit {
   async createUser(
     username: string,
     password: string,
-    profile?: { name?: string; email?: string; phone?: string }
+    profile?: { name?: string; email?: string; phone?: string; accessRoleId?: string | null }
   ): Promise<IUserView> {
     const now = new Date().toISOString();
     const userId = `usr_${Date.now()}`;
@@ -154,8 +171,12 @@ export class AuthService implements OnModuleInit {
     const fullName = profile?.name?.trim() || null;
     const email = profile?.email?.trim() || null;
     const phone = profile?.phone?.trim() || null;
+    const accessRoleId =
+      typeof profile?.accessRoleId === 'string' && profile.accessRoleId.trim() !== ''
+        ? profile.accessRoleId.trim()
+        : null;
     await this.db.execute(sql`
-      INSERT INTO rd_users (id, username, password_hash, full_name, email, phone, created_at, updated_at)
+      INSERT INTO rd_users (id, username, password_hash, full_name, email, phone, access_role_id, created_at, updated_at)
       VALUES (
         ${userId},
         ${username},
@@ -163,6 +184,7 @@ export class AuthService implements OnModuleInit {
         ${fullName},
         ${email},
         ${phone},
+        ${accessRoleId},
         ${now}::timestamptz,
         ${now}::timestamptz
       )
@@ -177,6 +199,23 @@ export class AuthService implements OnModuleInit {
 
   async deleteUser(id: string): Promise<void> {
     await this.db.execute(sql`DELETE FROM rd_users WHERE id = ${id};`);
+  }
+
+  async updateUserAccessRole(id: string, accessRoleId: string | null): Promise<IUserView> {
+    await this.db.execute(sql`
+      UPDATE rd_users
+      SET access_role_id = ${accessRoleId}, updated_at = NOW()
+      WHERE id = ${id};
+    `);
+    const result = await this.db.execute(sql`
+      SELECT id, username, full_name, email, phone, access_role_id, created_at, updated_at
+      FROM rd_users WHERE id = ${id} LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute(result);
+    if (!rows[0]) {
+      throw new Error('用户不存在');
+    }
+    return this.rowToUserView(rows[0]);
   }
 
   async register(username: string, password: string) {

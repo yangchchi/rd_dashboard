@@ -14,23 +14,15 @@ import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
+import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { TiptapEditorComplete } from '@/components/business-ui/tiptap-editor';
 import { CalendarIcon, Save, Send, Sparkles, Loader2, ChevronsUpDown, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { IRequirement, IUser, IProduct } from '@/lib/rd-types';
 import { authApi } from '@/lib/auth-api';
 import { useUpsertRequirement } from '@/lib/rd-hooks';
+import { rdAuditCreate } from '@/lib/rd-actor';
 import { rdApi } from '@/lib/rd-api';
-
-interface IRequirementInputPageProps {}
 
 const PRIORITY_OPTIONS = [
   { value: 'P0', label: 'P0 - 最高优先级', color: 'bg-red-500' },
@@ -64,7 +56,7 @@ function newProductId(): string {
 
 type RequirementOptimizeStreamChunk = { content?: string };
 
-const RequirementInputPage: React.FC<IRequirementInputPageProps> = () => {
+const RequirementInputPage: React.FC = () => {
   const router = useRouter();
   const userInfo = useCurrentUserProfile();
   const upsertRequirement = useUpsertRequirement();
@@ -193,6 +185,8 @@ const RequirementInputPage: React.FC<IRequirementInputPageProps> = () => {
       id: newProductId(),
       name: raw,
       description: '',
+      status: 'active',
+      ...rdAuditCreate(),
     });
     try {
       const refreshed = await rdApi.listProducts();
@@ -242,6 +236,7 @@ const RequirementInputPage: React.FC<IRequirementInputPageProps> = () => {
         submitterName: userInfo.name || '未知用户',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        ...rdAuditCreate(),
       };
 
       await upsertRequirement.mutateAsync(requirement);
@@ -250,7 +245,7 @@ const RequirementInputPage: React.FC<IRequirementInputPageProps> = () => {
 
       toast.success('需求提交成功');
       router.push('/requirements');
-    } catch (error) {
+    } catch {
       toast.error('提交失败', { description: '请稍后重试' });
     } finally {
       setIsSubmitting(false);
@@ -345,28 +340,34 @@ const RequirementInputPage: React.FC<IRequirementInputPageProps> = () => {
                         onValueChange={setProductSearch}
                       />
                       <CommandList>
-                        <CommandEmpty className="py-3 text-center text-xs text-muted-foreground">
-                          {products.length === 0 && !showCreateFromSearch
-                            ? '暂无产品，请在下方输入名称后选用'
-                            : '无匹配项'}
-                        </CommandEmpty>
                         <CommandGroup heading="产品列表">
-                          {filteredProducts.map((p) => (
-                            <CommandItem
-                              key={p.id}
-                              value={p.id}
-                              onSelect={() => {
-                                setProduct(p.name);
-                                setProductComboOpen(false);
-                                setProductSearch('');
-                              }}
-                            >
-                              <Check
-                                className={cn('mr-2 size-4 shrink-0', product === p.name ? 'opacity-100' : 'opacity-0')}
-                              />
-                              <span className="truncate">{p.name}</span>
-                            </CommandItem>
-                          ))}
+                          {filteredProducts.length === 0 ? (
+                            <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+                              {products.length === 0
+                                ? '暂无产品，可在下方「未找到匹配产品」中选用输入的名称'
+                                : '无匹配结果，请调整搜索或选用新名称'}
+                            </div>
+                          ) : (
+                            filteredProducts.map((p) => (
+                              <CommandItem
+                                key={p.id}
+                                value={p.id}
+                                onSelect={() => {
+                                  setProduct(p.name);
+                                  setProductComboOpen(false);
+                                  setProductSearch('');
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    'mr-2 size-4 shrink-0',
+                                    product === p.name ? 'opacity-100' : 'opacity-0'
+                                  )}
+                                />
+                                <span className="truncate">{p.name}</span>
+                              </CommandItem>
+                            ))
+                          )}
                         </CommandGroup>
                         {showCreateFromSearch && (
                           <CommandGroup heading="未找到匹配产品">

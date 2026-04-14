@@ -10,7 +10,6 @@ import { zhCN } from 'date-fns/locale';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -18,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { TiptapEditorComplete } from '@/components/business-ui/tiptap-editor';
 import { CalendarIcon, Save, Sparkles, Loader2, ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { rdAuditUpdate } from '@/lib/rd-actor';
 import { useRequirement, useUpsertRequirement } from '@/lib/rd-hooks';
 import type { IRequirement, IUser } from '@/lib/rd-types';
 import { authApi } from '@/lib/auth-api';
@@ -44,6 +44,20 @@ const getDefaultExpectedDate = () => {
   return date;
 };
 
+function stripHtmlTags(html: string): string {
+  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function plainTextToTipTapHtml(text: string): string {
+  const esc = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const t = text.trim();
+  if (!t) return '<p></p>';
+  return `<p>${esc(t)}</p>`;
+}
+
+type RequirementOptimizeStreamChunk = { content?: string };
+
 const RequirementEditPage: React.FC = () => {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
@@ -62,7 +76,6 @@ const RequirementEditPage: React.FC = () => {
   const [pmCandidateUserId, setPmCandidateUserId] = useState('');
   const [tmCandidateUserId, setTmCandidateUserId] = useState('');
   const [users, setUsers] = useState<IUser[]>([]);
-  const [aiCategory, setAiCategory] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -98,7 +111,6 @@ const RequirementEditPage: React.FC = () => {
         ? Math.max(0, Math.floor(found.bountyPoints))
         : 0
     );
-    setAiCategory(found.aiCategory || '');
     setPmCandidateUserId(found.pmCandidateUserId || '');
     setTmCandidateUserId(found.tmCandidateUserId || '');
     setIsLoading(false);
@@ -111,31 +123,38 @@ const RequirementEditPage: React.FC = () => {
       .catch(() => setUsers([]));
   }, []);
 
-  const handleAiClassify = async () => {
-    if (!description.trim()) {
+  const handleAiOptimize = async () => {
+    const plain = stripHtmlTags(description);
+    if (!plain) {
       toast.error('请先填写需求描述');
       return;
     }
 
     setIsAnalyzing(true);
     try {
-      const result = await capabilityClient
-        .load('requirement_classifier_1')
-        .call('aiCategorize', { requirement_text: description }) as { categories: string[] };
-      
-      if (result?.categories && result.categories.length > 0) {
-        const category = result.categories[0];
-        setAiCategory(category);
-        
-        const priorityMatch = category.match(/P[0-3]/);
-        if (priorityMatch) {
-          setPriority(priorityMatch[0]);
+      const stream = capabilityClient
+        .load('requirement_optimizer_1')
+        .callStream<RequirementOptimizeStreamChunk>('textGenerate', {
+          requirement_text: plain,
+        });
+
+      let full = '';
+      for await (const chunk of stream) {
+        if (chunk?.content) {
+          full += chunk.content;
         }
-        
-        toast.success('AI分析完成', { description: `识别为: ${category}` });
       }
-    } catch (error) {
-      toast.error('AI分析失败', { description: '请稍后重试' });
+
+      const optimized = full.trim();
+      if (!optimized) {
+        toast.error('未获得优化结果', { description: '请稍后重试' });
+        return;
+      }
+
+      setDescription(plainTextToTipTapHtml(optimized));
+      toast.success('AI 优化完成', { description: '已用优化后的描述替换编辑器内容' });
+    } catch {
+      toast.error('AI 优化失败', { description: '请稍后重试' });
     } finally {
       setIsAnalyzing(false);
     }
@@ -146,7 +165,7 @@ const RequirementEditPage: React.FC = () => {
       toast.error('请填写需求标题');
       return;
     }
-    if (!description.trim()) {
+    if (!stripHtmlTags(description)) {
       toast.error('请填写需求描述');
       return;
     }
@@ -174,8 +193,8 @@ const RequirementEditPage: React.FC = () => {
         priority: priority as 'P0' | 'P1' | 'P2' | 'P3',
         expectedDate: expectedDate.toISOString().split('T')[0],
         status: status as IRequirement['status'],
-        aiCategory,
         updatedAt: new Date().toISOString(),
+        ...rdAuditUpdate(),
       };
 
       await upsertRequirement.mutateAsync(updatedRequirement);
@@ -280,15 +299,15 @@ const RequirementEditPage: React.FC = () => {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={handleAiClassify}
-                    disabled={isAnalyzing || !description.trim()}
+                    onClick={handleAiOptimize}
+                    disabled={isAnalyzing || !stripHtmlTags(description)}
                   >
                     {isAnalyzing ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
                       <Sparkles className="mr-2 h-4 w-4" />
                     )}
-                    {isAnalyzing ? 'AI分析中...' : 'AI智能分类'}
+                    {isAnalyzing ? 'AI 优化中...' : 'AI优化'}
                   </Button>
                 </div>
                 <TiptapEditorComplete
@@ -297,15 +316,6 @@ const RequirementEditPage: React.FC = () => {
                   placeholder="请详细描述需求背景、业务场景..."
                 />
               </div>
-
-              {/* AI分类结果 */}
-              {aiCategory && (
-                <div className="flex items-center gap-2 p-3 bg-accent rounded-lg">
-                  <Sparkles className="h-4 w-4 text-primary" />
-                  <span className="text-sm text-muted-foreground">AI识别分类:</span>
-                  <Badge variant="secondary">{aiCategory}</Badge>
-                </div>
-              )}
               <div className="space-y-2">
                 <Label htmlFor="edit-bounty">金币</Label>
                 <Input

@@ -43,7 +43,7 @@ export const authApi = {
   createUser(
     username: string,
     password: string,
-    profile?: { name?: string; email?: string; phone?: string }
+    profile?: { name?: string; email?: string; phone?: string; accessRoleId?: string | null }
   ) {
     return json<IUser>('/users', {
       method: 'POST',
@@ -53,7 +53,15 @@ export const authApi = {
         name: profile?.name,
         email: profile?.email,
         phone: profile?.phone,
+        accessRoleId: profile?.accessRoleId,
       }),
+    });
+  },
+
+  updateUserAccessRole(id: string, accessRoleId: string | null) {
+    return json<IUser>(`/users/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ accessRoleId }),
     });
   },
 

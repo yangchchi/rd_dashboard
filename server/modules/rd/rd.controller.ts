@@ -65,17 +65,17 @@ export class RdController {
   @Post('prds/:id/submit-review')
   submitPrdReview(
     @Param('id') id: string,
-    @Body() body: { reviewer?: string; comment?: string }
+    @Body() body: { reviewer?: string; comment?: string; actorUserId?: string }
   ) {
-    return this.rd.submitPrdForReview(id, body?.reviewer, body?.comment);
+    return this.rd.submitPrdForReview(id, body?.reviewer, body?.comment, body?.actorUserId);
   }
 
   @Post('prds/:id/review')
   reviewPrd(
     @Param('id') id: string,
-    @Body() body: { status: 'approved' | 'rejected'; reviewer?: string; comment?: string }
+    @Body() body: { status: 'approved' | 'rejected'; reviewer?: string; comment?: string; actorUserId?: string }
   ) {
-    return this.rd.reviewPrd(id, body.status, body.reviewer, body.comment);
+    return this.rd.reviewPrd(id, body.status, body.reviewer, body.comment, body.actorUserId);
   }
 
   @Get('specs')
@@ -101,25 +101,25 @@ export class RdController {
   @Post('specs/:id/submit-review')
   submitSpecReview(
     @Param('id') id: string,
-    @Body() body: { reviewer?: string; comment?: string }
+    @Body() body: { reviewer?: string; comment?: string; actorUserId?: string }
   ) {
-    return this.rd.submitSpecForReview(id, body?.reviewer, body?.comment);
+    return this.rd.submitSpecForReview(id, body?.reviewer, body?.comment, body?.actorUserId);
   }
 
   @Post('specs/:id/approve')
   approveSpec(
     @Param('id') id: string,
-    @Body() body: { reviewer?: string; comment?: string }
+    @Body() body: { reviewer?: string; comment?: string; actorUserId?: string }
   ) {
-    return this.rd.approveSpec(id, body?.reviewer, body?.comment);
+    return this.rd.approveSpec(id, body?.reviewer, body?.comment, body?.actorUserId);
   }
 
   @Post('specs/:id/reject')
   rejectSpec(
     @Param('id') id: string,
-    @Body() body: { reviewer?: string; comment?: string }
+    @Body() body: { reviewer?: string; comment?: string; actorUserId?: string }
   ) {
-    return this.rd.rejectSpec(id, body?.reviewer, body?.comment);
+    return this.rd.rejectSpec(id, body?.reviewer, body?.comment, body?.actorUserId);
   }
 
   @Get('org-spec')

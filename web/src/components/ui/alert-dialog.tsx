@@ -105,18 +105,20 @@ function AlertDialogTitle({
   )
 }
 
-function AlertDialogDescription({
-  className,
-  ...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Description>) {
-  return (
-    <AlertDialogPrimitive.Description
+const AlertDialogDescription = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<typeof AlertDialogPrimitive.Description>
+>(({ className, ...props }, ref) => (
+  <AlertDialogPrimitive.Description asChild>
+    <div
+      ref={ref}
       data-slot="alert-dialog-description"
       className={cn("text-muted-foreground text-sm", className)}
       {...props}
     />
-  )
-}
+  </AlertDialogPrimitive.Description>
+))
+AlertDialogDescription.displayName = "AlertDialogDescription"
 
 function AlertDialogAction({
   className,

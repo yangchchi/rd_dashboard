@@ -31,6 +31,10 @@ export interface IPipelineSpecDocInput {
   prdId: string;
   status: string;
   updatedAt?: string;
+  /** 功能规格 Markdown 正文（优先作为 FS 独立文档） */
+  fsMarkdown?: string;
+  /** 技术规格 Markdown 正文（优先作为 TS 独立文档） */
+  tsMarkdown?: string;
   machineReadableJson?: string | boolean;
   functionalSpec?: {
     apis?: Array<{
@@ -69,11 +73,20 @@ export interface IPublishPipelineDocsPayload {
   specs: IPipelineSpecDocInput[];
 }
 
+export interface IPublishedDocumentRef {
+  path: string;
+  kind: 'prd' | 'fs' | 'ts';
+  id: string;
+  title: string;
+}
+
 export interface IPublishPipelineDocsResult {
   branch: string;
   commitHash: string;
   commitMessage: string;
   files: string[];
+  /** 本次写入的文档清单（用于前端拼 Git Web 链接） */
+  documents: IPublishedDocumentRef[];
 }
 
 export interface IFetchPipelineCommitsPayload {
@@ -142,24 +155,39 @@ export class PipelineGitService {
       await mkdir(docsBaseDir, { recursive: true });
 
       const files: string[] = [];
+      const documents: IPublishedDocumentRef[] = [];
 
       for (const prd of payload.prds) {
         const fileName = `prd-${this.slugify(prd.id)}.md`;
         const relativePath = join('docs', 'ai-pipeline', docsDirName, fileName);
+        const relPosix = relativePath.replace(/\\/g, '/');
         await writeFile(join(docsBaseDir, fileName), this.renderPrdMarkdown(prd, payload), 'utf8');
-        files.push(relativePath.replace(/\\/g, '/'));
+        files.push(relPosix);
+        documents.push({
+          path: relPosix,
+          kind: 'prd',
+          id: prd.id,
+          title: prd.title || prd.id,
+        });
       }
 
       for (const spec of payload.specs) {
-        const fileName = `spec-${this.slugify(spec.id)}.md`;
-        const relativePath = join('docs', 'ai-pipeline', docsDirName, fileName);
-        await writeFile(join(docsBaseDir, fileName), this.renderSpecMarkdown(spec, payload), 'utf8');
-        files.push(relativePath.replace(/\\/g, '/'));
+        const fsFileName = `fs-${this.slugify(spec.id)}.md`;
+        const tsFileName = `ts-${this.slugify(spec.id)}.md`;
+        const fsRel = join('docs', 'ai-pipeline', docsDirName, fsFileName).replace(/\\/g, '/');
+        const tsRel = join('docs', 'ai-pipeline', docsDirName, tsFileName).replace(/\\/g, '/');
+        await writeFile(join(docsBaseDir, fsFileName), this.renderFsMarkdown(spec, payload), 'utf8');
+        await writeFile(join(docsBaseDir, tsFileName), this.renderTsMarkdown(spec, payload), 'utf8');
+        files.push(fsRel, tsRel);
+        documents.push(
+          { path: fsRel, kind: 'fs', id: spec.id, title: `FS · ${spec.id}` },
+          { path: tsRel, kind: 'ts', id: spec.id, title: `TS · ${spec.id}` }
+        );
       }
 
       await this.runGit(['add', '.'], repoDir);
 
-      const commitMessage = `docs: 同步流水线 ${pipelineName} 的PRD和规格`;
+      const commitMessage = `docs: 同步流水线 ${pipelineName} 的 PRD / FS / TS`;
       await this.runGit(['commit', '-m', commitMessage], repoDir);
       await this.runGit(['push', 'origin', `HEAD:${branch}`], repoDir);
       const { stdout } = await this.runGit(['rev-parse', '--short', 'HEAD'], repoDir);
@@ -168,6 +196,7 @@ export class PipelineGitService {
         commitHash: stdout.trim(),
         commitMessage,
         files,
+        documents,
       };
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
@@ -194,6 +223,36 @@ export class PipelineGitService {
   }
 
   private renderPrdMarkdown(prd: IPipelinePrdDocInput, payload: IPublishPipelineDocsPayload) {
+    const meta = `## 元信息
+
+- 流水线：${payload.pipelineName}
+- PRD ID：${prd.id}
+- 关联需求：${prd.requirementId}
+- 状态：${prd.status}
+- 版本：v${prd.version ?? 1}
+- 更新时间：${prd.updatedAt || new Date().toISOString()}
+`;
+
+    const bg = (prd.background || '').trim();
+    if (bg) {
+      return `# PRD：${prd.title || prd.id}
+
+${meta}
+
+---
+
+# PRD 正文（Markdown）
+
+${bg}
+
+---
+
+## 附加说明
+
+${payload.remarks || '无'}
+`;
+    }
+
     const featureList = Array.isArray(prd.featureList) ? prd.featureList : [];
     const features = featureList.length
       ? featureList
@@ -209,18 +268,11 @@ export class PipelineGitService {
 
     return `# PRD 文档：${prd.title || prd.id}
 
-## 元信息
-
-- 流水线：${payload.pipelineName}
-- PRD ID：${prd.id}
-- 关联需求：${prd.requirementId}
-- 状态：${prd.status}
-- 版本：v${prd.version ?? 1}
-- 更新时间：${prd.updatedAt || new Date().toISOString()}
+${meta}
 
 ## 背景
 
-${prd.background || '无（当前仅同步基础元信息）'}
+${prd.background || '无'}
 
 ## 目标
 
@@ -244,15 +296,84 @@ ${payload.remarks || '无'}
 `;
   }
 
-  private renderSpecMarkdown(spec: IPipelineSpecDocInput, payload: IPublishPipelineDocsPayload) {
+  private renderFsMarkdown(spec: IPipelineSpecDocInput, payload: IPublishPipelineDocsPayload) {
+    const meta = `## 元信息
+
+- 流水线：${payload.pipelineName}
+- 规格 ID：${spec.id}
+- 关联 PRD：${spec.prdId}
+- 状态：${spec.status}
+- 更新时间：${spec.updatedAt || new Date().toISOString()}
+`;
+    const body = (spec.fsMarkdown || '').trim();
+    if (body) {
+      return `# 功能规格（FS）：${spec.id}
+
+${meta}
+
+---
+
+# FS 正文（Markdown）
+
+${body}
+`;
+    }
+    return `# 功能规格（FS）：${spec.id}
+
+${meta}
+
+${this.renderFsStructuredSection(spec)}
+`;
+  }
+
+  private renderTsMarkdown(spec: IPipelineSpecDocInput, payload: IPublishPipelineDocsPayload) {
+    const meta = `## 元信息
+
+- 流水线：${payload.pipelineName}
+- 规格 ID：${spec.id}
+- 关联 PRD：${spec.prdId}
+- 状态：${spec.status}
+- 更新时间：${spec.updatedAt || new Date().toISOString()}
+`;
+    const body = (spec.tsMarkdown || '').trim();
+    if (body) {
+      return `# 技术规格（TS）：${spec.id}
+
+${meta}
+
+---
+
+# TS 正文（Markdown）
+
+${body}
+
+---
+
+## Machine-Readable JSON（附录）
+
+\`\`\`json
+${typeof spec.machineReadableJson === 'string' ? spec.machineReadableJson : JSON.stringify({ machineReadableJson: spec.machineReadableJson ?? null }, null, 2)}
+\`\`\`
+`;
+    }
+    return `# 技术规格（TS）：${spec.id}
+
+${meta}
+
+${this.renderTsStructuredSection(spec)}
+
+## Machine-Readable JSON
+\`\`\`json
+${typeof spec.machineReadableJson === 'string' ? spec.machineReadableJson : JSON.stringify({ machineReadableJson: spec.machineReadableJson ?? null }, null, 2)}
+\`\`\`
+`;
+  }
+
+  private renderFsStructuredSection(spec: IPipelineSpecDocInput) {
     const functionalSpec = spec.functionalSpec || {};
-    const technicalSpec = spec.technicalSpec || {};
     const apisList = Array.isArray(functionalSpec.apis) ? functionalSpec.apis : [];
     const uiList = Array.isArray(functionalSpec.uiComponents) ? functionalSpec.uiComponents : [];
     const interactionsList = Array.isArray(functionalSpec.interactions) ? functionalSpec.interactions : [];
-    const integrations = Array.isArray(technicalSpec.thirdPartyIntegrations)
-      ? technicalSpec.thirdPartyIntegrations
-      : [];
 
     const apis = apisList.length
       ? apisList
@@ -280,7 +401,7 @@ ${JSON.stringify(api.response || {}, null, 2)}
             return `### 组件 ${idx + 1}
 - 名称：${item.name}
 - 类型：${item.type}
-- 事件：${item.events.join(', ') || '无'}
+- 事件：${(item.events || []).join(', ') || '无'}
 - Props：
 \`\`\`json
 ${JSON.stringify(item.props || {}, null, 2)}
@@ -296,17 +417,7 @@ ${JSON.stringify(item.props || {}, null, 2)}
           .join('\n')
       : '无交互定义';
 
-    return `# 规格文档：${spec.id}
-
-## 元信息
-
-- 流水线：${payload.pipelineName}
-- 规格 ID：${spec.id}
-- 关联 PRD：${spec.prdId}
-- 状态：${spec.status}
-- 更新时间：${spec.updatedAt || new Date().toISOString()}
-
-## 功能规格（FS）
+    return `## 功能规格（结构化导出）
 
 ### API 规范
 
@@ -319,8 +430,16 @@ ${components}
 ### 交互逻辑
 
 ${interactions}
+`;
+  }
 
-## 技术规格（TS）
+  private renderTsStructuredSection(spec: IPipelineSpecDocInput) {
+    const technicalSpec = spec.technicalSpec || {};
+    const integrations = Array.isArray(technicalSpec.thirdPartyIntegrations)
+      ? technicalSpec.thirdPartyIntegrations
+      : [];
+
+    return `## 技术规格（结构化导出）
 
 ### 数据库 Schema
 \`\`\`json
@@ -334,11 +453,6 @@ ${typeof technicalSpec.architecture === 'string' ? technicalSpec.architecture : 
 ### 第三方集成
 
 ${integrations.length ? integrations.map((item) => `- ${item}`).join('\n') : '无'}
-
-## Machine-Readable JSON
-\`\`\`json
-${typeof spec.machineReadableJson === 'string' ? spec.machineReadableJson : JSON.stringify({ machineReadableJson: spec.machineReadableJson ?? null }, null, 2)}
-\`\`\`
 `;
   }
 }

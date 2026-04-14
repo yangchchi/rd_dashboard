@@ -1,3 +1,4 @@
+import { createDefaultOrgSpecConfig } from '@shared/org-spec-defaults';
 import {
   splitBountyToRoleCoins,
   type IAcceptanceRecordRow,
@@ -282,86 +283,8 @@ export const SEED_SPECS: ISpecRow[] = [
   },
 ];
 
-/** 与客户端 createDefaultOrgSpecConfig 对齐的精简默认配置 */
-export const SEED_ORG_SPEC_CONFIG = {
-  id: 'org-spec-default',
-  orgName: '默认组织',
-  version: 1,
-  defaultLanguage: 'typescript',
-  updatedAt: new Date().toISOString(),
-  languages: {
-    java: {
-      language: 'java',
-      displayName: 'Java',
-      enabled: true,
-      styleGuide: ['遵循 Google Java Style'],
-      mustFollow: ['分层架构'],
-      forbidden: ['禁止吞异常'],
-      toolchain: ['JDK 21'],
-      testing: ['JUnit'],
-    },
-    python: {
-      language: 'python',
-      displayName: 'Python',
-      enabled: true,
-      styleGuide: ['PEP8'],
-      mustFollow: ['类型注解'],
-      forbidden: ['裸 except'],
-      toolchain: ['Python 3.11+'],
-      testing: ['pytest'],
-    },
-    go: {
-      language: 'go',
-      displayName: 'Go',
-      enabled: true,
-      styleGuide: ['gofmt'],
-      mustFollow: ['context 透传'],
-      forbidden: ['panic 业务错误'],
-      toolchain: ['Go 1.22+'],
-      testing: ['table-driven'],
-    },
-    node: {
-      language: 'node',
-      displayName: 'Node.js',
-      enabled: true,
-      styleGuide: ['ESLint'],
-      mustFollow: ['参数校验'],
-      forbidden: ['未处理 Promise'],
-      toolchain: ['Node.js 20+'],
-      testing: ['单测'],
-    },
-    react: {
-      language: 'react',
-      displayName: 'React',
-      enabled: true,
-      styleGuide: ['函数组件'],
-      mustFollow: ['hooks 规范'],
-      forbidden: ['渲染副作用'],
-      toolchain: ['React 19'],
-      testing: ['RTL'],
-    },
-    vue: {
-      language: 'vue',
-      displayName: 'Vue',
-      enabled: true,
-      styleGuide: ['Composition API'],
-      mustFollow: ['Pinia'],
-      forbidden: ['模板复杂表达式'],
-      toolchain: ['Vue 3'],
-      testing: ['组件单测'],
-    },
-    typescript: {
-      language: 'typescript',
-      displayName: 'TypeScript',
-      enabled: true,
-      styleGuide: ['strict'],
-      mustFollow: ['DTO 分离'],
-      forbidden: ['滥用断言'],
-      toolchain: ['TS 5+'],
-      testing: ['核心逻辑单测'],
-    },
-  },
-};
+/** 与 web 端 createDefaultOrgSpecConfig（shared）同源，保证首启种子与 UI 默认一致 */
+export const SEED_ORG_SPEC_CONFIG = createDefaultOrgSpecConfig();
 
 export const SEED_ACCEPTANCE: IAcceptanceRecordRow[] = [
   {
@@ -371,6 +294,10 @@ export const SEED_ACCEPTANCE: IAcceptanceRecordRow[] = [
     scores: { functionality: 4, valueMatch: 5, experience: 4 },
     feedback: '功能基本实现，但部分边界场景处理需要优化',
     result: 'approved',
+    status: 'approved',
     createdAt: '2026-01-18T00:00:00.000Z',
+    updatedAt: '2026-01-18T00:00:00.000Z',
+    createdBy: '张三',
+    updatedBy: '张三',
   },
 ];

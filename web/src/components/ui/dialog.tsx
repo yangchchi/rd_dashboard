@@ -116,18 +116,20 @@ function DialogTitle({
   )
 }
 
-function DialogDescription({
-  className,
-  ...props
-}: React.ComponentProps<typeof DialogPrimitive.Description>) {
-  return (
-    <DialogPrimitive.Description
+const DialogDescription = React.forwardRef<
+  HTMLDivElement,
+  React.ComponentProps<typeof DialogPrimitive.Description>
+>(({ className, ...props }, ref) => (
+  <DialogPrimitive.Description asChild>
+    <div
+      ref={ref}
       data-slot="dialog-description"
       className={cn("text-muted-foreground text-sm", className)}
       {...props}
     />
-  )
-}
+  </DialogPrimitive.Description>
+))
+DialogDescription.displayName = "DialogDescription"
 
 export {
   Dialog,

@@ -24,7 +24,7 @@
 | PRD编辑 | `PRDEditPage.tsx` | `/prd/:id/edit` | 二级 | PRD管理页 → 编辑按钮 |
 | 规格定义 | `SpecPage.tsx` | `/specification` | 一级 | 导航 |
 | 规格编辑 | `SpecEditPage.tsx` | `/specification/:id/edit` | 二级 | 规格定义页 → 编辑按钮 |
-| AI开发监控 | `AIPipelinePage.tsx` | `/ai-pipeline` | 一级 | 导航 |
+| 流水线 | `AIPipelinePage.tsx` | `/ai-pipeline` | 一级 | 导航 |
 | 验收中心 | `AcceptancePage.tsx` | `/acceptance` | 一级 | 导航 |
 | 需求详情 | `RequirementDetailPage.tsx` | `/requirements/:id` | 二级 | 需求看板/列表 → 卡片点击 |
 
@@ -37,7 +37,7 @@
 | prd_generator | ai-text-generate | 根据原始需求自动生成结构化PRD文档 | stream | PRD管理页 |
 | spec_generator | ai-text-generate | 根据PRD生成技术规格说明书草稿 | stream | 规格定义页 |
 | requirement_classifier | ai-categorization | 对需求进行自动分类和优先级识别 | unary | 需求采集页 |
-| code_review_assistant | ai-text-summary | 分析代码生成结果，提供质量评估摘要 | stream | AI开发监控页 |
+| code_review_assistant | ai-text-summary | 分析代码生成结果，提供质量评估摘要 | stream | 流水线页 |
 | conflict_detector | ai-text-to-json | 检测技术规格与现有系统的逻辑冲突 | unary | 规格定义页 |
 | acceptance_analyzer | ai-text-summary | 分析验收反馈，生成改进建议 | stream | 验收中心页 |
 
@@ -55,7 +55,7 @@
 | 需求列表 | `/requirements` | List |
 | PRD管理 | `/prd` | FileText |
 | 规格定义 | `/specification` | Settings2 |
-| AI开发监控 | `/ai-pipeline` | Cpu |
+| 流水线 | `/ai-pipeline` | Cpu |
 | 验收中心 | `/acceptance` | CheckCircle |
 
 ---
@@ -117,7 +117,7 @@
     - **格式校验**: 校验规格是否符合Machine-Readable标准（JSON Schema验证）
     - **导出规格**: 导出为AI可读取的标准化文件格式
 
-- **页面**: AI开发监控 (`AIPipelinePage.tsx`)
+- **页面**: 流水线 (`AIPipelinePage.tsx`)
   - **页面目标**: 监控AI代码生成与部署全流程
   - **功能点**:
     - **流水线看板**: 展示各需求的AI开发状态（代码生成中→自测中→构建中→部署中）
@@ -155,7 +155,7 @@
 | `__global_rd_currentRequirement` | 当前选中的需求详情，类型为 `IRequirement` | 需求看板、需求详情、PRD编辑、规格编辑、验收中心 |
 | `__global_rd_requirementList` | 需求列表缓存，类型为 `IRequirement[]` | 需求看板、需求列表 |
 | `__global_rd_currentPRD` | 当前编辑的PRD内容，类型为 `IPRD` | PRD管理、PRD编辑 |
-| `__global_rd_currentSpec` | 当前编辑的规格说明书，类型为 `ISpecification` | 规格定义、AI开发监控 |
+| `__global_rd_currentSpec` | 当前编辑的规格说明书，类型为 `ISpecification` | 规格定义、流水线 |
 | `__global_rd_userRole` | 当前用户角色，类型为 `'stakeholder' \| 'pm' \| 'tm'` | 全局（控制功能权限和可见性） |
 
 ```ts
@@ -388,7 +388,7 @@ interface IInteraction {
 | 需求列表 | `/requirements` | List | 全部 |
 | PRD管理 | `/prd` | FileText | PM, TM |
 | 规格定义 | `/specification` | Settings2 | TM, AI相关 |
-| AI开发监控 | `/ai-pipeline` | Cpu | TM, Stakeholder(只读) |
+| 流水线 | `/ai-pipeline` | Cpu | TM, Stakeholder(只读) |
 | 验收中心 | `/acceptance` | CheckCircle | Stakeholder, PM |
 
 **Sidebar 交互状态**:

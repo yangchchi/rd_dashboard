@@ -15,27 +15,25 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
-import { 
-  Save, 
-  ArrowLeft, 
-  CheckCircle, 
-  AlertTriangle, 
-  FileCode, 
-  Database, 
-  Layers, 
-  Zap,
+import {
+  Save,
+  ArrowLeft,
+  CheckCircle,
+  AlertTriangle,
+  FileCode,
+  Database,
+  Layers,
   Download,
   Wand2,
-  X,
-  ChevronRight,
-  ChevronDown,
-  Plus,
-  Trash2,
   Sparkles,
-  Loader2
+  Loader2,
+  PencilLine,
+  BookOpen,
 } from 'lucide-react';
 import { Streamdown } from '@/components/ui/streamdown';
 import { logger } from '@/lib/logger';
+import { getCurrentUser } from '@/lib/auth';
+import { rdAuditCreate, rdAuditUpdate } from '@/lib/rd-actor';
 import type { IPrd } from '@/lib/mock-data-store';
 import { createDefaultOrgSpecConfig } from '@/lib/org-spec-defaults';
 import {
@@ -51,8 +49,6 @@ import {
 import { toast } from 'sonner';
 import { runAiSkillStream } from '@/lib/ai-skill-engine';
 import { getAiSkill } from '@/lib/ai-skills';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-
 interface IApiDef {
   path: string;
   method: string;
@@ -272,25 +268,14 @@ const SpecEditPage: React.FC = () => {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  // API编辑状态
-  const [editingApi, setEditingApi] = useState<Partial<IApiDef> | null>(null);
-  const [showApiDialog, setShowApiDialog] = useState(false);
-
-  // UI组件编辑状态
-  const [editingComponent, setEditingComponent] = useState<Partial<IUIComponent> | null>(null);
-  const [showComponentDialog, setShowComponentDialog] = useState(false);
-
-  // 交互编辑状态
-  const [editingInteraction, setEditingInteraction] = useState<Partial<IInteraction> | null>(null);
-  const [showInteractionDialog, setShowInteractionDialog] = useState(false);
   const [orgSpecConfig, setOrgSpecConfig] = useState<IOrganizationSpecConfig | null>(null);
   const [selectedLanguage, setSelectedLanguage] = useState<OrgSpecLanguage>('typescript');
   const [generatingFs, setGeneratingFs] = useState(false);
   const [generatingTs, setGeneratingTs] = useState(false);
   const [fsStreamText, setFsStreamText] = useState('');
   const [tsStreamText, setTsStreamText] = useState('');
-  const [legacyFsOpen, setLegacyFsOpen] = useState(false);
-  const [legacyTsOpen, setLegacyTsOpen] = useState(false);
+  const [fsMdMode, setFsMdMode] = useState<'edit' | 'preview'>('edit');
+  const [tsMdMode, setTsMdMode] = useState<'edit' | 'preview'>('edit');
   const [selectedRequirementId, setSelectedRequirementId] = useState('');
   const [selectedPrdId, setSelectedPrdId] = useState('');
 
@@ -357,9 +342,10 @@ const SpecEditPage: React.FC = () => {
   useEffect(() => {
     if (!spec.id || !spec.prdId) return;
     const h = window.setTimeout(() => {
-      void upsertSpecMutation.mutateAsync(
-        spec as Parameters<typeof upsertSpecMutation.mutateAsync>[0]
-      );
+      void upsertSpecMutation.mutateAsync({
+        ...(spec as Parameters<typeof upsertSpecMutation.mutateAsync>[0]),
+        ...rdAuditUpdate(),
+      });
     }, 800);
     return () => window.clearTimeout(h);
   }, [spec, upsertSpecMutation]);
@@ -368,24 +354,6 @@ const SpecEditPage: React.FC = () => {
     setSpec(prev => ({
       ...prev,
       ...updates,
-      updatedAt: new Date().toISOString()
-    }));
-    setHasUnsavedChanges(true);
-  }, []);
-
-  const updateFunctionalSpec = useCallback((updates: Partial<ISpecification['functionalSpec']>) => {
-    setSpec(prev => ({
-      ...prev,
-      functionalSpec: { ...prev.functionalSpec, ...updates },
-      updatedAt: new Date().toISOString()
-    }));
-    setHasUnsavedChanges(true);
-  }, []);
-
-  const updateTechnicalSpec = useCallback((updates: Partial<ISpecification['technicalSpec']>) => {
-    setSpec(prev => ({
-      ...prev,
-      technicalSpec: { ...prev.technicalSpec, ...updates },
       updatedAt: new Date().toISOString()
     }));
     setHasUnsavedChanges(true);
@@ -522,14 +490,22 @@ const SpecEditPage: React.FC = () => {
     validateJson();
     updateSpec({ status: 'draft' });
     setHasUnsavedChanges(false);
-    void upsertSpecMutation.mutateAsync({ ...spec, status: 'draft' } as Parameters<typeof upsertSpecMutation.mutateAsync>[0]);
+    void upsertSpecMutation.mutateAsync({
+      ...spec,
+      status: 'draft',
+      ...rdAuditUpdate(),
+    } as Parameters<typeof upsertSpecMutation.mutateAsync>[0]);
   }, [spec, validateJson, updateSpec, upsertSpecMutation]);
 
   const handleSubmit = useCallback(() => {
     validateJson();
     updateSpec({ status: 'reviewing' });
     setHasUnsavedChanges(false);
-    void submitSpecReviewMutation.mutateAsync({ specId: spec.id, reviewer: '技术经理' });
+    void submitSpecReviewMutation.mutateAsync({
+      specId: spec.id,
+      reviewer: '技术经理',
+      actorUserId: getCurrentUser()?.id,
+    });
   }, [spec, validateJson, updateSpec, submitSpecReviewMutation]);
 
   const handleExport = useCallback(() => {
@@ -559,105 +535,6 @@ const SpecEditPage: React.FC = () => {
     setShowExportDialog(false);
   }, [orgSpecConfig, requirement, selectedLanguage, spec]);
 
-  // API管理
-  const addApi = useCallback(() => {
-    setEditingApi({ path: '', method: 'GET', description: '', requestParams: {}, response: {} });
-    setShowApiDialog(true);
-  }, []);
-
-  const editApi = useCallback((api: IApiDef, index: number) => {
-    setEditingApi({ ...api, _index: index });
-    setShowApiDialog(true);
-  }, []);
-
-  const saveApi = useCallback(() => {
-    if (!editingApi || !editingApi.path) return;
-    
-    const { _index, ...apiData } = editingApi as IApiDef & { _index?: number };
-    const newApis = [...spec.functionalSpec.apis];
-    
-    if (typeof _index === 'number') {
-      newApis[_index] = apiData as IApiDef;
-    } else {
-      newApis.push(apiData as IApiDef);
-    }
-    
-    updateFunctionalSpec({ apis: newApis });
-    setShowApiDialog(false);
-    setEditingApi(null);
-  }, [editingApi, spec.functionalSpec.apis, updateFunctionalSpec]);
-
-  const deleteApi = useCallback((index: number) => {
-    const newApis = spec.functionalSpec.apis.filter((_, i) => i !== index);
-    updateFunctionalSpec({ apis: newApis });
-  }, [spec.functionalSpec.apis, updateFunctionalSpec]);
-
-  // UI组件管理
-  const addComponent = useCallback(() => {
-    setEditingComponent({ name: '', type: '', props: {}, events: [] });
-    setShowComponentDialog(true);
-  }, []);
-
-  const editComponent = useCallback((component: IUIComponent, index: number) => {
-    setEditingComponent({ ...component, _index: index });
-    setShowComponentDialog(true);
-  }, []);
-
-  const saveComponent = useCallback(() => {
-    if (!editingComponent || !editingComponent.name) return;
-    
-    const { _index, ...compData } = editingComponent as IUIComponent & { _index?: number };
-    const newComponents = [...spec.functionalSpec.uiComponents];
-    
-    if (typeof _index === 'number') {
-      newComponents[_index] = compData as IUIComponent;
-    } else {
-      newComponents.push(compData as IUIComponent);
-    }
-    
-    updateFunctionalSpec({ uiComponents: newComponents });
-    setShowComponentDialog(false);
-    setEditingComponent(null);
-  }, [editingComponent, spec.functionalSpec.uiComponents, updateFunctionalSpec]);
-
-  const deleteComponent = useCallback((index: number) => {
-    const newComponents = spec.functionalSpec.uiComponents.filter((_, i) => i !== index);
-    updateFunctionalSpec({ uiComponents: newComponents });
-  }, [spec.functionalSpec.uiComponents, updateFunctionalSpec]);
-
-  // 交互管理
-  const addInteraction = useCallback(() => {
-    setEditingInteraction({ trigger: '', action: '' });
-    setShowInteractionDialog(true);
-  }, []);
-
-  const editInteraction = useCallback((interaction: IInteraction, index: number) => {
-    setEditingInteraction({ ...interaction, _index: index });
-    setShowInteractionDialog(true);
-  }, []);
-
-  const saveInteraction = useCallback(() => {
-    if (!editingInteraction || !editingInteraction.trigger || !editingInteraction.action) return;
-    
-    const { _index, ...intData } = editingInteraction as IInteraction & { _index?: number };
-    const newInteractions = [...spec.functionalSpec.interactions];
-    
-    if (typeof _index === 'number') {
-      newInteractions[_index] = intData as IInteraction;
-    } else {
-      newInteractions.push(intData as IInteraction);
-    }
-    
-    updateFunctionalSpec({ interactions: newInteractions });
-    setShowInteractionDialog(false);
-    setEditingInteraction(null);
-  }, [editingInteraction, spec.functionalSpec.interactions, updateFunctionalSpec]);
-
-  const deleteInteraction = useCallback((index: number) => {
-    const newInteractions = spec.functionalSpec.interactions.filter((_, i) => i !== index);
-    updateFunctionalSpec({ interactions: newInteractions });
-  }, [spec.functionalSpec.interactions, updateFunctionalSpec]);
-
   const getStatusBadge = (status: string) => {
     const statusMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive'; className?: string }> = {
       draft: { label: '草稿', variant: 'secondary' },
@@ -685,6 +562,7 @@ const SpecEditPage: React.FC = () => {
       prdId: selectedPrdId,
       createdAt: now,
       updatedAt: now,
+      ...rdAuditCreate(),
     };
     await upsertSpecMutation.mutateAsync(payload);
     toast.success('规格已创建，请继续完善 FS/TS');
@@ -912,22 +790,22 @@ const SpecEditPage: React.FC = () => {
             </TabsContent>
 
             {/* Functional Spec */}
-            <TabsContent value="functional" className="space-y-4 mt-6">
-              <Card>
-                <CardHeader>
+            <TabsContent value="functional" className="mt-6 flex min-h-0 flex-col">
+              <Card className="flex min-h-0 flex-1 flex-col border-border shadow-sm">
+                <CardHeader className="shrink-0">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <CardTitle>功能规格（FS）文档</CardTitle>
                       <CardDescription>
-                        基于关联 PRD 使用 Skill「功能规格（FS）自动生成」生成；格式为强结构化 Markdown，可直接修订。
+                        基于关联 PRD 可一键「AI 生成 FS」；正文为 Markdown，使用「编辑」「预览」切换。
                       </CardDescription>
                       {linkedPrd && (
-                        <p className="text-xs text-muted-foreground mt-2 font-mono">
+                        <p className="mt-2 font-mono text-xs text-muted-foreground">
                           PRD ID: {linkedPrd.id}
                         </p>
                       )}
                     </div>
-                    <div className="flex flex-wrap gap-2 shrink-0">
+                    <div className="flex shrink-0 flex-wrap gap-2">
                       <Button
                         type="button"
                         variant="outline"
@@ -952,225 +830,77 @@ const SpecEditPage: React.FC = () => {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <Textarea
-                    value={generatingFs ? fsStreamText : (spec.fsMarkdown ?? '')}
-                    onChange={(e) => updateSpec({ fsMarkdown: e.target.value })}
-                    readOnly={generatingFs}
-                    placeholder="在此编辑 FS，或点击「AI 生成 FS」基于 PRD 自动生成…"
-                    className="min-h-[280px] font-mono text-sm"
-                  />
-                  {generatingFs && fsStreamText === '' && (
-                    <p className="text-xs text-muted-foreground flex items-center gap-2">
-                      <Loader2 className="size-3 animate-spin" /> 正在流式输出…
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Collapsible open={legacyFsOpen} onOpenChange={setLegacyFsOpen}>
-                <Card>
-                  <CollapsibleTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between p-6 text-left hover:bg-accent/30 rounded-t-lg border-b"
+                <CardContent className="flex min-h-0 flex-1 flex-col space-y-3">
+                  <Tabs
+                    value={fsMdMode}
+                    onValueChange={(v) => setFsMdMode(v as 'edit' | 'preview')}
+                    className="flex min-h-0 flex-1 flex-col gap-0"
+                  >
+                    <TabsList className="grid w-full max-w-md shrink-0 grid-cols-2">
+                      <TabsTrigger value="edit" className="gap-2">
+                        <PencilLine className="size-4 shrink-0" />
+                        编辑
+                      </TabsTrigger>
+                      <TabsTrigger value="preview" className="gap-2">
+                        <BookOpen className="size-4 shrink-0" />
+                        预览
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent
+                      value="edit"
+                      className="mt-3 flex min-h-0 flex-1 flex-col space-y-2 data-[state=inactive]:hidden"
                     >
-                      <div>
-                        <CardTitle className="text-base">结构化条目（可选）</CardTitle>
-                        <CardDescription>API / UI / 交互列表，与 Machine-Readable 导出兼容</CardDescription>
-                      </div>
-                      <ChevronDown className={`size-5 shrink-0 transition-transform ${legacyFsOpen ? 'rotate-180' : ''}`} />
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <CardContent className="space-y-4 pt-0">
-              <Card className="border-0 shadow-none">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>API接口定义</CardTitle>
-                      <CardDescription>定义系统对外暴露的API接口规范</CardDescription>
-                    </div>
-                    <Button onClick={addApi} size="sm">
-                      <Plus className="mr-2 size-4" />
-                      添加API
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {spec.functionalSpec.apis.length === 0 ? (
-                    <Empty>
-                      <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                          <Layers className="size-6 text-muted-foreground" />
-                        </EmptyMedia>
-                        <EmptyTitle>暂无API定义</EmptyTitle>
-                        <EmptyDescription>点击上方按钮添加API接口</EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  ) : (
-                    <div className="space-y-3">
-                      {spec.functionalSpec.apis.map((api, index) => (
-                        <div
-                          key={index}
-                          className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/50 cursor-pointer"
-                          onClick={() => editApi(api, index)}
-                        >
-                          <div className="flex items-center gap-3">
-                            <Badge variant={api.method === 'GET' ? 'default' : api.method === 'POST' ? 'secondary' : 'outline'}>
-                              {api.method}
-                            </Badge>
-                            <code className="text-sm font-mono">{api.path}</code>
-                            <span className="text-sm text-muted-foreground">{api.description}</span>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteApi(index);
-                            }}
-                          >
-                            <Trash2 className="size-4 text-destructive" />
-                          </Button>
+                      <p className="shrink-0 text-xs text-muted-foreground">
+                        源码编辑（Markdown）；AI 流式生成时内容会实时出现在此框。
+                      </p>
+                      <Textarea
+                        value={generatingFs ? fsStreamText : (spec.fsMarkdown ?? '')}
+                        onChange={(e) => updateSpec({ fsMarkdown: e.target.value })}
+                        readOnly={generatingFs}
+                        placeholder="在此编辑 FS，或点击「AI 生成 FS」基于 PRD 自动生成…"
+                        className="min-h-0 flex-1 resize-none font-mono text-sm leading-relaxed md:min-h-[calc(100svh-22rem)]"
+                        spellCheck={false}
+                      />
+                      {generatingFs && fsStreamText === '' && (
+                        <p className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                          <Loader2 className="size-3 animate-spin" /> 正在流式输出…
+                        </p>
+                      )}
+                    </TabsContent>
+                    <TabsContent
+                      value="preview"
+                      className="mt-3 flex min-h-0 flex-1 flex-col space-y-2 data-[state=inactive]:hidden"
+                    >
+                      <p className="shrink-0 text-xs text-muted-foreground">渲染预览（只读）；修订请切回「编辑」</p>
+                      <ScrollArea className="min-h-[280px] w-full flex-1 rounded-md border border-border bg-card md:min-h-[calc(100svh-22rem)]">
+                        <div className="p-4 pr-5 text-sm text-foreground [&_.streamdown]:max-w-none">
+                          {(generatingFs ? fsStreamText : (spec.fsMarkdown ?? ''))?.trim() ? (
+                            <Streamdown className="prose prose-sm dark:prose-invert max-w-none text-foreground prose-headings:scroll-mt-4 prose-p:leading-relaxed prose-li:my-0.5 prose-table:text-sm">
+                              {generatingFs ? fsStreamText : (spec.fsMarkdown ?? '')}
+                            </Streamdown>
+                          ) : (
+                            <p className="py-8 text-center text-sm text-muted-foreground">暂无内容</p>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      </ScrollArea>
+                    </TabsContent>
+                  </Tabs>
                 </CardContent>
               </Card>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>UI组件规范</CardTitle>
-                      <CardDescription>定义前端UI组件及其属性</CardDescription>
-                    </div>
-                    <Button onClick={addComponent} size="sm">
-                      <Plus className="mr-2 size-4" />
-                      添加组件
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {spec.functionalSpec.uiComponents.length === 0 ? (
-                    <Empty>
-                      <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                          <Layers className="size-6 text-muted-foreground" />
-                        </EmptyMedia>
-                        <EmptyTitle>暂无组件定义</EmptyTitle>
-                        <EmptyDescription>点击上方按钮添加UI组件</EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {spec.functionalSpec.uiComponents.map((comp, index) => (
-                        <div
-                          key={index}
-                          className="p-4 border rounded-lg hover:bg-accent/50 cursor-pointer"
-                          onClick={() => editComponent(comp, index)}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="font-medium">{comp.name}</span>
-                            <Badge variant="outline">{comp.type}</Badge>
-                          </div>
-                          <div className="mt-2 text-sm text-muted-foreground">
-                            事件: {comp.events?.join(', ') || '无'}
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="absolute top-2 right-2 opacity-0 group-hover:opacity-100"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteComponent(index);
-                            }}
-                          >
-                            <Trash2 className="size-4 text-destructive" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>交互逻辑</CardTitle>
-                      <CardDescription>定义用户交互触发的事件响应</CardDescription>
-                    </div>
-                    <Button onClick={addInteraction} size="sm">
-                      <Plus className="mr-2 size-4" />
-                      添加交互
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {spec.functionalSpec.interactions.length === 0 ? (
-                    <Empty>
-                      <EmptyHeader>
-                        <EmptyMedia variant="icon">
-                          <Zap className="size-6 text-muted-foreground" />
-                        </EmptyMedia>
-                        <EmptyTitle>暂无交互定义</EmptyTitle>
-                        <EmptyDescription>点击上方按钮添加交互逻辑</EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
-                  ) : (
-                    <div className="space-y-3">
-                      {spec.functionalSpec.interactions.map((int, index) => (
-                        <div
-                          key={index}
-                          className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/50 cursor-pointer"
-                          onClick={() => editInteraction(int, index)}
-                        >
-                          <div className="flex items-center gap-3">
-                            <Badge variant="secondary">{int.trigger}</Badge>
-                            <ChevronRight className="size-4 text-muted-foreground" />
-                            <span>{int.action}</span>
-                            {int.condition && (
-                              <Badge variant="outline">条件: {int.condition}</Badge>
-                            )}
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteInteraction(index);
-                            }}
-                          >
-                            <Trash2 className="size-4 text-destructive" />
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-                    </CardContent>
-                  </CollapsibleContent>
-                </Card>
-              </Collapsible>
             </TabsContent>
 
             {/* Technical Spec */}
-            <TabsContent value="technical" className="space-y-4 mt-6">
-              <Card>
-                <CardHeader>
+            <TabsContent value="technical" className="mt-6 flex min-h-0 flex-col">
+              <Card className="flex min-h-0 flex-1 flex-col border-border shadow-sm">
+                <CardHeader className="shrink-0">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <CardTitle>技术规格（TS）文档</CardTitle>
                       <CardDescription>
-                        在「组织编码约束」中选定语言后，使用 Skill「技术规格（TS）自动生成」基于 FS + org_spec 生成。
+                        在「组织编码约束」中选定语言后，可「AI 生成 TS」；正文为 Markdown，使用「编辑」「预览」切换。
                       </CardDescription>
                     </div>
-                    <div className="flex flex-wrap gap-2 shrink-0">
+                    <div className="flex shrink-0 flex-wrap gap-2">
                       <Button
                         type="button"
                         variant="outline"
@@ -1195,125 +925,63 @@ const SpecEditPage: React.FC = () => {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <Textarea
-                    value={generatingTs ? tsStreamText : (spec.tsMarkdown ?? '')}
-                    onChange={(e) => updateSpec({ tsMarkdown: e.target.value })}
-                    readOnly={generatingTs}
-                    placeholder="在此编辑 TS，需先完成 FS 正文，再点击「AI 生成 TS」…"
-                    className="min-h-[280px] font-mono text-sm"
-                  />
-                  {generatingTs && tsStreamText === '' && (
-                    <p className="text-xs text-muted-foreground flex items-center gap-2">
-                      <Loader2 className="size-3 animate-spin" /> 正在流式输出…
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-
-              <Collapsible open={legacyTsOpen} onOpenChange={setLegacyTsOpen}>
-                <Card>
-                  <CollapsibleTrigger asChild>
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between p-6 text-left hover:bg-accent/30 rounded-t-lg border-b"
+                <CardContent className="flex min-h-0 flex-1 flex-col space-y-3">
+                  <Tabs
+                    value={tsMdMode}
+                    onValueChange={(v) => setTsMdMode(v as 'edit' | 'preview')}
+                    className="flex min-h-0 flex-1 flex-col gap-0"
+                  >
+                    <TabsList className="grid w-full max-w-md shrink-0 grid-cols-2">
+                      <TabsTrigger value="edit" className="gap-2">
+                        <PencilLine className="size-4 shrink-0" />
+                        编辑
+                      </TabsTrigger>
+                      <TabsTrigger value="preview" className="gap-2">
+                        <BookOpen className="size-4 shrink-0" />
+                        预览
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent
+                      value="edit"
+                      className="mt-3 flex min-h-0 flex-1 flex-col space-y-2 data-[state=inactive]:hidden"
                     >
-                      <div>
-                        <CardTitle className="text-base">结构化条目（可选）</CardTitle>
-                        <CardDescription>架构说明、数据库 Schema、第三方集成，与导出 JSON 兼容</CardDescription>
-                      </div>
-                      <ChevronDown className={`size-5 shrink-0 transition-transform ${legacyTsOpen ? 'rotate-180' : ''}`} />
-                    </button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <CardContent className="space-y-4 pt-0">
-              <Card className="border-0 shadow-none">
-                <CardHeader>
-                  <CardTitle>系统架构</CardTitle>
-                  <CardDescription>描述整体系统架构设计方案</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Textarea
-                    value={spec.technicalSpec.architecture}
-                    onChange={(e) => updateTechnicalSpec({ architecture: e.target.value })}
-                    placeholder="描述系统架构，包括技术栈、部署方案、服务划分等..."
-                    className="min-h-[200px] font-mono"
-                  />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>数据库Schema</CardTitle>
-                  <CardDescription>定义数据表结构和关系（JSON格式）</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Textarea
-                    value={JSON.stringify(spec.technicalSpec.databaseSchema, null, 2)}
-                    onChange={(e) => {
-                      try {
-                        const schema = JSON.parse(e.target.value);
-                        updateTechnicalSpec({ databaseSchema: schema });
-                        setJsonError(null);
-                      } catch {
-                        // 允许编辑过程中的语法错误
-                        setJsonError('数据库Schema JSON格式错误');
-                      }
-                    }}
-                    placeholder='{"tables": [{"name": "users", "fields": [...]}]}'
-                    className="min-h-[300px] font-mono"
-                  />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>第三方集成</CardTitle>
-                  <CardDescription>列出需要集成的第三方服务</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    {spec.technicalSpec.thirdPartyIntegrations.map((integration, index) => (
-                      <div key={index} className="flex items-center gap-2">
-                        <Input
-                          value={integration}
-                          onChange={(e) => {
-                            const newIntegrations = [...spec.technicalSpec.thirdPartyIntegrations];
-                            newIntegrations[index] = e.target.value;
-                            updateTechnicalSpec({ thirdPartyIntegrations: newIntegrations });
-                          }}
-                          placeholder="第三方服务名称和用途"
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            const newIntegrations = spec.technicalSpec.thirdPartyIntegrations.filter((_, i) => i !== index);
-                            updateTechnicalSpec({ thirdPartyIntegrations: newIntegrations });
-                          }}
-                        >
-                          <X className="size-4" />
-                        </Button>
-                      </div>
-                    ))}
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        updateTechnicalSpec({
-                          thirdPartyIntegrations: [...spec.technicalSpec.thirdPartyIntegrations, '']
-                        });
-                      }}
+                      <p className="shrink-0 text-xs text-muted-foreground">
+                        源码编辑（Markdown）；需先完成 FS 正文再生成 TS；流式生成时内容实时出现在此框。
+                      </p>
+                      <Textarea
+                        value={generatingTs ? tsStreamText : (spec.tsMarkdown ?? '')}
+                        onChange={(e) => updateSpec({ tsMarkdown: e.target.value })}
+                        readOnly={generatingTs}
+                        placeholder="在此编辑 TS，需先完成 FS 正文，再点击「AI 生成 TS」…"
+                        className="min-h-0 flex-1 resize-none font-mono text-sm leading-relaxed md:min-h-[calc(100svh-22rem)]"
+                        spellCheck={false}
+                      />
+                      {generatingTs && tsStreamText === '' && (
+                        <p className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                          <Loader2 className="size-3 animate-spin" /> 正在流式输出…
+                        </p>
+                      )}
+                    </TabsContent>
+                    <TabsContent
+                      value="preview"
+                      className="mt-3 flex min-h-0 flex-1 flex-col space-y-2 data-[state=inactive]:hidden"
                     >
-                      <Plus className="mr-2 size-4" />
-                      添加集成
-                    </Button>
-                  </div>
+                      <p className="shrink-0 text-xs text-muted-foreground">渲染预览（只读）；修订请切回「编辑」</p>
+                      <ScrollArea className="min-h-[280px] w-full flex-1 rounded-md border border-border bg-card md:min-h-[calc(100svh-22rem)]">
+                        <div className="p-4 pr-5 text-sm text-foreground [&_.streamdown]:max-w-none">
+                          {(generatingTs ? tsStreamText : (spec.tsMarkdown ?? ''))?.trim() ? (
+                            <Streamdown className="prose prose-sm dark:prose-invert max-w-none text-foreground prose-headings:scroll-mt-4 prose-p:leading-relaxed prose-li:my-0.5 prose-table:text-sm">
+                              {generatingTs ? tsStreamText : (spec.tsMarkdown ?? '')}
+                            </Streamdown>
+                          ) : (
+                            <p className="py-8 text-center text-sm text-muted-foreground">暂无内容</p>
+                          )}
+                        </div>
+                      </ScrollArea>
+                    </TabsContent>
+                  </Tabs>
                 </CardContent>
               </Card>
-                    </CardContent>
-                  </CollapsibleContent>
-                </Card>
-              </Collapsible>
             </TabsContent>
 
             {/* Machine-Readable Preview */}
@@ -1367,132 +1035,6 @@ const SpecEditPage: React.FC = () => {
             </TabsContent>
           </Tabs>
         </section>
-
-        {/* API Edit Dialog */}
-        <Dialog open={showApiDialog} onOpenChange={setShowApiDialog}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>{(editingApi as unknown as { _index?: number })?._index !== undefined ? '编辑API' : '添加API'}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>请求方法</Label>
-                <select
-                  className="w-full p-2 border rounded-md"
-                  value={editingApi?.method || 'GET'}
-                  onChange={(e) => setEditingApi(prev => ({ ...prev, method: e.target.value }))}
-                >
-                  <option value="GET">GET</option>
-                  <option value="POST">POST</option>
-                  <option value="PUT">PUT</option>
-                  <option value="DELETE">DELETE</option>
-                  <option value="PATCH">PATCH</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label>接口路径</Label>
-                <Input
-                  value={editingApi?.path || ''}
-                  onChange={(e) => setEditingApi(prev => ({ ...prev, path: e.target.value }))}
-                  placeholder="/api/v1/users"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>描述</Label>
-                <Textarea
-                  value={editingApi?.description || ''}
-                  onChange={(e) => setEditingApi(prev => ({ ...prev, description: e.target.value }))}
-                  placeholder="接口功能描述..."
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowApiDialog(false)}>取消</Button>
-              <Button onClick={saveApi}>保存</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Component Edit Dialog */}
-        <Dialog open={showComponentDialog} onOpenChange={setShowComponentDialog}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>{(editingComponent as unknown as { _index?: number })?._index !== undefined ? '编辑组件' : '添加组件'}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>组件名称</Label>
-                <Input
-                  value={editingComponent?.name || ''}
-                  onChange={(e) => setEditingComponent(prev => ({ ...prev, name: e.target.value }))}
-                  placeholder="UserCard"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>组件类型</Label>
-                <Input
-                  value={editingComponent?.type || ''}
-                  onChange={(e) => setEditingComponent(prev => ({ ...prev, type: e.target.value }))}
-                  placeholder="Card / Form / Table"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>事件列表（逗号分隔）</Label>
-                <Input
-                  value={editingComponent?.events?.join(', ') || ''}
-                  onChange={(e) => setEditingComponent(prev => ({ 
-                    ...prev, 
-                    events: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
-                  }))}
-                  placeholder="onClick, onChange, onSubmit"
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowComponentDialog(false)}>取消</Button>
-              <Button onClick={saveComponent}>保存</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Interaction Edit Dialog */}
-        <Dialog open={showInteractionDialog} onOpenChange={setShowInteractionDialog}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>{(editingInteraction as unknown as { _index?: number })?._index !== undefined ? '编辑交互' : '添加交互'}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>触发条件</Label>
-                <Input
-                  value={editingInteraction?.trigger || ''}
-                  onChange={(e) => setEditingInteraction(prev => ({ ...prev, trigger: e.target.value }))}
-                  placeholder="点击提交按钮"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>执行动作</Label>
-                <Input
-                  value={editingInteraction?.action || ''}
-                  onChange={(e) => setEditingInteraction(prev => ({ ...prev, action: e.target.value }))}
-                  placeholder="调用API提交表单"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>条件（可选）</Label>
-                <Input
-                  value={editingInteraction?.condition || ''}
-                  onChange={(e) => setEditingInteraction(prev => ({ ...prev, condition: e.target.value }))}
-                  placeholder="表单验证通过"
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowInteractionDialog(false)}>取消</Button>
-              <Button onClick={saveInteraction}>保存</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
 
         {/* Conflict Detection Dialog */}
         <Dialog open={showConflictDialog} onOpenChange={setShowConflictDialog}>

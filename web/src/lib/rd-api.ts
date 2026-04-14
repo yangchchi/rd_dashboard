@@ -45,6 +45,7 @@ function splitBountyLocal(bounty: number): { pmCoins: number; tmCoins: number } 
 }
 
 function mapProduct(p: Record<string, unknown>): IProduct {
+  const st = (p.status as string) || 'active';
   return {
     id: p.id as string,
     name: (p.name as string) || '',
@@ -53,8 +54,11 @@ function mapProduct(p: Record<string, unknown>): IProduct {
     sandboxUrl: (p.sandboxUrl as string) || (p.sandbox_url as string) || undefined,
     productionUrl: (p.productionUrl as string) || (p.production_url as string) || undefined,
     gitUrl: (p.gitUrl as string) || (p.git_url as string) || undefined,
+    status: st === 'archived' ? 'archived' : 'active',
     createdAt: (p.createdAt as string) || (p.created_at as string),
     updatedAt: (p.updatedAt as string) || (p.updated_at as string),
+    createdBy: (p.createdBy as string) || (p.created_by as string) || undefined,
+    updatedBy: (p.updatedBy as string) || (p.updated_by as string) || undefined,
   };
 }
 
@@ -105,10 +109,12 @@ function mapRequirement(r: Record<string, unknown>): IRequirement {
     submitter: r.submitter as string,
     pm: (r.pm as string) || undefined,
     tm: (r.tm as string) || undefined,
-    createdAt: r.createdAt as string,
-    updatedAt: r.updatedAt as string,
+    createdAt: (r.createdAt as string) || (r.created_at as string),
+    updatedAt: (r.updatedAt as string) || (r.updated_at as string),
     submitterName: (r.submitterName as string) || (r.submitter_name as string) || undefined,
     aiCategory: (r.aiCategory as string) || (r.ai_category as string) || undefined,
+    createdBy: (r.createdBy as string) || (r.created_by as string) || undefined,
+    updatedBy: (r.updatedBy as string) || (r.updated_by as string) || undefined,
   };
 }
 
@@ -128,6 +134,8 @@ function mapPrd(p: Record<string, unknown>): IPrd {
     createdAt: (p.createdAt as string) || (p.created_at as string) || undefined,
     updatedAt: (p.updatedAt as string) || (p.updated_at as string),
     reviews: (p.reviews as IPrd['reviews']) || [],
+    createdBy: (p.createdBy as string) || (p.created_by as string) || undefined,
+    updatedBy: (p.updatedBy as string) || (p.updated_by as string) || undefined,
   };
 }
 
@@ -151,6 +159,8 @@ function mapSpec(s: Record<string, unknown>): ISpecification {
     createdAt: (s.createdAt as string) || (s.created_at as string),
     updatedAt: (s.updatedAt as string) || (s.updated_at as string),
     reviews: (s.reviews as ISpecification['reviews']) || [],
+    createdBy: (s.createdBy as string) || (s.created_by as string) || undefined,
+    updatedBy: (s.updatedBy as string) || (s.updated_by as string) || undefined,
   };
 }
 
@@ -213,12 +223,17 @@ export const rdApi = {
     await json(`/prds/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
-  async submitPrdForReview(prdId: string, reviewer?: string, comment?: string): Promise<IPrd | null> {
+  async submitPrdForReview(
+    prdId: string,
+    reviewer?: string,
+    comment?: string,
+    actorUserId?: string
+  ): Promise<IPrd | null> {
     const raw = await json<Record<string, unknown> | null>(
       `/prds/${encodeURIComponent(prdId)}/submit-review`,
       {
         method: 'POST',
-        body: JSON.stringify({ reviewer, comment }),
+        body: JSON.stringify({ reviewer, comment, actorUserId }),
       }
     );
     return raw ? mapPrd(raw) : null;
@@ -228,13 +243,14 @@ export const rdApi = {
     prdId: string,
     status: 'approved' | 'rejected',
     reviewer?: string,
-    comment?: string
+    comment?: string,
+    actorUserId?: string
   ): Promise<IPrd | null> {
     const raw = await json<Record<string, unknown> | null>(
       `/prds/${encodeURIComponent(prdId)}/review`,
       {
         method: 'POST',
-        body: JSON.stringify({ status, reviewer, comment }),
+        body: JSON.stringify({ status, reviewer, comment, actorUserId }),
       }
     );
     return raw ? mapPrd(raw) : null;
@@ -262,34 +278,49 @@ export const rdApi = {
     await json(`/specs/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
-  async submitSpecForReview(specId: string, reviewer?: string, comment?: string): Promise<ISpecification | null> {
+  async submitSpecForReview(
+    specId: string,
+    reviewer?: string,
+    comment?: string,
+    actorUserId?: string
+  ): Promise<ISpecification | null> {
     const raw = await json<Record<string, unknown> | null>(
       `/specs/${encodeURIComponent(specId)}/submit-review`,
       {
         method: 'POST',
-        body: JSON.stringify({ reviewer, comment }),
+        body: JSON.stringify({ reviewer, comment, actorUserId }),
       }
     );
     return raw ? mapSpec(raw) : null;
   },
 
-  async approveSpec(specId: string, reviewer?: string, comment?: string): Promise<ISpecification | null> {
+  async approveSpec(
+    specId: string,
+    reviewer?: string,
+    comment?: string,
+    actorUserId?: string
+  ): Promise<ISpecification | null> {
     const raw = await json<Record<string, unknown> | null>(
       `/specs/${encodeURIComponent(specId)}/approve`,
       {
         method: 'POST',
-        body: JSON.stringify({ reviewer, comment }),
+        body: JSON.stringify({ reviewer, comment, actorUserId }),
       }
     );
     return raw ? mapSpec(raw) : null;
   },
 
-  async rejectSpec(specId: string, reviewer?: string, comment?: string): Promise<ISpecification | null> {
+  async rejectSpec(
+    specId: string,
+    reviewer?: string,
+    comment?: string,
+    actorUserId?: string
+  ): Promise<ISpecification | null> {
     const raw = await json<Record<string, unknown> | null>(
       `/specs/${encodeURIComponent(specId)}/reject`,
       {
         method: 'POST',
-        body: JSON.stringify({ reviewer, comment }),
+        body: JSON.stringify({ reviewer, comment, actorUserId }),
       }
     );
     return raw ? mapSpec(raw) : null;
@@ -308,15 +339,23 @@ export const rdApi = {
 
   async listAcceptanceRecords(): Promise<IAcceptanceRecord[]> {
     const rows = await json<Record<string, unknown>[]>('/acceptance');
-    return rows.map((r) => ({
-      id: r.id as string,
-      requirementId: (r.requirementId as string) || (r.requirement_id as string),
-      reviewer: r.reviewer as string,
-      scores: r.scores as IAcceptanceRecord['scores'],
-      feedback: (r.feedback as string) || '',
-      result: r.result as IAcceptanceRecord['result'],
-      createdAt: (r.createdAt as string) || (r.created_at as string),
-    }));
+    return rows.map((r) => {
+      const result = r.result as IAcceptanceRecord['result'];
+      const status = ((r.status as string) || result) as IAcceptanceRecord['result'];
+      return {
+        id: r.id as string,
+        requirementId: (r.requirementId as string) || (r.requirement_id as string),
+        reviewer: r.reviewer as string,
+        scores: r.scores as IAcceptanceRecord['scores'],
+        feedback: (r.feedback as string) || '',
+        result,
+        status,
+        createdAt: (r.createdAt as string) || (r.created_at as string),
+        updatedAt: (r.updatedAt as string) || (r.updated_at as string) || undefined,
+        createdBy: (r.createdBy as string) || (r.created_by as string) || undefined,
+        updatedBy: (r.updatedBy as string) || (r.updated_by as string) || undefined,
+      };
+    });
   },
 
   async addAcceptanceRecord(record: IAcceptanceRecord): Promise<void> {
@@ -397,5 +436,7 @@ function mapPipelineTask(row: Record<string, unknown>): IPipelineTask {
     commitStore,
     createdAt: (row.createdAt as string) || (row.created_at as string),
     updatedAt: (row.updatedAt as string) || (row.updated_at as string),
+    createdBy: (row.createdBy as string) || (row.created_by as string) || undefined,
+    updatedBy: (row.updatedBy as string) || (row.updated_by as string) || undefined,
   };
 }

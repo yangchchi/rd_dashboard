@@ -40,15 +40,24 @@ import {
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import { Streamdown } from '@/components/ui/streamdown';
 import { logger } from '@/lib/logger';
+import { rdAuditCreate, rdAuditUpdate } from '@/lib/rd-actor';
 import {
   useDeletePipelineTask,
   usePipelineTasksList,
   usePrdsList,
+  useProductsList,
   useRequirementsList,
   useSpecsList,
   useUpsertPipelineTask,
 } from '@/lib/rd-hooks';
-import type { IGitCommitRecord, IPipelineTask } from '@/lib/rd-types';
+import { gitBlobViewerUrl } from '@/lib/git-web-url';
+import type {
+  IGitCommitRecord,
+  IPipelinePublishedDocument,
+  IPipelineTask,
+  IProduct,
+  IRequirement,
+} from '@/lib/rd-types';
 import { toast } from 'sonner';
 
 interface ICodeReviewResult {
@@ -63,11 +72,31 @@ interface IRelationOption {
 interface ICreatePipelineForm {
   name: string;
   gitUrl: string;
+  sandboxUrl: string;
   branch: string;
   triggerMode: 'manual' | 'push' | 'schedule';
   priority: 'P0' | 'P1' | 'P2' | 'P3';
   remarks: string;
   requirementId: string;
+}
+
+/** 需求「所属产品」存的是名称；亦兼容直接填产品 id */
+function publishedDocsFromPublishResult(result: unknown): IPipelinePublishedDocument[] {
+  const r = result as { documents?: IPipelinePublishedDocument[] };
+  if (Array.isArray(r.documents) && r.documents.length > 0) return r.documents;
+  return [];
+}
+
+function findProductForRequirement(
+  requirement: IRequirement | undefined,
+  products: IProduct[]
+): IProduct | undefined {
+  const key = requirement?.product?.trim();
+  if (!key) return undefined;
+  const byId = products.find((p) => p.id === key);
+  if (byId) return byId;
+  const lower = key.toLowerCase();
+  return products.find((p) => p.name.trim().toLowerCase() === lower);
 }
 
 const statusConfig: Record<string, { label: string; color: string; icon: React.ComponentType<{className?: string}> }> = {
@@ -90,6 +119,7 @@ const AIPipelinePage: React.FC = () => {
   const router = useRouter();
   const currentProfile = useCurrentUserProfile();
   const { data: requirements = [] } = useRequirementsList();
+  const { data: products = [] } = useProductsList();
   const { data: prds = [] } = usePrdsList();
   const { data: specs = [] } = useSpecsList();
   const { data: tasks = [], isLoading: tasksLoading } = usePipelineTasksList();
@@ -106,6 +136,7 @@ const AIPipelinePage: React.FC = () => {
   const [createForm, setCreateForm] = useState<ICreatePipelineForm>({
     name: '',
     gitUrl: '',
+    sandboxUrl: '',
     branch: 'main',
     triggerMode: 'manual',
     priority: 'P1',
@@ -116,6 +147,7 @@ const AIPipelinePage: React.FC = () => {
 
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
   const selectedRequirement = requirements.find((r) => r.id === createForm.requirementId);
+  const productForSelectedRequirement = findProductForRequirement(selectedRequirement, products);
   const defaultPipelineName = selectedRequirement ? `${selectedRequirement.title}-生产流水线` : '';
   const selectedTaskCommitStore = selectedTask?.commitStore;
 
@@ -131,6 +163,7 @@ const AIPipelinePage: React.FC = () => {
     setCreateForm({
       name: '',
       gitUrl: '',
+      sandboxUrl: '',
       branch: 'main',
       triggerMode: 'manual',
       priority: 'P1',
@@ -172,6 +205,9 @@ const AIPipelinePage: React.FC = () => {
     const nextDefaultName = nextRequirement ? `${nextRequirement.title}-生产流水线` : '';
     const currentRequirement = requirements.find((r) => r.id === createForm.requirementId);
     const currentDefaultName = currentRequirement ? `${currentRequirement.title}-生产流水线` : '';
+    const nextProduct = findProductForRequirement(nextRequirement, products);
+    const nextGit = nextProduct?.gitUrl?.trim() ?? '';
+    const nextSandbox = nextProduct?.sandboxUrl?.trim() ?? '';
 
     setCreateForm((prev) => {
       const shouldApplyDefaultName = !prev.name.trim() || prev.name === currentDefaultName;
@@ -179,6 +215,8 @@ const AIPipelinePage: React.FC = () => {
         ...prev,
         requirementId: nextRequirementId,
         name: shouldApplyDefaultName ? nextDefaultName : prev.name,
+        gitUrl: nextGit,
+        sandboxUrl: nextSandbox,
       };
     });
   };
@@ -211,6 +249,23 @@ const AIPipelinePage: React.FC = () => {
     setSpecOptions(specList);
   }, [prds, specs, createForm.requirementId]);
 
+  /** 产品列表晚于需求加载时，在 Git/沙箱仍为空时补全 */
+  useEffect(() => {
+    if (!createForm.requirementId || products.length === 0) return;
+    const req = requirements.find((r) => r.id === createForm.requirementId);
+    const p = findProductForRequirement(req, products);
+    if (!p) return;
+    const g = p.gitUrl?.trim() ?? '';
+    const s = p.sandboxUrl?.trim() ?? '';
+    if (!g && !s) return;
+    setCreateForm((prev) => {
+      const nextGit = prev.gitUrl.trim() ? prev.gitUrl : g;
+      const nextSandbox = prev.sandboxUrl.trim() ? prev.sandboxUrl : s;
+      if (nextGit === prev.gitUrl && nextSandbox === prev.sandboxUrl) return prev;
+      return { ...prev, gitUrl: nextGit, sandboxUrl: nextSandbox };
+    });
+  }, [createForm.requirementId, products, requirements]);
+
   const handleAction = async (action: 'pause' | 'retry' | 'rollback', taskId: string) => {
     const task = tasks.find((t) => t.id === taskId);
     if (!task) return;
@@ -227,7 +282,7 @@ const AIPipelinePage: React.FC = () => {
           next = { ...task, status: 'failed', stage: '已回滚' };
           break;
       }
-      await upsertPipelineTask.mutateAsync(next);
+      await upsertPipelineTask.mutateAsync({ ...next, ...rdAuditUpdate() });
       toast.success('操作已保存');
     } catch (error) {
       logger.error('更新流水线任务失败', error);
@@ -245,7 +300,11 @@ const AIPipelinePage: React.FC = () => {
     const nextName = window.prompt('请输入新的流水线名称', target.requirementTitle);
     if (!nextName || !nextName.trim()) return;
     try {
-      await upsertPipelineTask.mutateAsync({ ...target, requirementTitle: nextName.trim() });
+      await upsertPipelineTask.mutateAsync({
+        ...target,
+        requirementTitle: nextName.trim(),
+        ...rdAuditUpdate(),
+      });
       toast.success('已更新');
     } catch (error) {
       logger.error('更新流水线任务失败', error);
@@ -414,14 +473,17 @@ const AIPipelinePage: React.FC = () => {
         pipelineMeta: {
           name: createForm.name.trim(),
           gitUrl: createForm.gitUrl.trim(),
+          sandboxUrl: createForm.sandboxUrl.trim() || undefined,
           branch: createForm.branch.trim(),
           triggerMode: createForm.triggerMode,
           priority: createForm.priority,
           remarks: createForm.remarks.trim(),
           prdIds: selectedPrds.map((p) => p.id),
           specIds: selectedSpecs.map((s) => s.id),
+          publishedDocuments: publishedDocsFromPublishResult(result),
         },
         commitStore: commitStorePayload,
+        ...rdAuditCreate(),
       };
 
       await upsertPipelineTask.mutateAsync(newTask);
@@ -472,7 +534,7 @@ const AIPipelinePage: React.FC = () => {
             <div>
               <h1 className="flex items-center gap-2 rd-page-title">
                 <Cpu className="size-6 text-purple-500" />
-                AI开发监控
+                流水线
               </h1>
               <p className="rd-page-desc mt-1">
                 实时监控AI代码生成、测试与部署全流程
@@ -580,13 +642,18 @@ const AIPipelinePage: React.FC = () => {
                                 disabled: task.status === 'completed',
                                 variant: 'destructive',
                               },
-                              ...(task.status === 'completed'
+                              ...(task.status === 'completed' && task.pipelineMeta?.sandboxUrl?.trim()
                                 ? [
                                     {
                                       key: 'sandbox',
                                       label: '访问沙箱',
                                       icon: <ExternalLink className="size-3" />,
-                                      onClick: () => window.open('#', '_blank'),
+                                      onClick: () =>
+                                        window.open(
+                                          task.pipelineMeta!.sandboxUrl!.trim(),
+                                          '_blank',
+                                          'noopener,noreferrer'
+                                        ),
                                     },
                                   ]
                                 : []),
@@ -710,6 +777,12 @@ const AIPipelinePage: React.FC = () => {
                             <div className="text-xs text-muted-foreground mb-1">Git地址</div>
                             <div className="font-mono text-xs break-all">{selectedTask.pipelineMeta.gitUrl}</div>
                           </div>
+                          {selectedTask.pipelineMeta.sandboxUrl?.trim() && (
+                            <div>
+                              <div className="text-xs text-muted-foreground mb-1">沙箱环境</div>
+                              <div className="font-mono text-xs break-all">{selectedTask.pipelineMeta.sandboxUrl}</div>
+                            </div>
+                          )}
                           <div>
                             <div className="text-xs text-muted-foreground mb-1">目标分支</div>
                             <div className="font-mono text-sm">{selectedTask.pipelineMeta.branch}</div>
@@ -722,6 +795,44 @@ const AIPipelinePage: React.FC = () => {
                             <div className="text-xs text-muted-foreground mb-1">关联规格</div>
                             <div className="text-sm">{(selectedTask.pipelineMeta.specIds ?? []).join('、')}</div>
                           </div>
+                          {selectedTask.pipelineMeta.publishedDocuments &&
+                            selectedTask.pipelineMeta.publishedDocuments.length > 0 && (
+                              <div className="pt-2">
+                                <div className="text-xs text-muted-foreground mb-2">Git 文档（PRD / FS / TS 分文件）</div>
+                                <ul className="space-y-1.5 text-sm">
+                                  {selectedTask.pipelineMeta.publishedDocuments.map((doc) => {
+                                    const href = gitBlobViewerUrl(
+                                      selectedTask.pipelineMeta!.gitUrl!,
+                                      selectedTask.pipelineMeta!.branch!,
+                                      doc.path
+                                    );
+                                    const kindLabel =
+                                      doc.kind === 'prd' ? 'PRD' : doc.kind === 'fs' ? 'FS' : 'TS';
+                                    return (
+                                      <li key={doc.path} className="break-all">
+                                        {href ? (
+                                          <a
+                                            href={href}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="font-medium text-primary underline-offset-4 hover:underline"
+                                          >
+                                            <ExternalLink className="mr-1 inline size-3.5 shrink-0 align-text-bottom" />
+                                            [{kindLabel}] {doc.title}
+                                          </a>
+                                        ) : (
+                                          <span className="text-muted-foreground">
+                                            <span className="font-medium text-foreground">[{kindLabel}]</span>{' '}
+                                            <span className="font-mono text-xs">{doc.path}</span>
+                                            <span className="ml-1 text-xs">（当前仓库托管方无法自动生成浏览链接）</span>
+                                          </span>
+                                        )}
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              </div>
+                            )}
                         </>
                       )}
                       <div>
@@ -741,8 +852,15 @@ const AIPipelinePage: React.FC = () => {
                           查看需求详情
                         </Button>
                       </div>
-                      {selectedTask.status === 'completed' && (
-                        <Button className="w-full">
+                      {selectedTask.status === 'completed' && selectedTask.pipelineMeta?.sandboxUrl?.trim() && (
+                        <Button
+                          type="button"
+                          className="w-full"
+                          onClick={() => {
+                            const u = selectedTask.pipelineMeta!.sandboxUrl!.trim();
+                            window.open(u, '_blank', 'noopener,noreferrer');
+                          }}
+                        >
                           <ExternalLink className="size-4 mr-2" />
                           访问沙箱环境
                         </Button>
@@ -1001,6 +1119,20 @@ const AIPipelinePage: React.FC = () => {
                 placeholder="https://github.com/org/repo.git 或 git@github.com:org/repo.git"
                 value={createForm.gitUrl}
                 onChange={(e) => setCreateForm((prev) => ({ ...prev, gitUrl: e.target.value }))}
+              />
+              {productForSelectedRequirement && (
+                <p className="text-xs text-muted-foreground">
+                  已根据需求所属产品「{productForSelectedRequirement.name}」从产品目录带入；可在「产品管理」中维护仓库与沙箱。
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">沙箱环境地址</label>
+              <Input
+                placeholder="https://sandbox.example.com"
+                value={createForm.sandboxUrl}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, sandboxUrl: e.target.value }))}
               />
             </div>
 

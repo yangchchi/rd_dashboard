@@ -65,6 +65,8 @@ export interface IRequirementRow {
   aiCategory?: string | null;
   createdAt: string;
   updatedAt: string;
+  createdBy?: string | null;
+  updatedBy?: string | null;
 }
 
 export function splitBountyToRoleCoins(bounty: number): { pmCoins: number; tmCoins: number } {
@@ -104,6 +106,8 @@ export interface IPrdRow {
   createdAt: string;
   updatedAt: string;
   reviews?: IReviewRecord[];
+  createdBy?: string | null;
+  updatedBy?: string | null;
 }
 
 export interface IApiDef {
@@ -147,6 +151,8 @@ export interface ISpecRow {
   createdAt: string;
   updatedAt: string;
   reviews?: IReviewRecord[];
+  createdBy?: string | null;
+  updatedBy?: string | null;
 }
 
 export interface IAcceptanceRecordRow {
@@ -156,7 +162,11 @@ export interface IAcceptanceRecordRow {
   scores: { functionality: number; valueMatch: number; experience: number };
   feedback: string;
   result: 'approved' | 'rejected';
+  status: 'approved' | 'rejected';
   createdAt: string;
+  updatedAt: string;
+  createdBy?: string | null;
+  updatedBy?: string | null;
 }
 
 export type PipelineTaskStatus =
@@ -196,15 +206,24 @@ export interface IPipelineQualityMetrics {
   testPassRate: number;
 }
 
+export interface IPipelinePublishedDocument {
+  path: string;
+  kind: 'prd' | 'fs' | 'ts';
+  id: string;
+  title: string;
+}
+
 export interface IPipelineMeta {
   name?: string;
   gitUrl?: string;
+  sandboxUrl?: string;
   branch?: string;
   triggerMode?: 'manual' | 'push' | 'schedule';
   priority?: 'P0' | 'P1' | 'P2' | 'P3';
   remarks?: string;
   prdIds?: string[];
   specIds?: string[];
+  publishedDocuments?: IPipelinePublishedDocument[];
 }
 
 export interface IGitCommitRecord {
@@ -238,6 +257,8 @@ export interface IPipelineTaskRow {
   commitStore?: IPipelineCommitStore | null;
   createdAt: string;
   updatedAt: string;
+  createdBy?: string | null;
+  updatedBy?: string | null;
 }
 
 /** 产品目录（与需求「所属产品」可同名关联，此处存结构化元数据） */
@@ -249,8 +270,11 @@ export interface IProductRow {
   sandboxUrl?: string | null;
   productionUrl?: string | null;
   gitUrl?: string | null;
+  status: 'active' | 'archived';
   createdAt: string;
   updatedAt: string;
+  createdBy?: string | null;
+  updatedBy?: string | null;
 }
 
 @Injectable()
@@ -278,6 +302,7 @@ export class RdService implements OnModuleInit {
 
   async onModuleInit() {
     await this.ensureTables();
+    await this.ensureCommonAuditColumns();
     await this.ensureProductSchemaUpgrade();
     await this.ensureRequirementExtraColumns();
     await this.ensureDatapaasRoleGrants();
@@ -439,6 +464,99 @@ export class RdService implements OnModuleInit {
     `);
   }
 
+  /** 已有库升级：各表补充 created_by / updated_by 等通用审计字段 */
+  private async ensureCommonAuditColumns(): Promise<void> {
+    await this.db.execute(sql`
+      ALTER TABLE rd_requirements ADD COLUMN IF NOT EXISTS created_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_requirements ADD COLUMN IF NOT EXISTS updated_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_prds ADD COLUMN IF NOT EXISTS created_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_prds ADD COLUMN IF NOT EXISTS updated_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_specs ADD COLUMN IF NOT EXISTS created_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_specs ADD COLUMN IF NOT EXISTS updated_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_pipeline_tasks ADD COLUMN IF NOT EXISTS created_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_pipeline_tasks ADD COLUMN IF NOT EXISTS updated_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_products ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_products ADD COLUMN IF NOT EXISTS created_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_products ADD COLUMN IF NOT EXISTS updated_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_acceptance_records ADD COLUMN IF NOT EXISTS created_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_acceptance_records ADD COLUMN IF NOT EXISTS updated_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_acceptance_records ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_acceptance_records ADD COLUMN IF NOT EXISTS status TEXT;
+    `);
+
+    await this.db.execute(sql`
+      UPDATE rd_acceptance_records SET updated_at = created_at WHERE updated_at IS NULL;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_acceptance_records SET status = result WHERE status IS NULL OR status = '';
+    `);
+
+    await this.db.execute(sql`
+      UPDATE rd_requirements SET created_by = submitter WHERE created_by IS NULL AND submitter IS NOT NULL;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_requirements
+      SET updated_by = COALESCE(pm, tm, submitter)
+      WHERE updated_by IS NULL;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_prds SET created_by = author WHERE created_by IS NULL AND author IS NOT NULL;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_prds SET updated_by = author WHERE updated_by IS NULL AND author IS NOT NULL;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_specs SET updated_by = created_by WHERE updated_by IS NULL AND created_by IS NOT NULL;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_pipeline_tasks SET updated_by = created_by WHERE updated_by IS NULL AND created_by IS NOT NULL;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_products
+      SET updated_by = COALESCE(owner, created_by)
+      WHERE updated_by IS NULL;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_acceptance_records SET created_by = reviewer WHERE created_by IS NULL AND reviewer IS NOT NULL;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_acceptance_records
+      SET updated_by = COALESCE(reviewer, created_by)
+      WHERE updated_by IS NULL;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_acceptance_records SET updated_at = created_at WHERE updated_at IS NULL;
+    `);
+  }
+
   /** 已有库升级：补充需求表字段 */
   private async ensureRequirementExtraColumns(): Promise<void> {
     await this.db.execute(sql`
@@ -554,6 +672,8 @@ export class RdService implements OnModuleInit {
       aiCategory: (r.ai_category as string) || (r.aiCategory as string) || undefined,
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
+      createdBy: (r.created_by as string) || (r.createdBy as string) || undefined,
+      updatedBy: (r.updated_by as string) || (r.updatedBy as string) || undefined,
     };
   }
 
@@ -574,6 +694,8 @@ export class RdService implements OnModuleInit {
       reviews: (r.reviews as IReviewRecord[]) || [],
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
+      createdBy: (r.created_by as string) || (r.createdBy as string) || undefined,
+      updatedBy: (r.updated_by as string) || (r.updatedBy as string) || undefined,
     };
   }
 
@@ -603,6 +725,8 @@ export class RdService implements OnModuleInit {
       commitStore: commitStore ?? undefined,
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
+      createdBy: (r.created_by as string) || (r.createdBy as string) || undefined,
+      updatedBy: (r.updated_by as string) || (r.updatedBy as string) || undefined,
     };
   }
 
@@ -630,11 +754,15 @@ export class RdService implements OnModuleInit {
       reviews: (r.reviews as IReviewRecord[]) || [],
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
+      createdBy: (r.created_by as string) || (r.createdBy as string) || undefined,
+      updatedBy: (r.updated_by as string) || (r.updatedBy as string) || undefined,
     };
   }
 
   private rowToProduct(r: Record<string, unknown>): IProductRow {
     const t = this.tsFromRow(r);
+    const st = (r.status as string) || 'active';
+    const status: IProductRow['status'] = st === 'archived' ? 'archived' : 'active';
     return {
       id: r.id as string,
       name: (r.name as string) || '',
@@ -643,8 +771,11 @@ export class RdService implements OnModuleInit {
       sandboxUrl: (r.sandbox_url as string) || (r.sandboxUrl as string) || null,
       productionUrl: (r.production_url as string) || (r.productionUrl as string) || null,
       gitUrl: (r.git_url as string) || (r.gitUrl as string) || null,
+      status,
       createdAt: t.createdAt,
       updatedAt: t.updatedAt,
+      createdBy: (r.created_by as string) || (r.createdBy as string) || undefined,
+      updatedBy: (r.updated_by as string) || (r.updatedBy as string) || undefined,
     };
   }
 
@@ -706,6 +837,8 @@ export class RdService implements OnModuleInit {
             body.taskAcceptances !== undefined ? body.taskAcceptances : existing.taskAcceptances,
           createdAt: existing.createdAt,
           updatedAt: now,
+          createdBy: existing.createdBy ?? body.createdBy ?? null,
+          updatedBy: body.updatedBy !== undefined ? body.updatedBy : existing.updatedBy ?? null,
         }
       : {
           id: body.id,
@@ -729,6 +862,8 @@ export class RdService implements OnModuleInit {
           aiCategory: body.aiCategory,
           createdAt: body.createdAt || now,
           updatedAt: body.updatedAt || now,
+          createdBy: body.createdBy ?? body.updatedBy ?? body.submitter ?? null,
+          updatedBy: body.updatedBy ?? body.createdBy ?? body.submitter ?? null,
         };
 
     await this.db.execute(sql`
@@ -736,7 +871,8 @@ export class RdService implements OnModuleInit {
         id, title, description, sketch_url, product, bounty_points, pm_coins, tm_coins,
         pm_candidate_user_id, tm_candidate_user_id, task_acceptances,
         priority, expected_date, status,
-        submitter, pm, tm, submitter_name, ai_category, created_at, updated_at
+        submitter, pm, tm, submitter_name, ai_category,
+        created_by, updated_by, created_at, updated_at
       ) VALUES (
         ${merged.id},
         ${merged.title},
@@ -757,6 +893,8 @@ export class RdService implements OnModuleInit {
         ${merged.tm ?? null},
         ${merged.submitterName ?? null},
         ${merged.aiCategory ?? null},
+        ${merged.createdBy ?? null},
+        ${merged.updatedBy ?? null},
         ${merged.createdAt}::timestamptz,
         ${merged.updatedAt}::timestamptz
       )
@@ -779,6 +917,7 @@ export class RdService implements OnModuleInit {
         tm = EXCLUDED.tm,
         submitter_name = EXCLUDED.submitter_name,
         ai_category = EXCLUDED.ai_category,
+        updated_by = EXCLUDED.updated_by,
         updated_at = EXCLUDED.updated_at;
     `);
     return (await this.getRequirement(merged.id))!;
@@ -802,15 +941,12 @@ export class RdService implements OnModuleInit {
     if (!userId) {
       throw new BadRequestException('缺少用户标识');
     }
-    if (req.submitter === userId) {
-      throw new BadRequestException('提交人不能领取自己的任务');
-    }
     if (body.role === 'pm') {
-      if (req.pm) {
+      if (req.taskAcceptances.some((t) => t.role === 'pm')) {
         throw new BadRequestException('产品经理任务已被领取');
       }
-      if (req.pmCandidateUserId && req.pmCandidateUserId !== userId) {
-        throw new BadRequestException('仅限提交人指定的产品经理领取');
+      if (req.pm) {
+        throw new BadRequestException('产品经理任务已被领取');
       }
       const coins = req.pmCoins;
       const record: ITaskAcceptanceRecord = {
@@ -825,13 +961,14 @@ export class RdService implements OnModuleInit {
         id: requirementId,
         pm: userId,
         taskAcceptances: [...req.taskAcceptances, record],
+        updatedBy: userId,
       });
+    }
+    if (req.taskAcceptances.some((t) => t.role === 'tm')) {
+      throw new BadRequestException('技术经理任务已被领取');
     }
     if (req.tm) {
       throw new BadRequestException('技术经理任务已被领取');
-    }
-    if (req.tmCandidateUserId && req.tmCandidateUserId !== userId) {
-      throw new BadRequestException('仅限提交人指定的技术经理领取');
     }
     const coins = req.tmCoins;
     const record: ITaskAcceptanceRecord = {
@@ -846,6 +983,7 @@ export class RdService implements OnModuleInit {
       id: requirementId,
       tm: userId,
       taskAcceptances: [...req.taskAcceptances, record],
+      updatedBy: userId,
     });
   }
 
@@ -876,6 +1014,8 @@ export class RdService implements OnModuleInit {
           reviews: body.reviews ?? existing.reviews,
           createdAt: existing.createdAt,
           updatedAt: now,
+          createdBy: existing.createdBy ?? body.createdBy ?? null,
+          updatedBy: body.updatedBy !== undefined ? body.updatedBy : existing.updatedBy ?? null,
         }
       : {
           id: body.id,
@@ -892,11 +1032,14 @@ export class RdService implements OnModuleInit {
           reviews: body.reviews || [],
           createdAt: body.createdAt || now,
           updatedAt: body.updatedAt || now,
+          createdBy: body.createdBy ?? body.updatedBy ?? body.author ?? null,
+          updatedBy: body.updatedBy ?? body.createdBy ?? body.author ?? null,
         };
     await this.db.execute(sql`
       INSERT INTO rd_prds (
         id, requirement_id, title, background, objectives, flowchart,
-        feature_list, non_functional, status, version, author, reviews, created_at, updated_at
+        feature_list, non_functional, status, version, author, reviews,
+        created_by, updated_by, created_at, updated_at
       ) VALUES (
         ${merged.id},
         ${merged.requirementId},
@@ -910,6 +1053,8 @@ export class RdService implements OnModuleInit {
         ${merged.version},
         ${merged.author ?? null},
         ${JSON.stringify(merged.reviews || [])}::jsonb,
+        ${merged.createdBy ?? null},
+        ${merged.updatedBy ?? null},
         ${merged.createdAt}::timestamptz,
         ${merged.updatedAt}::timestamptz
       )
@@ -925,6 +1070,7 @@ export class RdService implements OnModuleInit {
         version = EXCLUDED.version,
         author = EXCLUDED.author,
         reviews = EXCLUDED.reviews,
+        updated_by = EXCLUDED.updated_by,
         updated_at = EXCLUDED.updated_at;
     `);
     return (await this.getPrd(merged.id))!;
@@ -934,7 +1080,12 @@ export class RdService implements OnModuleInit {
     await this.db.execute(sql`DELETE FROM rd_prds WHERE id = ${id};`);
   }
 
-  async submitPrdForReview(prdId: string, reviewer = '系统', comment?: string): Promise<IPrdRow | null> {
+  async submitPrdForReview(
+    prdId: string,
+    reviewer = '系统',
+    comment?: string,
+    actorUserId?: string
+  ): Promise<IPrdRow | null> {
     const prd = await this.getPrd(prdId);
     if (!prd) return null;
     const record: IReviewRecord = {
@@ -944,10 +1095,12 @@ export class RdService implements OnModuleInit {
       comment,
       createdAt: new Date().toISOString(),
     };
+    const actor = actorUserId?.trim() || reviewer;
     return this.upsertPrd({
       ...prd,
       status: 'reviewing',
       reviews: [...(prd.reviews || []), record],
+      updatedBy: actor,
     });
   }
 
@@ -955,7 +1108,8 @@ export class RdService implements OnModuleInit {
     prdId: string,
     status: 'approved' | 'rejected',
     reviewer = '审核人',
-    comment?: string
+    comment?: string,
+    actorUserId?: string
   ): Promise<IPrdRow | null> {
     const prd = await this.getPrd(prdId);
     if (!prd) return null;
@@ -966,15 +1120,18 @@ export class RdService implements OnModuleInit {
       comment,
       createdAt: new Date().toISOString(),
     };
+    const actor = actorUserId?.trim() || reviewer;
     const next = await this.upsertPrd({
       ...prd,
       status,
       reviews: [...(prd.reviews || []), record],
+      updatedBy: actor,
     });
     if (status === 'approved') {
       await this.upsertRequirement({
         id: prd.requirementId,
         status: 'spec_defining',
+        updatedBy: actor,
       });
     }
     return next;
@@ -1004,6 +1161,8 @@ export class RdService implements OnModuleInit {
           reviews: body.reviews ?? existing.reviews,
           createdAt: existing.createdAt,
           updatedAt: now,
+          createdBy: existing.createdBy ?? body.createdBy ?? null,
+          updatedBy: body.updatedBy !== undefined ? body.updatedBy : existing.updatedBy ?? null,
         }
       : {
           id: body.id,
@@ -1021,11 +1180,14 @@ export class RdService implements OnModuleInit {
           reviews: body.reviews || [],
           createdAt: body.createdAt || now,
           updatedAt: body.updatedAt || now,
+          createdBy: body.createdBy ?? body.updatedBy ?? null,
+          updatedBy: body.updatedBy ?? body.createdBy ?? null,
         };
     await this.db.execute(sql`
       INSERT INTO rd_specs (
         id, prd_id, fs_markdown, ts_markdown, functional_spec, technical_spec,
-        machine_readable_json, status, reviews, created_at, updated_at
+        machine_readable_json, status, reviews,
+        created_by, updated_by, created_at, updated_at
       ) VALUES (
         ${merged.id},
         ${merged.prdId},
@@ -1036,6 +1198,8 @@ export class RdService implements OnModuleInit {
         ${merged.machineReadableJson},
         ${merged.status},
         ${JSON.stringify(merged.reviews || [])}::jsonb,
+        ${merged.createdBy ?? null},
+        ${merged.updatedBy ?? null},
         ${merged.createdAt}::timestamptz,
         ${merged.updatedAt}::timestamptz
       )
@@ -1048,6 +1212,7 @@ export class RdService implements OnModuleInit {
         machine_readable_json = EXCLUDED.machine_readable_json,
         status = EXCLUDED.status,
         reviews = EXCLUDED.reviews,
+        updated_by = EXCLUDED.updated_by,
         updated_at = EXCLUDED.updated_at;
     `);
     return (await this.getSpec(merged.id))!;
@@ -1057,7 +1222,12 @@ export class RdService implements OnModuleInit {
     await this.db.execute(sql`DELETE FROM rd_specs WHERE id = ${id};`);
   }
 
-  async submitSpecForReview(specId: string, reviewer = '系统', comment?: string): Promise<ISpecRow | null> {
+  async submitSpecForReview(
+    specId: string,
+    reviewer = '系统',
+    comment?: string,
+    actorUserId?: string
+  ): Promise<ISpecRow | null> {
     const spec = await this.getSpec(specId);
     if (!spec) return null;
     const record: IReviewRecord = {
@@ -1067,14 +1237,21 @@ export class RdService implements OnModuleInit {
       comment,
       createdAt: new Date().toISOString(),
     };
+    const actor = actorUserId?.trim() || reviewer;
     return this.upsertSpec({
       ...spec,
       status: 'reviewing',
       reviews: [...(spec.reviews || []), record],
+      updatedBy: actor,
     });
   }
 
-  async approveSpec(specId: string, reviewer = '审核人', comment?: string): Promise<ISpecRow | null> {
+  async approveSpec(
+    specId: string,
+    reviewer = '审核人',
+    comment?: string,
+    actorUserId?: string
+  ): Promise<ISpecRow | null> {
     const spec = await this.getSpec(specId);
     if (!spec) return null;
     const record: IReviewRecord = {
@@ -1084,19 +1261,26 @@ export class RdService implements OnModuleInit {
       comment,
       createdAt: new Date().toISOString(),
     };
+    const actor = actorUserId?.trim() || reviewer;
     const next = await this.upsertSpec({
       ...spec,
       status: 'approved',
       reviews: [...(spec.reviews || []), record],
+      updatedBy: actor,
     });
     const prd = await this.getPrd(spec.prdId);
     if (prd) {
-      await this.upsertRequirement({ id: prd.requirementId, status: 'ai_developing' });
+      await this.upsertRequirement({ id: prd.requirementId, status: 'ai_developing', updatedBy: actor });
     }
     return next;
   }
 
-  async rejectSpec(specId: string, reviewer = '审核人', comment?: string): Promise<ISpecRow | null> {
+  async rejectSpec(
+    specId: string,
+    reviewer = '审核人',
+    comment?: string,
+    actorUserId?: string
+  ): Promise<ISpecRow | null> {
     const spec = await this.getSpec(specId);
     if (!spec) return null;
     const record: IReviewRecord = {
@@ -1106,10 +1290,12 @@ export class RdService implements OnModuleInit {
       comment,
       createdAt: new Date().toISOString(),
     };
+    const actor = actorUserId?.trim() || reviewer;
     return this.upsertSpec({
       ...spec,
       status: 'draft',
       reviews: [...(spec.reviews || []), record],
+      updatedBy: actor,
     });
   }
 
@@ -1134,28 +1320,49 @@ export class RdService implements OnModuleInit {
       SELECT * FROM rd_acceptance_records ORDER BY created_at DESC;
     `);
     const rows = this.rowsFromExecute(result);
-    return rows.map((r) => ({
-      id: r.id as string,
-      requirementId: r.requirement_id as string,
-      reviewer: r.reviewer as string,
-      scores: r.scores as IAcceptanceRecordRow['scores'],
-      feedback: (r.feedback as string) || '',
-      result: r.result as IAcceptanceRecordRow['result'],
-      createdAt: this.toIso(r.created_at ?? r.createdAt),
-    }));
+    return rows.map((r) => {
+      const result = r.result as IAcceptanceRecordRow['result'];
+      const statusRaw = (r.status as string) || result;
+      const status: IAcceptanceRecordRow['status'] =
+        statusRaw === 'rejected' ? 'rejected' : 'approved';
+      return {
+        id: r.id as string,
+        requirementId: (r.requirement_id as string) || (r.requirementId as string),
+        reviewer: r.reviewer as string,
+        scores: r.scores as IAcceptanceRecordRow['scores'],
+        feedback: (r.feedback as string) || '',
+        result,
+        status,
+        createdAt: this.toIso(r.created_at ?? r.createdAt),
+        updatedAt: this.toIso(r.updated_at ?? r.updatedAt ?? r.created_at ?? r.createdAt),
+        createdBy: (r.created_by as string) || (r.createdBy as string) || undefined,
+        updatedBy: (r.updated_by as string) || (r.updatedBy as string) || undefined,
+      };
+    });
   }
 
   async addAcceptanceRecord(rec: IAcceptanceRecordRow): Promise<void> {
+    const now = new Date().toISOString();
+    const status = rec.status ?? rec.result;
+    const updatedAt = rec.updatedAt ?? now;
+    const createdBy = rec.createdBy ?? rec.reviewer;
+    const updatedBy = rec.updatedBy ?? rec.reviewer;
     await this.db.execute(sql`
-      INSERT INTO rd_acceptance_records (id, requirement_id, reviewer, scores, feedback, result, created_at)
-      VALUES (
+      INSERT INTO rd_acceptance_records (
+        id, requirement_id, reviewer, scores, feedback, result, status,
+        created_by, updated_by, created_at, updated_at
+      ) VALUES (
         ${rec.id},
         ${rec.requirementId},
         ${rec.reviewer},
         ${JSON.stringify(rec.scores)}::jsonb,
         ${rec.feedback},
         ${rec.result},
-        ${rec.createdAt}::timestamptz
+        ${status},
+        ${createdBy},
+        ${updatedBy},
+        ${rec.createdAt}::timestamptz,
+        ${updatedAt}::timestamptz
       );
     `);
   }
@@ -1192,6 +1399,8 @@ export class RdService implements OnModuleInit {
           qualityMetrics: body.qualityMetrics !== undefined ? body.qualityMetrics : existing.qualityMetrics,
           createdAt: existing.createdAt,
           updatedAt: now,
+          createdBy: existing.createdBy ?? body.createdBy ?? null,
+          updatedBy: body.updatedBy !== undefined ? body.updatedBy : existing.updatedBy ?? null,
         }
       : {
           id: body.id,
@@ -1209,12 +1418,14 @@ export class RdService implements OnModuleInit {
           commitStore: body.commitStore,
           createdAt: body.createdAt || now,
           updatedAt: body.updatedAt || now,
+          createdBy: body.createdBy ?? body.updatedBy ?? null,
+          updatedBy: body.updatedBy ?? body.createdBy ?? null,
         };
     await this.db.execute(sql`
       INSERT INTO rd_pipeline_tasks (
         id, requirement_id, requirement_title, status, progress, stage,
         start_time, estimated_end_time, logs, test_report, quality_metrics,
-        pipeline_meta, commit_store, created_at, updated_at
+        pipeline_meta, commit_store, created_by, updated_by, created_at, updated_at
       ) VALUES (
         ${merged.id},
         ${merged.requirementId},
@@ -1229,6 +1440,8 @@ export class RdService implements OnModuleInit {
         ${this.jsonbSql(merged.qualityMetrics ?? null)},
         ${JSON.stringify(merged.pipelineMeta || {})}::jsonb,
         ${this.jsonbSql(merged.commitStore ?? null)},
+        ${merged.createdBy ?? null},
+        ${merged.updatedBy ?? null},
         ${merged.createdAt}::timestamptz,
         ${merged.updatedAt}::timestamptz
       )
@@ -1245,6 +1458,7 @@ export class RdService implements OnModuleInit {
         quality_metrics = EXCLUDED.quality_metrics,
         pipeline_meta = EXCLUDED.pipeline_meta,
         commit_store = EXCLUDED.commit_store,
+        updated_by = EXCLUDED.updated_by,
         updated_at = EXCLUDED.updated_at;
     `);
     return (await this.getPipelineTask(merged.id))!;
@@ -1289,8 +1503,11 @@ export class RdService implements OnModuleInit {
           sandboxUrl: body.sandboxUrl !== undefined ? nullIfEmpty(body.sandboxUrl) : existing.sandboxUrl,
           productionUrl: body.productionUrl !== undefined ? nullIfEmpty(body.productionUrl) : existing.productionUrl,
           gitUrl: body.gitUrl !== undefined ? nullIfEmpty(body.gitUrl) : existing.gitUrl,
+          status: body.status !== undefined ? body.status : existing.status,
           createdAt: existing.createdAt,
           updatedAt: now,
+          createdBy: existing.createdBy ?? body.createdBy ?? null,
+          updatedBy: body.updatedBy !== undefined ? body.updatedBy : existing.updatedBy ?? null,
         }
       : {
           id: body.id,
@@ -1300,8 +1517,11 @@ export class RdService implements OnModuleInit {
           sandboxUrl: nullIfEmpty(body.sandboxUrl),
           productionUrl: nullIfEmpty(body.productionUrl),
           gitUrl: nullIfEmpty(body.gitUrl),
+          status: body.status ?? 'active',
           createdAt: body.createdAt || now,
           updatedAt: body.updatedAt || now,
+          createdBy: body.createdBy ?? body.updatedBy ?? nullIfEmpty(body.owner),
+          updatedBy: body.updatedBy ?? body.createdBy ?? nullIfEmpty(body.owner),
         };
 
     if (!merged.name.trim()) {
@@ -1311,7 +1531,7 @@ export class RdService implements OnModuleInit {
     await this.db.execute(sql`
       INSERT INTO rd_products (
         id, name, description, owner, sandbox_url, production_url, git_url,
-        created_at, updated_at
+        status, created_by, updated_by, created_at, updated_at
       ) VALUES (
         ${merged.id},
         ${merged.name.trim()},
@@ -1320,6 +1540,9 @@ export class RdService implements OnModuleInit {
         ${merged.sandboxUrl ?? null},
         ${merged.productionUrl ?? null},
         ${merged.gitUrl ?? null},
+        ${merged.status},
+        ${merged.createdBy ?? null},
+        ${merged.updatedBy ?? null},
         ${merged.createdAt}::timestamptz,
         ${merged.updatedAt}::timestamptz
       )
@@ -1330,6 +1553,8 @@ export class RdService implements OnModuleInit {
         sandbox_url = EXCLUDED.sandbox_url,
         production_url = EXCLUDED.production_url,
         git_url = EXCLUDED.git_url,
+        status = EXCLUDED.status,
+        updated_by = EXCLUDED.updated_by,
         updated_at = EXCLUDED.updated_at;
     `);
     return (await this.getProduct(merged.id))!;

@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Filter, Plus, Calendar, ChevronDown } from 'lucide-react';
+import { rdAuditUpdate } from '@/lib/rd-actor';
 import { useUpsertRequirement, useDeleteRequirement } from '@/lib/rd-hooks';
 import type { IRequirement } from '@/lib/rd-types';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
@@ -106,6 +107,7 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
         ...draggedItem,
         status,
         updatedAt: new Date().toISOString(),
+        ...rdAuditUpdate(),
       });
     }
     setDraggedItem(null);

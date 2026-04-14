@@ -1,6 +1,6 @@
 # AI 驱动型研发管理看板（rd_dashboard）
 
-本项目是一个前后端一体化的研发管理系统原型，覆盖需求看板、PRD 管理、规格定义、AI 开发监控与验收流程等页面与能力。
+本项目是一个前后端一体化的研发管理系统原型，覆盖需求看板、PRD 管理、规格定义、流水线与验收流程等页面与能力。
 
 ## 1. 项目结构
 
@@ -57,7 +57,7 @@ rd_dashboard/
 - `/requirements/[id]/edit`：需求编辑
 - `/prd`、`/prd/[id]/edit`：PRD 管理/编辑
 - `/specification`、`/specification/[id]/edit`：规格定义/编辑
-- `/ai-pipeline`：AI 开发监控
+- `/ai-pipeline`：流水线
 - `/acceptance`：验收中心
 
 ## 4. 启动方式

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
 
 import { AuthService } from './auth.service';
 
@@ -30,13 +30,23 @@ export class AuthController {
       name?: string;
       email?: string;
       phone?: string;
+      accessRoleId?: string | null;
     }
   ) {
     return this.authService.createUser(body.username, body.password, {
       name: body.name,
       email: body.email,
       phone: body.phone,
+      accessRoleId: body.accessRoleId,
     });
+  }
+
+  @Patch('users/:id')
+  patchUser(
+    @Param('id') id: string,
+    @Body() body: { accessRoleId?: string | null }
+  ) {
+    return this.authService.updateUserAccessRole(id, body.accessRoleId ?? null);
   }
 
   @Delete('users/:id')

@@ -19,6 +19,7 @@ export default function RootLayout({
   return (
     <html
       lang="zh-CN"
+      suppressHydrationWarning
       className={`${GeistSans.variable} ${GeistMono.variable}`}
     >
       <body className={`${GeistSans.className} min-h-screen antialiased`}>
