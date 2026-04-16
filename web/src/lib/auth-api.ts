@@ -37,6 +37,14 @@ export const authApi = {
     });
   },
 
+  /** 飞书 OAuth：code + 与授权时一致的重定向 URI */
+  feishuLogin(code: string, redirectUri: string) {
+    return json<ILoginResponse>('/feishu/login', {
+      method: 'POST',
+      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+    });
+  },
+
   listUsers() {
     return json<IUser[]>('/users');
   },

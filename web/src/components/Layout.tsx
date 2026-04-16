@@ -156,6 +156,8 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
         ? "黑夜"
         : `自动（当前${resolvedTheme === "dark" ? "黑夜" : "白天"}）`;
 
+  const displayName = userInfo.name || authUser?.username || "用户";
+
   const coinStats = requirements.reduce((sum, req) => {
     const records = req.taskAcceptances ?? [];
     for (const record of records) {
@@ -449,9 +451,10 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                 <Button
                   type="button"
                   variant="ghost"
-                  className="h-9 gap-2 rounded-lg px-2 text-foreground hover:bg-accent"
+                  className="h-9 max-w-[min(100%,240px)] gap-2 rounded-lg px-2 text-foreground hover:bg-accent"
+                  aria-label={`${displayName}，打开账户菜单`}
                 >
-                  <Avatar className="size-8 border border-border bg-muted/50">
+                  <Avatar className="size-8 shrink-0 border border-border bg-muted/50">
                     {avatarSrc ? (
                       <AvatarImage src={avatarSrc} alt="" className="object-cover" />
                     ) : null}
@@ -459,10 +462,10 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                       <User className="size-4" />
                     </AvatarFallback>
                   </Avatar>
-                  <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                  <span className="sr-only">
-                    {userInfo.name || authUser?.username || "用户"}，打开账户菜单
+                  <span className="min-w-0 truncate text-left text-sm font-medium">
+                    {displayName}
                   </span>
+                  <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent

@@ -1,4 +1,12 @@
-import { BadRequestException, Inject, Injectable, OnModuleInit, UnauthorizedException } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  OnModuleInit,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { DRIZZLE_DATABASE } from '../../database/database.constants';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
@@ -165,6 +173,22 @@ export class AuthService implements OnModuleInit {
     await this.db.execute(sql`
       ALTER TABLE rd_users ADD COLUMN IF NOT EXISTS access_role_id TEXT;
     `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_users ADD COLUMN IF NOT EXISTS feishu_open_id TEXT;
+    `);
+    await this.db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS rd_users_feishu_open_id_uidx
+      ON rd_users (feishu_open_id)
+      WHERE feishu_open_id IS NOT NULL;
+    `);
+  }
+
+  private getFeishuAppId(): string {
+    return (process.env.FEISHU_APP_ID || '').trim();
+  }
+
+  private getFeishuAppSecret(): string {
+    return (process.env.FEISHU_APP_SECRET || '').trim();
   }
 
   private nowIso(): string {
@@ -470,6 +494,126 @@ export class AuthService implements OnModuleInit {
     const user = await this.getUserByUsername(username);
     if (!user || !verifyPassword(password, user.passwordHash)) {
       throw new UnauthorizedException('用户名或密码错误');
+    }
+
+    const token = signAuthToken(
+      {
+        userId: user.id,
+        username: user.username,
+      },
+      {
+        secret: this.getJwtSecret(),
+        expiresInSec: this.getJwtExpireSec(),
+      }
+    );
+
+    return {
+      token,
+      user: this.rowToUserView(user as unknown as Record<string, unknown>),
+    };
+  }
+
+  async getUserByFeishuOpenId(openId: string): Promise<IUserRow | null> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_users WHERE feishu_open_id = ${openId} LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows[0] ? this.rowToUser(rows[0]) : null;
+  }
+
+  /**
+   * 飞书网页应用 OAuth：用授权码换 user_access_token，拉取用户身份并签发本站 JWT。
+   * @see https://open.feishu.cn/document/sso/web-application-sso/login-overview
+   */
+  async loginWithFeishu(code: string, redirectUri: string) {
+    const appId = this.getFeishuAppId();
+    const appSecret = this.getFeishuAppSecret();
+    if (!appId || !appSecret) {
+      throw new ServiceUnavailableException('未配置飞书应用凭证（FEISHU_APP_ID / FEISHU_APP_SECRET）');
+    }
+    const trimmedCode = code.trim();
+    const trimmedRedirect = redirectUri.trim();
+    if (!trimmedCode || !trimmedRedirect) {
+      throw new BadRequestException('缺少 code 或 redirect_uri');
+    }
+
+    const tokenRes = await fetch('https://open.feishu.cn/open-apis/authen/v2/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({
+        grant_type: 'authorization_code',
+        client_id: appId,
+        client_secret: appSecret,
+        code: trimmedCode,
+        redirect_uri: trimmedRedirect,
+      }),
+    });
+    const tokenJson = (await tokenRes.json()) as {
+      code?: number;
+      access_token?: string;
+      msg?: string;
+      error?: string;
+      error_description?: string;
+    };
+    if (tokenJson.code !== 0 || !tokenJson.access_token) {
+      const detail =
+        tokenJson.msg ||
+        tokenJson.error_description ||
+        tokenJson.error ||
+        `飞书换取 access_token 失败（HTTP ${tokenRes.status}）`;
+      throw new UnauthorizedException(detail);
+    }
+
+    const userRes = await fetch('https://open.feishu.cn/open-apis/authen/v1/user_info', {
+      headers: { Authorization: `Bearer ${tokenJson.access_token}` },
+    });
+    const userJson = (await userRes.json()) as {
+      code?: number;
+      msg?: string;
+      data?: { open_id?: string; name?: string; email?: string; enterprise_email?: string };
+    };
+    if (userJson.code !== 0 || !userJson.data?.open_id) {
+      throw new UnauthorizedException(userJson.msg || '获取飞书用户信息失败');
+    }
+
+    const { open_id: openId, name, email, enterprise_email: enterpriseEmail } = userJson.data;
+    const displayName =
+      typeof name === 'string' && name.trim() !== '' ? name.trim() : '飞书用户';
+    const emailNorm =
+      typeof email === 'string' && email.trim() !== ''
+        ? email.trim()
+        : typeof enterpriseEmail === 'string' && enterpriseEmail.trim() !== ''
+          ? enterpriseEmail.trim()
+          : null;
+
+    let user = await this.getUserByFeishuOpenId(openId);
+    if (!user) {
+      const username = `feishu_${openId}`;
+      const existing = await this.getUserByUsername(username);
+      if (existing) {
+        await this.db.execute(sql`
+          UPDATE rd_users
+          SET feishu_open_id = ${openId},
+              full_name = COALESCE(full_name, ${displayName}),
+              email = COALESCE(email, ${emailNorm}),
+              updated_at = NOW()
+          WHERE id = ${existing.id};
+        `);
+        user = await this.getUserByFeishuOpenId(openId);
+      } else {
+        await this.createUser(username, randomBytes(32).toString('hex'), {
+          name: displayName,
+          email: emailNorm ?? undefined,
+          accessRoleId: 'role_stakeholder',
+        });
+        await this.db.execute(sql`
+          UPDATE rd_users SET feishu_open_id = ${openId} WHERE username = ${username};
+        `);
+        user = await this.getUserByFeishuOpenId(openId);
+      }
+    }
+    if (!user) {
+      throw new UnauthorizedException('创建或关联飞书用户失败');
     }
 
     const token = signAuthToken(

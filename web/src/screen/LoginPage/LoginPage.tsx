@@ -6,6 +6,11 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { authApi } from '@/lib/auth-api';
 import { saveAuthSession } from '@/lib/auth';
+import {
+  buildFeishuAuthorizeUrl,
+  FEISHU_OAUTH_STATE_KEY,
+  getFeishuRedirectUri,
+} from '@/lib/feishu-oauth';
 import { toast } from 'sonner';
 import { ShipWheel } from 'lucide-react';
 
@@ -15,6 +20,27 @@ const LoginPage: React.FC = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const startFeishuLogin = () => {
+    const clientId = (process.env.NEXT_PUBLIC_FEISHU_APP_ID || '').trim();
+    if (!clientId) {
+      toast.error('未配置 NEXT_PUBLIC_FEISHU_APP_ID，无法发起飞书授权');
+      return;
+    }
+    const redirectUri = getFeishuRedirectUri();
+    if (!redirectUri) {
+      toast.error('无法构造飞书回调地址');
+      return;
+    }
+    const state = crypto.randomUUID();
+    sessionStorage.setItem(FEISHU_OAUTH_STATE_KEY, state);
+    const url = buildFeishuAuthorizeUrl({
+      clientId,
+      redirectUri,
+      state,
+    });
+    window.location.assign(url);
+  };
 
   const submit = async () => {
     if (!username.trim() || !password.trim()) {
@@ -97,7 +123,7 @@ const LoginPage: React.FC = () => {
             type="button"
             variant="outline"
             className="w-full border-white/[0.1] bg-white/[0.04] text-foreground shadow-none backdrop-blur-sm hover:bg-white/[0.08] hover:text-foreground"
-            onClick={() => toast.info('飞书登录功能开发中')}
+            onClick={startFeishuLogin}
           >
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-[#3370FF] text-[11px] font-bold leading-none text-white">
               飞

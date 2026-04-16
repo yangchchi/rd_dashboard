@@ -16,6 +16,12 @@ export class AuthController {
     return this.authService.login(body.username, body.password);
   }
 
+  /** 飞书 OAuth 授权码换本站 JWT（App Secret 仅服务端使用） */
+  @Post('feishu/login')
+  feishuLogin(@Body() body: { code: string; redirect_uri: string }) {
+    return this.authService.loginWithFeishu(body.code, body.redirect_uri);
+  }
+
   @Get('users')
   listUsers() {
     return this.authService.listUsers();
