@@ -139,3 +139,20 @@ NODE_ENV=production node server/main.js
 - `LOG_DIR`：开发日志目录（默认 `logs`）
 - `MAX_RESTART_COUNT`：dev 模式最大重启次数（默认 `10`）
 - `RESTART_DELAY`：dev 模式重启初始延迟秒数（默认 `2`）
+
+
+新增远程仓库
+名称：internal
+地址：http://10.6.35.91/yangchuanchi/rd_dashboard.git
+原有的 origin（GitHub）未改动。
+2. 提交并推送
+已将当前与飞书登录相关的 7 个文件提交，提交说明：feat(auth): 飞书 OAuth 登录与回调页
+已执行 git push -u internal main，内网仓库上已创建并更新 main 分支。
+常用命令
+# 只推到内网
+git push internal main
+# 同时推到 GitHub
+git push origin main
+说明：main 当前的上游分支是 internal/main，因此在本分支执行 git pull 会默认从内网拉取。若希望 git pull 仍默认从 GitHub 拉取，可执行：
+git branch -u origin/main main
+之后需要从内网更新时再执行：git pull internal main

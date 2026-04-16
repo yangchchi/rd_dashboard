@@ -604,7 +604,7 @@ export class AuthService implements OnModuleInit {
         await this.createUser(username, randomBytes(32).toString('hex'), {
           name: displayName,
           email: emailNorm ?? undefined,
-          accessRoleId: 'role_stakeholder',
+          accessRoleId: null,
         });
         await this.db.execute(sql`
           UPDATE rd_users SET feishu_open_id = ${openId} WHERE username = ${username};

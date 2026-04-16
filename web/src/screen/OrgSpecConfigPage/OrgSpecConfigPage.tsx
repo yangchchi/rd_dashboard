@@ -90,13 +90,13 @@ const OrgSpecConfigPage: React.FC = () => {
       </section>
 
       <section className="w-full grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-1">
+        <Card className="lg:col-span-1 flex min-h-0 flex-col">
           <CardHeader>
             <CardTitle>语言列表</CardTitle>
             <CardDescription>默认模板已按 SDD 编排；启用语言即纳入生成与校验上下文</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="max-h-[420px] overflow-y-auto space-y-2 pr-1">
+          <CardContent className="flex-1 min-h-0">
+            <div className="h-full overflow-y-auto space-y-2 pr-1">
               {(config ? Object.values(config.languages) : []).map((item) => {
                 const active = item.language === selectedLanguage;
                 return (

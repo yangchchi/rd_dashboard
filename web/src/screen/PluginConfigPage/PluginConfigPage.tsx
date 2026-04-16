@@ -9,9 +9,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
-import { Puzzle, Search, Sparkles } from 'lucide-react';
+import { Plus, Puzzle, Search, Sparkles, Trash2 } from 'lucide-react';
 import type { IAiSkillConfig } from '@/lib/ai-skill-engine';
-import { getAiSkill, listAiSkills, resetAiSkill, updateAiSkill } from '@/lib/ai-skills';
+import { createAiSkill, deleteAiSkill, getAiSkill, listAiSkills, resetAiSkill, updateAiSkill } from '@/lib/ai-skills';
 
 /** 插件（Skill）配置：大模型 + 提示词，用于研发流程中的各类 AI 任务（与组织级代码规范 Org Spec 无关） */
 const PluginConfigPage: React.FC = () => {
@@ -19,33 +19,43 @@ const PluginConfigPage: React.FC = () => {
   const [skills, setSkills] = useState<IAiSkillConfig[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Partial<IAiSkillConfig>>({});
+  const [creating, setCreating] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const reload = useCallback(() => {
-    const list = listAiSkills();
-    setSkills(list);
-    setSelectedId((prev) => {
-      if (prev && list.some((s) => s.id === prev)) return prev;
-      return list[0]?.id ?? null;
-    });
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await listAiSkills();
+      setSkills(list);
+      setSelectedId((prev) => {
+        if (prev && list.some((s) => s.id === prev)) return prev;
+        return list[0]?.id ?? null;
+      });
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    reload();
+    void reload();
   }, [reload]);
 
   useEffect(() => {
+    if (creating) return;
     if (!selectedId) {
       setDraft({});
       return;
     }
-    try {
-      setDraft(getAiSkill(selectedId));
-    } catch {
-      setDraft({});
-    }
+    void (async () => {
+      try {
+        setDraft(await getAiSkill(selectedId));
+      } catch {
+        setDraft({});
+      }
+    })();
   }, [selectedId, skills]);
 
-  const filtered = useMemo(() => {
+  const filtered = useMemo<IAiSkillConfig[]>(() => {
     const q = query.trim().toLowerCase();
     if (!q) return skills;
     return skills.filter(
@@ -58,36 +68,86 @@ const PluginConfigPage: React.FC = () => {
 
   const selected = selectedId ? skills.find((s) => s.id === selectedId) : undefined;
 
-  const handleSave = () => {
-    if (!selectedId || !draft.model || !draft.promptTemplate) {
+  const handleSave = async () => {
+    if (!draft.model || !draft.promptTemplate) {
       toast.error('请填写模型与提示词');
       return;
     }
     try {
-      updateAiSkill(selectedId, {
-        name: draft.name || '未命名插件',
-        description: draft.description,
-        model: draft.model,
-        stream: draft.stream ?? true,
-        promptTemplate: draft.promptTemplate,
-        endpoint: draft.endpoint || undefined,
-        tools: draft.tools,
-      });
-      toast.success('插件配置已保存');
-      reload();
+      if (creating) {
+        await createAiSkill({
+          id: String(draft.id ?? ''),
+          name: draft.name || '未命名插件',
+        });
+        await updateAiSkill(String(draft.id ?? ''), {
+          description: draft.description,
+          model: draft.model,
+          stream: draft.stream ?? true,
+          promptTemplate: draft.promptTemplate,
+          endpoint: draft.endpoint || undefined,
+          tools: draft.tools,
+        });
+        toast.success('Skill 已新增');
+        setCreating(false);
+        setSelectedId(String(draft.id ?? '').trim());
+      } else if (selectedId) {
+        await updateAiSkill(selectedId, {
+          name: draft.name || '未命名插件',
+          description: draft.description,
+          model: draft.model,
+          stream: draft.stream ?? true,
+          promptTemplate: draft.promptTemplate,
+          endpoint: draft.endpoint || undefined,
+          tools: draft.tools,
+        });
+        toast.success('插件配置已保存');
+      } else {
+        toast.error('请选择插件或点击新增');
+        return;
+      }
+      await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '保存失败');
     }
   };
 
-  const handleResetOne = () => {
+  const handleResetOne = async () => {
     if (!selectedId) return;
     try {
-      resetAiSkill(selectedId);
+      await resetAiSkill(selectedId);
       toast.success('已恢复该插件的默认配置');
-      reload();
+      await reload();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '恢复失败');
+    }
+  };
+
+  const handleCreateSkill = async () => {
+    setCreating(true);
+    setSelectedId(null);
+    setDraft({
+      id: '',
+      name: '',
+      provider: 'ark',
+      model: '',
+      stream: false,
+      tools: [],
+      promptTemplate: '',
+      description: '',
+      endpoint: '',
+    });
+  };
+
+  const handleDeleteSkill = async () => {
+    if (!selectedId || creating) return;
+    const ok = window.confirm(`确认删除 Skill「${selectedId}」吗？`);
+    if (!ok) return;
+    try {
+      await deleteAiSkill(selectedId);
+      await reload();
+      toast.success('Skill 已删除');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '删除失败');
     }
   };
 
@@ -106,9 +166,15 @@ const PluginConfigPage: React.FC = () => {
       </section>
 
       <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,280px)_1fr] gap-6">
-        <Card className="lg:max-h-[calc(100vh-12rem)] flex flex-col">
+        <Card className="lg:h-[calc(100vh-12rem)] flex flex-col">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">插件</CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base">插件</CardTitle>
+              <Button size="sm" variant="outline" onClick={() => void handleCreateSkill()} disabled={loading}>
+                <Plus className="mr-1 size-4" />
+                新增
+              </Button>
+            </div>
             <CardDescription>选择要编辑的能力</CardDescription>
             <div className="relative pt-2">
               <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -121,15 +187,18 @@ const PluginConfigPage: React.FC = () => {
             </div>
           </CardHeader>
           <CardContent className="flex-1 min-h-0 p-0 px-6 pb-4">
-            <ScrollArea className="h-[min(520px,calc(100vh-16rem))] pr-3">
+            <ScrollArea className="h-full pr-3">
               <div className="space-y-1">
                 {filtered.map((s) => {
-                  const active = s.id === selectedId;
+                  const active = !creating && s.id === selectedId;
                   return (
                     <button
                       key={s.id}
                       type="button"
-                      onClick={() => setSelectedId(s.id)}
+                      onClick={() => {
+                        setCreating(false);
+                        setSelectedId(s.id);
+                      }}
                       className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm backdrop-blur-sm transition-colors ${
                         active
                           ? 'border-primary bg-primary/10 text-foreground'
@@ -155,24 +224,28 @@ const PluginConfigPage: React.FC = () => {
               <div className="min-w-0">
                 <CardTitle className="flex items-center gap-2 text-lg">
                   <Sparkles className="size-5 shrink-0 text-primary" />
-                  <span className="truncate">{draft.name || selected?.name || '请选择左侧插件'}</span>
+                  <span className="truncate">{draft.name || selected?.name || (creating ? '新建 Skill' : '请选择左侧插件')}</span>
                 </CardTitle>
                 {draft.description && (
                   <CardDescription className="mt-2">{draft.description}</CardDescription>
                 )}
               </div>
               <div className="flex shrink-0 gap-2">
-                <Button variant="outline" size="sm" onClick={handleResetOne} disabled={!selectedId}>
+                <Button variant="outline" size="sm" onClick={() => void handleDeleteSkill()} disabled={!selectedId || loading || creating}>
+                  <Trash2 className="mr-1 size-4" />
+                  删除
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => void handleResetOne()} disabled={!selectedId || loading || creating}>
                   恢复默认
                 </Button>
-                <Button size="sm" onClick={handleSave} disabled={!selectedId}>
+                <Button size="sm" onClick={() => void handleSave()} disabled={loading}>
                   保存
                 </Button>
               </div>
             </div>
           </CardHeader>
           <CardContent>
-            {!selectedId ? (
+            {!selectedId && !creating ? (
               <p className="text-sm text-muted-foreground">请从左侧选择一个插件。</p>
             ) : (
               <Tabs defaultValue="detail" className="w-full">
@@ -182,6 +255,20 @@ const PluginConfigPage: React.FC = () => {
                   <TabsTrigger value="logs">运行日志</TabsTrigger>
                 </TabsList>
                 <TabsContent value="detail" className="mt-4 space-y-5">
+                  <div className="space-y-2">
+                    <Label htmlFor="plugin-id">插件 ID</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Skill ID 是调用标识；具体在业务代码中何处调用该 Skill，由开发工程师按场景接入配置。
+                    </p>
+                    <Input
+                      id="plugin-id"
+                      className="font-mono text-sm"
+                      value={draft.id ?? selectedId ?? ''}
+                      disabled={!creating}
+                      onChange={(e) => setDraft((d) => ({ ...d, id: e.target.value }))}
+                      placeholder="例如 code_review_assistant_v2"
+                    />
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="plugin-name">显示名称</Label>
                     <Input

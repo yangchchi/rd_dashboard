@@ -9,6 +9,7 @@ import {
 import { DRIZZLE_DATABASE } from '../../database/database.constants';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
+import { DEFAULT_AI_SKILLS } from '../../../shared/ai-skill-defaults';
 
 
 export type RequirementStatus =
@@ -306,6 +307,19 @@ export interface IBountyTaskRow {
   updatedAt: string;
 }
 
+export interface IAiSkillConfig {
+  id: string;
+  name: string;
+  description?: string | null;
+  provider: 'ark';
+  endpoint?: string | null;
+  model: string;
+  stream?: boolean;
+  tools?: unknown[];
+  promptTemplate: string;
+  updatedAt: string;
+}
+
 @Injectable()
 export class RdService implements OnModuleInit {
   private readonly logger = new Logger(RdService.name);
@@ -339,6 +353,8 @@ export class RdService implements OnModuleInit {
     await this.ensureProductSchemaUpgrade();
     await this.ensureRequirementExtraColumns();
     await this.ensureBountyDualSlotColumns();
+    await this.ensureAiSkillTables();
+    await this.ensureAiSkillDefaults();
     await this.ensureDatapaasRoleGrants();
   }
 
@@ -431,6 +447,21 @@ export class RdService implements OnModuleInit {
       );
     `);
     await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_ai_skill_configs (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        provider TEXT NOT NULL DEFAULT 'ark',
+        endpoint TEXT,
+        model TEXT NOT NULL,
+        stream BOOLEAN NOT NULL DEFAULT TRUE,
+        tools JSONB NOT NULL DEFAULT '[]'::jsonb,
+        prompt_template TEXT NOT NULL,
+        is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await this.db.execute(sql`
       CREATE TABLE IF NOT EXISTS rd_acceptance_records (
         id TEXT PRIMARY KEY,
         requirement_id TEXT NOT NULL REFERENCES rd_requirements(id) ON DELETE CASCADE,
@@ -496,6 +527,60 @@ export class RdService implements OnModuleInit {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
+  }
+
+  private async ensureAiSkillTables(): Promise<void> {
+    await this.db.execute(sql`
+      ALTER TABLE rd_ai_skill_configs ADD COLUMN IF NOT EXISTS description TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_ai_skill_configs ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'ark';
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_ai_skill_configs ADD COLUMN IF NOT EXISTS endpoint TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_ai_skill_configs ADD COLUMN IF NOT EXISTS model TEXT NOT NULL DEFAULT '';
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_ai_skill_configs ADD COLUMN IF NOT EXISTS stream BOOLEAN NOT NULL DEFAULT TRUE;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_ai_skill_configs ADD COLUMN IF NOT EXISTS tools JSONB NOT NULL DEFAULT '[]'::jsonb;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_ai_skill_configs ADD COLUMN IF NOT EXISTS prompt_template TEXT NOT NULL DEFAULT '';
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_ai_skill_configs ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_ai_skill_configs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    `);
+  }
+
+  /** 初始化内置 Skill 到数据库（仅插入缺失项，不覆盖管理员已配置项） */
+  private async ensureAiSkillDefaults(): Promise<void> {
+    for (const skill of Object.values(DEFAULT_AI_SKILLS)) {
+      await this.db.execute(sql`
+        INSERT INTO rd_ai_skill_configs (
+          id, name, description, provider, endpoint, model, stream, tools, prompt_template, is_deleted, updated_at
+        ) VALUES (
+          ${skill.id},
+          ${skill.name},
+          ${skill.description ?? null},
+          ${skill.provider},
+          ${skill.endpoint ?? null},
+          ${skill.model},
+          ${skill.stream ?? true},
+          ${JSON.stringify(skill.tools ?? [])}::jsonb,
+          ${skill.promptTemplate},
+          FALSE,
+          NOW()
+        )
+        ON CONFLICT (id) DO NOTHING;
+      `);
+    }
   }
 
   /** 同一需求仅允许存在一份 PRD。 */
@@ -900,6 +985,89 @@ export class RdService implements OnModuleInit {
       createdBy: (r.created_by as string) || (r.createdBy as string) || undefined,
       updatedBy: (r.updated_by as string) || (r.updatedBy as string) || undefined,
     };
+  }
+
+  private rowToAiSkill(r: Record<string, unknown>): IAiSkillConfig {
+    return {
+      id: String(r.id || ''),
+      name: String(r.name || ''),
+      description: (r.description as string) || undefined,
+      provider: 'ark',
+      endpoint: (r.endpoint as string) || undefined,
+      model: String(r.model || ''),
+      stream: Boolean(r.stream ?? true),
+      tools: Array.isArray(r.tools) ? (r.tools as unknown[]) : [],
+      promptTemplate: String(r.prompt_template || r.promptTemplate || ''),
+      updatedAt: this.toIso(r.updated_at ?? r.updatedAt),
+    };
+  }
+
+  async listAiSkills(): Promise<IAiSkillConfig[]> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_ai_skill_configs WHERE is_deleted = FALSE ORDER BY id ASC;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows.map((row) => this.rowToAiSkill(row));
+  }
+
+  async getAiSkill(id: string): Promise<IAiSkillConfig | null> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_ai_skill_configs WHERE id = ${id} AND is_deleted = FALSE LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows[0] ? this.rowToAiSkill(rows[0]) : null;
+  }
+
+  async upsertAiSkill(
+    id: string,
+    patch: Partial<Omit<IAiSkillConfig, 'id' | 'updatedAt'>>,
+  ): Promise<IAiSkillConfig> {
+    const existing = await this.getAiSkill(id);
+    const merged = {
+      name: patch.name ?? existing?.name ?? id,
+      description: patch.description ?? existing?.description ?? null,
+      provider: 'ark' as const,
+      endpoint: patch.endpoint ?? existing?.endpoint ?? null,
+      model: patch.model ?? existing?.model ?? '',
+      stream: patch.stream ?? existing?.stream ?? true,
+      tools: patch.tools ?? existing?.tools ?? [],
+      promptTemplate: patch.promptTemplate ?? existing?.promptTemplate ?? '',
+    };
+    await this.db.execute(sql`
+      INSERT INTO rd_ai_skill_configs (
+        id, name, description, provider, endpoint, model, stream, tools, prompt_template, is_deleted, updated_at
+      ) VALUES (
+        ${id},
+        ${merged.name},
+        ${merged.description},
+        ${merged.provider},
+        ${merged.endpoint},
+        ${merged.model},
+        ${merged.stream},
+        ${JSON.stringify(merged.tools || [])}::jsonb,
+        ${merged.promptTemplate},
+        FALSE,
+        NOW()
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        description = EXCLUDED.description,
+        provider = EXCLUDED.provider,
+        endpoint = EXCLUDED.endpoint,
+        model = EXCLUDED.model,
+        stream = EXCLUDED.stream,
+        tools = EXCLUDED.tools,
+        prompt_template = EXCLUDED.prompt_template,
+        is_deleted = FALSE,
+        updated_at = NOW();
+    `);
+    return (await this.getAiSkill(id)) as IAiSkillConfig;
+  }
+
+  async resetAiSkill(id: string): Promise<void> {
+    await this.db.execute(sql`
+      UPDATE rd_ai_skill_configs SET is_deleted = TRUE, updated_at = NOW() WHERE id = ${id};
+    `);
   }
 
   async listRequirements(): Promise<IRequirementRow[]> {

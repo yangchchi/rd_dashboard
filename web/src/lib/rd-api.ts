@@ -13,6 +13,7 @@ import type {
   IRequirement,
   ITaskAcceptanceRecord,
   ISpecification,
+  IAiSkillConfig,
 } from './rd-types';
 
 const BASE = '/api/rd';
@@ -201,6 +202,21 @@ function mapBountyTask(b: Record<string, unknown>): IBountyTask {
   };
 }
 
+function mapAiSkill(s: Record<string, unknown>): IAiSkillConfig {
+  return {
+    id: String(s.id || ''),
+    name: String(s.name || ''),
+    description: (s.description as string) || undefined,
+    provider: 'ark',
+    endpoint: (s.endpoint as string) || undefined,
+    model: String(s.model || ''),
+    stream: Boolean(s.stream ?? true),
+    tools: Array.isArray(s.tools) ? (s.tools as Array<Record<string, unknown>>) : [],
+    promptTemplate: String(s.promptTemplate || s.prompt_template || ''),
+    updatedAt: (s.updatedAt as string) || (s.updated_at as string) || undefined,
+  };
+}
+
 export const rdApi = {
   async listRequirements(): Promise<IRequirement[]> {
     const rows = await json<Record<string, unknown>[]>('/requirements');
@@ -374,6 +390,28 @@ export const rdApi = {
       method: 'PUT',
       body: JSON.stringify(config),
     });
+  },
+
+  async listAiSkills(): Promise<IAiSkillConfig[]> {
+    const rows = await json<Record<string, unknown>[]>('/ai-skills');
+    return rows.map(mapAiSkill);
+  },
+
+  async getAiSkill(id: string): Promise<IAiSkillConfig | null> {
+    const raw = await json<Record<string, unknown> | null>(`/ai-skills/${encodeURIComponent(id)}`);
+    return raw ? mapAiSkill(raw) : null;
+  },
+
+  async upsertAiSkill(id: string, body: Partial<IAiSkillConfig>): Promise<IAiSkillConfig> {
+    const raw = await json<Record<string, unknown>>(`/ai-skills/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    return mapAiSkill(raw);
+  },
+
+  async resetAiSkill(id: string): Promise<void> {
+    await json(`/ai-skills/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
   async listAcceptanceRecords(): Promise<IAcceptanceRecord[]> {

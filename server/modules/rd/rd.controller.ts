@@ -142,6 +142,27 @@ export class RdController {
     return this.rd.saveOrgSpecConfig(body);
   }
 
+  @Get('ai-skills')
+  listAiSkills() {
+    return this.rd.listAiSkills();
+  }
+
+  @Get('ai-skills/:id')
+  getAiSkill(@Param('id') id: string) {
+    return this.rd.getAiSkill(id);
+  }
+
+  @Put('ai-skills/:id')
+  upsertAiSkill(@Param('id') id: string, @Body() body: Record<string, unknown>) {
+    return this.rd.upsertAiSkill(id, body);
+  }
+
+  @Delete('ai-skills/:id')
+  async resetAiSkill(@Param('id') id: string) {
+    await this.rd.resetAiSkill(id);
+    return { ok: true };
+  }
+
   @Get('acceptance')
   listAcceptance(): Promise<IAcceptanceRecordRow[]> {
     return this.rd.listAcceptanceRecords();

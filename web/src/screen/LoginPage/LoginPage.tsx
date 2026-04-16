@@ -4,8 +4,9 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { authApi } from '@/lib/auth-api';
+import { authApi, getAuthActionErrorMessage } from '@/lib/auth-api';
 import { saveAuthSession } from '@/lib/auth';
+import { shouldTriggerAuthSubmitOnKeyDown } from '@/lib/auth-form';
 import {
   buildFeishuAuthorizeUrl,
   FEISHU_OAUTH_STATE_KEY,
@@ -57,10 +58,21 @@ const LoginPage: React.FC = () => {
       toast.success(mode === 'login' ? '登录成功' : '注册成功');
       router.replace('/dashboard');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '操作失败');
+      toast.error(getAuthActionErrorMessage(e, mode));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAuthInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!shouldTriggerAuthSubmitOnKeyDown({
+      key: event.key,
+      isComposing: event.nativeEvent.isComposing,
+    })) {
+      return;
+    }
+    event.preventDefault();
+    void submit();
   };
 
   return (
@@ -69,14 +81,14 @@ const LoginPage: React.FC = () => {
         <div className="px-1">
           <div className="flex items-start gap-3">
             <ShipWheel
-              className="h-12 w-12 shrink-0 text-blue-700 dark:text-cyan-100"
+              className="h-10 w-10 shrink-0 text-blue-700 dark:text-cyan-100"
               aria-hidden
             />
             <div className="min-w-0 flex-1 space-y-2 pt-1">
-              <span className="bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-600 bg-clip-text text-3xl font-extrabold leading-none tracking-wide text-transparent drop-shadow-[0_2px_4px_rgba(59,130,246,0.35)] dark:from-cyan-200 dark:via-blue-200 dark:to-purple-200 dark:drop-shadow-[0_2px_6px_rgba(125,211,252,0.45)]">
+              <span className="bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-600 bg-clip-text text-2xl font-extrabold leading-none tracking-wide text-transparent drop-shadow-[0_2px_4px_rgba(59,130,246,0.35)] dark:from-cyan-200 dark:via-blue-200 dark:to-purple-200 dark:drop-shadow-[0_2px_6px_rgba(125,211,252,0.45)]">
                 AI智研平台
               </span>
-              <div className="flex w-full max-w-[280px] items-center gap-2">
+              <div className="flex w-full max-w-[240px] items-center gap-2">
                 <span className="h-px w-10 bg-gradient-to-r from-transparent via-blue-500/70 to-blue-500/30 dark:via-cyan-300/80 dark:to-cyan-300/30" />
                 <span className="shrink-0 text-xs font-semibold uppercase tracking-[0.2em] text-blue-700/90 dark:text-cyan-100/90">
                   AI-Driven SDLC
@@ -95,6 +107,7 @@ const LoginPage: React.FC = () => {
               placeholder="用户名"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={handleAuthInputKeyDown}
               className="border-white/[0.1] bg-white/[0.04] text-foreground backdrop-blur-sm"
             />
             <Input
@@ -102,6 +115,7 @@ const LoginPage: React.FC = () => {
               placeholder="密码"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={handleAuthInputKeyDown}
               className="border-white/[0.1] bg-white/[0.04] text-foreground backdrop-blur-sm"
             />
             <Button onClick={submit} disabled={loading} className="w-full">
@@ -114,11 +128,11 @@ const LoginPage: React.FC = () => {
             >
               {mode === 'login' ? '没有账号？去注册' : '已有账号？去登录'}
             </Button>
-            <p className="text-xs text-muted-foreground">默认管理员：admin / 123456</p>
           </CardContent>
         </Card>
 
         <div className="space-y-4 pt-1">
+       
           <Button
             type="button"
             variant="outline"
@@ -130,6 +144,7 @@ const LoginPage: React.FC = () => {
             </span>
             飞书登录
           </Button>
+         
           <Button
             type="button"
             variant="outline"
@@ -145,6 +160,7 @@ const LoginPage: React.FC = () => {
             />
             微信登录
           </Button>
+        
         </div>
       </div>
     </div>

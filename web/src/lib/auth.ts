@@ -1,4 +1,5 @@
 import type { IUser } from './rd-types';
+import { clearAiSkillCache } from './ai-skills';
 
 const TOKEN_KEY = '__rd_auth_token';
 const USER_KEY = '__rd_auth_user';
@@ -27,12 +28,14 @@ export function getCurrentUser(): IUser | null {
 export function saveAuthSession(token: string, user: IUser): void {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
+  clearAiSkillCache();
   emitStoredUserUpdated();
 }
 
 export function clearAuthSession(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  clearAiSkillCache();
   emitStoredUserUpdated();
 }
 

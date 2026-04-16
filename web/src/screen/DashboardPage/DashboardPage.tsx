@@ -1,9 +1,17 @@
 'use client';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCurrentUserProfile } from '@/hooks/useCurrentUserProfile';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,8 +21,30 @@ import {
 import { LayoutDashboard, Filter, Plus, ChevronDown, Trophy } from 'lucide-react';
 import { useRequirementsList } from '@/lib/rd-hooks';
 import type { IRequirement } from '@/lib/rd-types';
+import { getCurrentUser, updateStoredCurrentUser } from '@/lib/auth';
+import { authApi } from '@/lib/auth-api';
+import { toast } from 'sonner';
 
 const LEADERBOARD_TOP = 10;
+const ROLE_SELECTED_ONCE_PREFIX = '__rd_role_selected_once_';
+
+const ROLE_OPTIONS = [
+  {
+    roleId: 'role_pm',
+    title: '产品经理',
+    description: '侧重需求分析、PRD与跨角色协同。',
+  },
+  {
+    roleId: 'role_tm',
+    title: '技术经理',
+    description: '侧重技术规格、交付质量与工程治理。',
+  },
+  {
+    roleId: 'role_stakeholder',
+    title: '干系人',
+    description: '侧重需求发起与验收反馈，参与闭环协作。',
+  },
+] as const;
 
 type LeaderboardActor = { id?: string | null; name?: string | null };
 type LeaderboardRow = { actorKey: string; actorLabel: string; count: number; coins: number };
@@ -122,6 +152,40 @@ const DashboardPage: React.FC = () => {
   const currentProfile = useCurrentUserProfile();
   const { data: requirements = [], isLoading } = useRequirementsList();
   const [filter, setFilter] = useState<FilterType>('all');
+  const [roleDialogOpen, setRoleDialogOpen] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<(typeof ROLE_OPTIONS)[number]['roleId'] | null>(null);
+  const [roleSaving, setRoleSaving] = useState(false);
+
+  useEffect(() => {
+    const user = getCurrentUser();
+    if (!user?.id) return;
+    const selectedOnceKey = `${ROLE_SELECTED_ONCE_PREFIX}${user.id}`;
+    const selectedOnce = localStorage.getItem(selectedOnceKey) === '1';
+    if (selectedOnce) return;
+    if (user.accessRoleId?.trim()) {
+      localStorage.setItem(selectedOnceKey, '1');
+      return;
+    }
+    setRoleDialogOpen(true);
+  }, []);
+
+  const confirmRoleSelection = async () => {
+    const user = getCurrentUser();
+    if (!user?.id || !selectedRole) return;
+    setRoleSaving(true);
+    try {
+      const updatedUser = await authApi.updateUserAccessRole(user.id, selectedRole);
+      updateStoredCurrentUser({ accessRoleId: updatedUser.accessRoleId ?? selectedRole });
+      sessionStorage.setItem('__global_rd_userRole', updatedUser.accessRoleId ?? selectedRole);
+      localStorage.setItem(`${ROLE_SELECTED_ONCE_PREFIX}${user.id}`, '1');
+      setRoleDialogOpen(false);
+      toast.success('角色已确认');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '角色保存失败，请重试');
+    } finally {
+      setRoleSaving(false);
+    }
+  };
 
   const filteredRequirements = requirements.filter((req) => {
     if (filter === 'mine') {
@@ -361,6 +425,56 @@ const DashboardPage: React.FC = () => {
           </div>
         </section>
       </div>
+
+      <Dialog
+        open={roleDialogOpen}
+        onOpenChange={(open) => {
+          if (open) setRoleDialogOpen(true);
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="max-w-xl border-border"
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onPointerDownOutside={(event) => event.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle>请选择你的角色</DialogTitle>
+            <DialogDescription>
+              首次登录需要确认一次角色身份。该选择仅可提交一次，提交后下次登录将不再提示。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            {ROLE_OPTIONS.map((item) => {
+              const active = selectedRole === item.roleId;
+              return (
+                <button
+                  key={item.roleId}
+                  type="button"
+                  onClick={() => setSelectedRole(item.roleId)}
+                  disabled={roleSaving}
+                  className={`w-full rounded-lg border p-4 text-left transition ${
+                    active
+                      ? 'border-primary bg-primary/10 ring-1 ring-primary/40'
+                      : 'border-border bg-card hover:bg-accent'
+                  }`}
+                  aria-pressed={active}
+                >
+                  <p className="text-sm font-medium text-foreground">{item.title}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{item.description}</p>
+                </button>
+              );
+            })}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" onClick={confirmRoleSelection} disabled={!selectedRole || roleSaving}>
+              {roleSaving ? '保存中...' : '确认角色'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

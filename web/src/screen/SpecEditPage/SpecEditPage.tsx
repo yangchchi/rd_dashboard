@@ -276,8 +276,8 @@ const SpecEditPage: React.FC = () => {
   const [generatingTs, setGeneratingTs] = useState(false);
   const [fsStreamText, setFsStreamText] = useState('');
   const [tsStreamText, setTsStreamText] = useState('');
-  const [fsMdMode, setFsMdMode] = useState<'edit' | 'preview'>('edit');
-  const [tsMdMode, setTsMdMode] = useState<'edit' | 'preview'>('edit');
+  const [fsMdMode, setFsMdMode] = useState<'edit' | 'preview'>('preview');
+  const [tsMdMode, setTsMdMode] = useState<'edit' | 'preview'>('preview');
   const [selectedRequirementId, setSelectedRequirementId] = useState('');
   const [selectedPrdId, setSelectedPrdId] = useState('');
 
@@ -434,7 +434,7 @@ const SpecEditPage: React.FC = () => {
     setGeneratingFs(true);
     setFsStreamText('');
     try {
-      const skill = getAiSkill('fs_auto_generation');
+      const skill = await getAiSkill('fs_auto_generation');
       const prdDoc = buildPrdDocument(prd);
       const full = await runAiSkillStream(skill, {
         variables: { prd_document: prdDoc },
@@ -466,7 +466,7 @@ const SpecEditPage: React.FC = () => {
     setGeneratingTs(true);
     setTsStreamText('');
     try {
-      const skill = getAiSkill('ts_auto_generation');
+      const skill = await getAiSkill('ts_auto_generation');
       const orgText = buildOrgSpecText(orgSpecConfig, selectedLanguage);
       const full = await runAiSkillStream(skill, {
         variables: {

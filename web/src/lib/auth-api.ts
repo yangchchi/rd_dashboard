@@ -3,6 +3,27 @@ import type { AccessRoleRecord } from './access-policy-storage';
 
 const BASE = '/api/auth';
 
+type AuthAction = 'login' | 'register';
+
+function extractErrorText(error: unknown): string {
+  return error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+}
+
+function looksLikeUnauthorizedError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes('401') || normalized.includes('unauthorized');
+}
+
+export function getAuthActionErrorMessage(error: unknown, action: AuthAction): string {
+  const message = extractErrorText(error);
+
+  if (action === 'login' && looksLikeUnauthorizedError(message)) {
+    return '用户名或密码错误';
+  }
+
+  return action === 'login' ? '登录失败，请稍后重试' : '操作失败';
+}
+
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,

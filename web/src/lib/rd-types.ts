@@ -12,6 +12,19 @@ export type ReviewStatus = 'draft' | 'reviewing' | 'approved' | 'rejected';
 export type SpecStatus = 'draft' | 'reviewing' | 'approved';
 export type { OrgSpecLanguage, IOrgLanguageSpec, IOrganizationSpecConfig } from '@shared/org-spec-defaults';
 
+export interface IAiSkillConfig {
+  id: string;
+  name: string;
+  description?: string;
+  provider: 'ark';
+  endpoint?: string;
+  model: string;
+  stream?: boolean;
+  tools?: Array<Record<string, unknown>>;
+  promptTemplate: string;
+  updatedAt?: string;
+}
+
 /** 任务领取记录；金币在需求「已发布」后对领取人生效 */
 export interface ITaskAcceptanceRecord {
   id: string;
