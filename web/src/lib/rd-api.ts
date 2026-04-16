@@ -1,5 +1,6 @@
 import type {
   IAcceptanceRecord,
+  IBountyTask,
   IOrganizationSpecConfig,
   IPipelineCommitStore,
   IPipelineLogEntry,
@@ -161,6 +162,42 @@ function mapSpec(s: Record<string, unknown>): ISpecification {
     reviews: (s.reviews as ISpecification['reviews']) || [],
     createdBy: (s.createdBy as string) || (s.created_by as string) || undefined,
     updatedBy: (s.updatedBy as string) || (s.updated_by as string) || undefined,
+  };
+}
+
+function mapBountyTask(b: Record<string, unknown>): IBountyTask {
+  return {
+    id: b.id as string,
+    requirementId: (b.requirementId as string) || (b.requirement_id as string),
+    publisherId: (b.publisherId as string) || (b.publisher_id as string),
+    publisherName: (b.publisherName as string) || (b.publisher_name as string) || undefined,
+    title: (b.title as string) || '',
+    description: (b.description as string) || '',
+    rewardCoins: Number(b.rewardCoins ?? b.reward_coins ?? 0),
+    depositCoins: Number(b.depositCoins ?? b.deposit_coins ?? 0),
+    consolationCoins: Number(b.consolationCoins ?? b.consolation_coins ?? 1),
+    difficultyTag:
+      ((b.difficultyTag as IBountyTask['difficultyTag']) ||
+        (b.difficulty_tag as IBountyTask['difficultyTag']) ||
+        'normal'),
+    deadlineAt: (b.deadlineAt as string) || (b.deadline_at as string) || new Date().toISOString(),
+    acceptStatus:
+      ((b.acceptStatus as IBountyTask['acceptStatus']) ||
+        (b.accept_status as IBountyTask['acceptStatus']) ||
+        'open'),
+    hunterUserId: (b.hunterUserId as string) || (b.hunter_user_id as string) || undefined,
+    hunterUserName: (b.hunterUserName as string) || (b.hunter_user_name as string) || undefined,
+    pmUserId: (b.pmUserId as string) || (b.pm_user_id as string) || undefined,
+    pmUserName: (b.pmUserName as string) || (b.pm_user_name as string) || undefined,
+    tmUserId: (b.tmUserId as string) || (b.tm_user_id as string) || undefined,
+    tmUserName: (b.tmUserName as string) || (b.tm_user_name as string) || undefined,
+    pmAcceptedAt: (b.pmAcceptedAt as string) || (b.pm_accepted_at as string) || undefined,
+    tmAcceptedAt: (b.tmAcceptedAt as string) || (b.tm_accepted_at as string) || undefined,
+    acceptedAt: (b.acceptedAt as string) || (b.accepted_at as string) || undefined,
+    deliveredAt: (b.deliveredAt as string) || (b.delivered_at as string) || undefined,
+    settledAt: (b.settledAt as string) || (b.settled_at as string) || undefined,
+    createdAt: (b.createdAt as string) || (b.created_at as string) || new Date().toISOString(),
+    updatedAt: (b.updatedAt as string) || (b.updated_at as string) || new Date().toISOString(),
   };
 }
 
@@ -327,7 +364,9 @@ export const rdApi = {
   },
 
   async getOrgSpecConfig(): Promise<IOrganizationSpecConfig | null> {
-    return json<IOrganizationSpecConfig | null>('/org-spec');
+    const raw = await json<IOrganizationSpecConfig | null | undefined>('/org-spec');
+    // json() 在 204 / 空 body 时为 undefined；React Query 不允许 query 结果为 undefined
+    return raw ?? null;
   },
 
   async saveOrgSpecConfig(config: IOrganizationSpecConfig): Promise<void> {
@@ -340,8 +379,12 @@ export const rdApi = {
   async listAcceptanceRecords(): Promise<IAcceptanceRecord[]> {
     const rows = await json<Record<string, unknown>[]>('/acceptance');
     return rows.map((r) => {
-      const result = r.result as IAcceptanceRecord['result'];
-      const status = ((r.status as string) || result) as IAcceptanceRecord['result'];
+      const resultRaw = String(r.result || 'pending');
+      const result: IAcceptanceRecord['result'] =
+        resultRaw === 'approved' || resultRaw === 'rejected' ? resultRaw : 'pending';
+      const statusRaw = String(r.status || result);
+      const status: IAcceptanceRecord['status'] =
+        statusRaw === 'approved' || statusRaw === 'rejected' ? statusRaw : 'pending';
       return {
         id: r.id as string,
         requirementId: (r.requirementId as string) || (r.requirement_id as string),
@@ -384,6 +427,15 @@ export const rdApi = {
     await json(`/pipeline-tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
+  async downloadPipelineDocsZip(requirementId: string): Promise<Blob> {
+    const res = await fetch(`${BASE}/pipeline-docs/download?requirementId=${encodeURIComponent(requirementId)}`);
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`${res.status}: ${t}`);
+    }
+    return res.blob();
+  },
+
   async listProducts(): Promise<IProduct[]> {
     const rows = await json<Record<string, unknown>[]>('/products');
     return rows.map(mapProduct);
@@ -404,6 +456,64 @@ export const rdApi = {
 
   async deleteProduct(id: string): Promise<void> {
     await json(`/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  async listBountyTasks(): Promise<IBountyTask[]> {
+    const rows = await json<Record<string, unknown>[]>('/bounty-tasks');
+    return rows.map(mapBountyTask);
+  },
+
+  async listHuntBountyTasks(): Promise<IBountyTask[]> {
+    const rows = await json<Record<string, unknown>[]>('/bounty-tasks/hunt');
+    return rows.map(mapBountyTask);
+  },
+
+  async createBountyTask(
+    body: Partial<IBountyTask> & { requirementId: string; publisherId: string; title: string }
+  ): Promise<IBountyTask> {
+    const raw = await json<Record<string, unknown>>('/bounty-tasks', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return mapBountyTask(raw);
+  },
+
+  async acceptBountyTask(
+    id: string,
+    body: { role: 'pm' | 'tm'; hunterUserId: string; hunterUserName?: string }
+  ): Promise<{ ok: boolean; task?: IBountyTask; consolationCoins?: number; bothFilled?: boolean }> {
+    const raw = await json<Record<string, unknown>>(`/bounty-tasks/${encodeURIComponent(id)}/accept`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return {
+      ok: Boolean(raw.ok),
+      task: raw.task ? mapBountyTask(raw.task as Record<string, unknown>) : undefined,
+      consolationCoins: raw.consolationCoins != null ? Number(raw.consolationCoins) : undefined,
+      bothFilled: raw.bothFilled != null ? Boolean(raw.bothFilled) : undefined,
+    };
+  },
+
+  async deliverBountyTask(id: string, actorUserId: string): Promise<IBountyTask> {
+    const raw = await json<Record<string, unknown>>(`/bounty-tasks/${encodeURIComponent(id)}/deliver`, {
+      method: 'POST',
+      body: JSON.stringify({ actorUserId }),
+    });
+    return mapBountyTask(raw);
+  },
+
+  async settleBountyTask(id: string): Promise<IBountyTask> {
+    const raw = await json<Record<string, unknown>>(`/bounty-tasks/${encodeURIComponent(id)}/settle`, {
+      method: 'POST',
+    });
+    return mapBountyTask(raw);
+  },
+
+  async rejectBountyTask(id: string): Promise<IBountyTask> {
+    const raw = await json<Record<string, unknown>>(`/bounty-tasks/${encodeURIComponent(id)}/reject`, {
+      method: 'POST',
+    });
+    return mapBountyTask(raw);
   },
 };
 

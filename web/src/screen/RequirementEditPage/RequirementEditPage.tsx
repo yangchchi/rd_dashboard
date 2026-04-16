@@ -9,12 +9,12 @@ import { zhCN } from 'date-fns/locale';
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
+import { Label, RequiredMark } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { TiptapEditorComplete } from '@/components/business-ui/tiptap-editor';
+import { Textarea } from '@/components/ui/textarea';
 import { CalendarIcon, Save, Sparkles, Loader2, ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rdAuditUpdate } from '@/lib/rd-actor';
@@ -43,18 +43,6 @@ const getDefaultExpectedDate = () => {
   date.setDate(date.getDate() + 7);
   return date;
 };
-
-function stripHtmlTags(html: string): string {
-  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function plainTextToTipTapHtml(text: string): string {
-  const esc = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const t = text.trim();
-  if (!t) return '<p></p>';
-  return `<p>${esc(t)}</p>`;
-}
 
 type RequirementOptimizeStreamChunk = { content?: string };
 
@@ -124,7 +112,7 @@ const RequirementEditPage: React.FC = () => {
   }, []);
 
   const handleAiOptimize = async () => {
-    const plain = stripHtmlTags(description);
+    const plain = description.trim();
     if (!plain) {
       toast.error('请先填写需求描述');
       return;
@@ -151,7 +139,7 @@ const RequirementEditPage: React.FC = () => {
         return;
       }
 
-      setDescription(plainTextToTipTapHtml(optimized));
+      setDescription(optimized);
       toast.success('AI 优化完成', { description: '已用优化后的描述替换编辑器内容' });
     } catch {
       toast.error('AI 优化失败', { description: '请稍后重试' });
@@ -165,7 +153,7 @@ const RequirementEditPage: React.FC = () => {
       toast.error('请填写需求标题');
       return;
     }
-    if (!stripHtmlTags(description)) {
+    if (!description.trim()) {
       toast.error('请填写需求描述');
       return;
     }
@@ -232,8 +220,8 @@ const RequirementEditPage: React.FC = () => {
         }
       `}</style>
 
-      <div className="requirement-edit-page w-full max-w-4xl mx-auto">
-        <section className="w-full mb-6">
+      <div className="requirement-edit-page w-full space-y-6">
+        <section className="w-full">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <Button variant="outline" size="icon" onClick={() => router.back()}>
@@ -264,7 +252,9 @@ const RequirementEditPage: React.FC = () => {
           <Card>
             <CardHeader>
               <CardTitle>基本信息</CardTitle>
-              <CardDescription>编辑需求的基本信息，带 * 为必填项</CardDescription>
+              <CardDescription>
+                编辑需求的基本信息，带 <RequiredMark /> 为必填项
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
             <div className="space-y-2">
@@ -279,7 +269,7 @@ const RequirementEditPage: React.FC = () => {
               {/* 需求标题 */}
               <div className="space-y-2">
                 <Label htmlFor="title">
-                  需求标题 <span className="text-destructive">*</span>
+                  需求标题 <RequiredMark />
                 </Label>
                 <Input
                   id="title"
@@ -293,14 +283,14 @@ const RequirementEditPage: React.FC = () => {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label>
-                    需求描述 <span className="text-destructive">*</span>
+                    需求描述 <RequiredMark />
                   </Label>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={handleAiOptimize}
-                    disabled={isAnalyzing || !stripHtmlTags(description)}
+                    disabled={isAnalyzing || !description.trim()}
                   >
                     {isAnalyzing ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -310,10 +300,13 @@ const RequirementEditPage: React.FC = () => {
                     {isAnalyzing ? 'AI 优化中...' : 'AI优化'}
                   </Button>
                 </div>
-                <TiptapEditorComplete
+                <p className="text-xs text-muted-foreground">支持 Markdown 格式（标题、列表、表格等）</p>
+                <Textarea
                   value={description}
-                  onValueChange={setDescription}
-                  placeholder="请详细描述需求背景、业务场景..."
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="请详细描述需求背景、业务场景…（支持 Markdown）"
+                  className="min-h-[280px] resize-none font-mono text-sm leading-relaxed md:min-h-[320px]"
+                  spellCheck={false}
                 />
               </div>
               <div className="space-y-2">
@@ -375,7 +368,7 @@ const RequirementEditPage: React.FC = () => {
               {/* 期望上线时间 */}
               <div className="space-y-2">
                 <Label>
-                  期望上线时间 <span className="text-destructive">*</span>
+                  期望上线时间 <RequiredMark />
                 </Label>
                 <Popover>
                   <PopoverTrigger asChild>
@@ -408,7 +401,7 @@ const RequirementEditPage: React.FC = () => {
               {/* 业务优先级 */}
               <div className="space-y-2">
                 <Label>
-                  业务优先级 <span className="text-destructive">*</span>
+                  业务优先级 <RequiredMark />
                 </Label>
                 <Select value={priority} onValueChange={setPriority}>
                   <SelectTrigger>

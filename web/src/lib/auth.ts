@@ -2,6 +2,13 @@ import type { IUser } from './rd-types';
 
 const TOKEN_KEY = '__rd_auth_token';
 const USER_KEY = '__rd_auth_user';
+const USER_UPDATED_EVENT = 'rd-auth-user-updated';
+
+function emitStoredUserUpdated(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event('storage'));
+  window.dispatchEvent(new CustomEvent(USER_UPDATED_EVENT));
+}
 
 export function getAuthToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -20,14 +27,14 @@ export function getCurrentUser(): IUser | null {
 export function saveAuthSession(token: string, user: IUser): void {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
+  emitStoredUserUpdated();
 }
 
 export function clearAuthSession(): void {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  emitStoredUserUpdated();
 }
-
-const USER_UPDATED_EVENT = 'rd-auth-user-updated';
 
 export function updateStoredCurrentUser(
   updates: Partial<Pick<IUser, 'name' | 'email' | 'phone' | 'avatarUrl' | 'accessRoleId'>>
@@ -41,8 +48,7 @@ export function updateStoredCurrentUser(
     updatedAt: new Date().toISOString(),
   };
   localStorage.setItem(USER_KEY, JSON.stringify(next));
-  window.dispatchEvent(new Event('storage'));
-  window.dispatchEvent(new CustomEvent(USER_UPDATED_EVENT));
+  emitStoredUserUpdated();
   return next;
 }
 

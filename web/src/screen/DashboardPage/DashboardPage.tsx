@@ -314,7 +314,7 @@ const DashboardPage: React.FC = () => {
           </div>
         </section>
 
-        <section className="w-full mt-10 max-w-[1400px]">
+        <section className="mt-10 w-full">
           <div className="mb-4 flex items-start gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-primary/10">
               <Trophy className="h-5 w-5 text-primary" />
@@ -328,10 +328,10 @@ const DashboardPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid w-full min-w-0 gap-6 [grid-template-columns:repeat(auto-fit,minmax(min(100%,17.5rem),1fr))]">
+          <div className="grid w-full min-w-0 grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             <Card className="rd-surface-card rd-surface-card-hover min-w-0 overflow-hidden border-border">
               <CardHeader className="border-b border-border/80 pb-3">
-                <CardTitle className="text-base">提交人</CardTitle>
+                <CardTitle className="text-base">金主（发起人）</CardTitle>
                 <CardDescription>每条需求计 1；金币为 bounty 累计</CardDescription>
               </CardHeader>
               <CardContent className="p-0">
@@ -341,7 +341,7 @@ const DashboardPage: React.FC = () => {
 
             <Card className="rd-surface-card rd-surface-card-hover min-w-0 overflow-hidden border-border">
               <CardHeader className="border-b border-border/80 pb-3">
-                <CardTitle className="text-base">产品经理</CardTitle>
+                <CardTitle className="text-base">赏金猎人（产品经理）</CardTitle>
                 <CardDescription>已发布需求累计 PM 份额金币</CardDescription>
               </CardHeader>
               <CardContent className="p-0">
@@ -351,7 +351,7 @@ const DashboardPage: React.FC = () => {
 
             <Card className="rd-surface-card rd-surface-card-hover min-w-0 overflow-hidden border-border">
               <CardHeader className="border-b border-border/80 pb-3">
-                <CardTitle className="text-base">技术经理</CardTitle>
+                <CardTitle className="text-base">赏金猎人（技术经理）</CardTitle>
                 <CardDescription>已发布需求累计 TM 份额金币</CardDescription>
               </CardHeader>
               <CardContent className="p-0">

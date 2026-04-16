@@ -42,6 +42,7 @@ import {
   useRequirementsList,
   usePrd,
   useRequirement,
+  useSpecsList,
   useSpec,
   useSubmitSpecReview,
   useUpsertSpec,
@@ -251,6 +252,7 @@ const SpecEditPage: React.FC = () => {
   const { data: loadedOrg } = useOrgSpecConfig();
   const { data: allRequirements = [] } = useRequirementsList();
   const { data: allPrds = [] } = usePrdsList();
+  const { data: allSpecs = [] } = useSpecsList();
   const upsertSpecMutation = useUpsertSpec();
   const submitSpecReviewMutation = useSubmitSpecReview();
 
@@ -554,6 +556,11 @@ const SpecEditPage: React.FC = () => {
       toast.error('该需求尚未关联 PRD，请先在 PRD 管理中创建/关联 PRD');
       return;
     }
+    const existingSpec = allSpecs.find((s) => s.prdId === selectedPrdId);
+    if (existingSpec) {
+      toast.error('该需求已存在规格说明书，不允许重复创建');
+      return;
+    }
     const now = new Date().toISOString();
     const newId = `spec-${Date.now()}`;
     const payload = {
@@ -567,11 +574,18 @@ const SpecEditPage: React.FC = () => {
     await upsertSpecMutation.mutateAsync(payload);
     toast.success('规格已创建，请继续完善 FS/TS');
     router.push(`/specification/${newId}/edit`);
-  }, [selectedPrdId, selectedRequirementId, upsertSpecMutation, router]);
+  }, [allSpecs, selectedPrdId, selectedRequirementId, upsertSpecMutation, router]);
 
   if (isCreateMode) {
+    const prdRequirementMap = new Map(allPrds.map((p) => [p.id, p.requirementId]));
+    const requirementIdsWithSpec = new Set(
+      allSpecs
+        .map((s) => prdRequirementMap.get(s.prdId))
+        .filter((id): id is string => Boolean(id)),
+    );
     const candidateRequirements = allRequirements.filter((r) =>
-      ['backlog', 'prd_writing', 'spec_defining'].includes(r.status)
+      ['backlog', 'prd_writing', 'spec_defining'].includes(r.status) &&
+      !requirementIdsWithSpec.has(r.id)
     );
     const candidatePrds = allPrds.filter((p) => p.requirementId === selectedRequirementId);
     return (

@@ -65,6 +65,7 @@ export interface IPipelineSpecDocInput {
 
 export interface IPublishPipelineDocsPayload {
   pipelineName: string;
+  requirementTitle?: string;
   gitUrl: string;
   branch: string;
   remarks?: string;
@@ -150,40 +151,30 @@ export class PipelineGitService {
       await this.runGit(['clone', '--depth', '1', gitUrl, repoDir], tempRoot);
       await this.runGit(['checkout', '-B', branch], repoDir);
 
-      const docsDirName = `${this.slugify(pipelineName)}-${this.timestamp()}`;
+      const docsDirName = `${this.slugify(payload.requirementTitle || pipelineName)}-${this.timestamp()}`;
       const docsBaseDir = join(repoDir, 'docs', 'ai-pipeline', docsDirName);
       await mkdir(docsBaseDir, { recursive: true });
 
       const files: string[] = [];
       const documents: IPublishedDocumentRef[] = [];
 
-      for (const prd of payload.prds) {
-        const fileName = `prd-${this.slugify(prd.id)}.md`;
-        const relativePath = join('docs', 'ai-pipeline', docsDirName, fileName);
-        const relPosix = relativePath.replace(/\\/g, '/');
-        await writeFile(join(docsBaseDir, fileName), this.renderPrdMarkdown(prd, payload), 'utf8');
-        files.push(relPosix);
-        documents.push({
-          path: relPosix,
-          kind: 'prd',
-          id: prd.id,
-          title: prd.title || prd.id,
-        });
-      }
-
-      for (const spec of payload.specs) {
-        const fsFileName = `fs-${this.slugify(spec.id)}.md`;
-        const tsFileName = `ts-${this.slugify(spec.id)}.md`;
-        const fsRel = join('docs', 'ai-pipeline', docsDirName, fsFileName).replace(/\\/g, '/');
-        const tsRel = join('docs', 'ai-pipeline', docsDirName, tsFileName).replace(/\\/g, '/');
-        await writeFile(join(docsBaseDir, fsFileName), this.renderFsMarkdown(spec, payload), 'utf8');
-        await writeFile(join(docsBaseDir, tsFileName), this.renderTsMarkdown(spec, payload), 'utf8');
-        files.push(fsRel, tsRel);
-        documents.push(
-          { path: fsRel, kind: 'fs', id: spec.id, title: `FS · ${spec.id}` },
-          { path: tsRel, kind: 'ts', id: spec.id, title: `TS · ${spec.id}` }
-        );
-      }
+      const latestPrd = payload.prds[0];
+      const latestSpec = payload.specs[0];
+      const prdFileName = 'prd.md';
+      const fsFileName = 'fs-spec.md';
+      const tsFileName = 'ts-spec.md';
+      const prdRel = join('docs', 'ai-pipeline', docsDirName, prdFileName).replace(/\\/g, '/');
+      const fsRel = join('docs', 'ai-pipeline', docsDirName, fsFileName).replace(/\\/g, '/');
+      const tsRel = join('docs', 'ai-pipeline', docsDirName, tsFileName).replace(/\\/g, '/');
+      await writeFile(join(docsBaseDir, prdFileName), this.renderPrdMarkdown(latestPrd, payload), 'utf8');
+      await writeFile(join(docsBaseDir, fsFileName), this.renderFsMarkdown(latestSpec, payload), 'utf8');
+      await writeFile(join(docsBaseDir, tsFileName), this.renderTsMarkdown(latestSpec, payload), 'utf8');
+      files.push(prdRel, fsRel, tsRel);
+      documents.push(
+        { path: prdRel, kind: 'prd', id: latestPrd.id, title: 'PRD' },
+        { path: fsRel, kind: 'fs', id: latestSpec.id, title: 'FS' },
+        { path: tsRel, kind: 'ts', id: latestSpec.id, title: 'TS' },
+      );
 
       await this.runGit(['add', '.'], repoDir);
 

@@ -10,13 +10,6 @@ import { DRIZZLE_DATABASE } from '../../database/database.constants';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
 
-import {
-  SEED_ACCEPTANCE,
-  SEED_ORG_SPEC_CONFIG,
-  SEED_PRDS,
-  SEED_REQUIREMENTS,
-  SEED_SPECS,
-} from './seed-data';
 
 export type RequirementStatus =
   | 'backlog'
@@ -161,8 +154,8 @@ export interface IAcceptanceRecordRow {
   reviewer: string;
   scores: { functionality: number; valueMatch: number; experience: number };
   feedback: string;
-  result: 'approved' | 'rejected';
-  status: 'approved' | 'rejected';
+  result: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected';
   createdAt: string;
   updatedAt: string;
   createdBy?: string | null;
@@ -261,6 +254,11 @@ export interface IPipelineTaskRow {
   updatedBy?: string | null;
 }
 
+export interface IPipelineDocsExportItem {
+  fileName: string;
+  content: string;
+}
+
 /** 产品目录（与需求「所属产品」可同名关联，此处存结构化元数据） */
 export interface IProductRow {
   id: string;
@@ -275,6 +273,37 @@ export interface IProductRow {
   updatedAt: string;
   createdBy?: string | null;
   updatedBy?: string | null;
+}
+
+export type BountyTaskStatus = 'open' | 'developing' | 'delivered' | 'settled' | 'rework';
+
+export interface IBountyTaskRow {
+  id: string;
+  requirementId: string;
+  publisherId: string;
+  publisherName?: string | null;
+  title: string;
+  description: string;
+  rewardCoins: number;
+  depositCoins: number;
+  consolationCoins: number;
+  difficultyTag: 'normal' | 'hard' | 'epic';
+  deadlineAt: string;
+  acceptStatus: BountyTaskStatus;
+  /** @deprecated 旧版单人猎人；迁移后请用 pmUserId/tmUserId */
+  hunterUserId?: string | null;
+  hunterUserName?: string | null;
+  pmUserId?: string | null;
+  pmUserName?: string | null;
+  tmUserId?: string | null;
+  tmUserName?: string | null;
+  pmAcceptedAt?: string | null;
+  tmAcceptedAt?: string | null;
+  acceptedAt?: string | null;
+  deliveredAt?: string | null;
+  settledAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 @Injectable()
@@ -302,11 +331,15 @@ export class RdService implements OnModuleInit {
 
   async onModuleInit() {
     await this.ensureTables();
+    await this.ensurePrdRequirementUniqueIndex();
+    await this.ensureSpecPrdUniqueIndex();
+    await this.ensurePipelineRequirementUniqueIndex();
+    await this.ensureAcceptanceRequirementUniqueIndex();
     await this.ensureCommonAuditColumns();
     await this.ensureProductSchemaUpgrade();
     await this.ensureRequirementExtraColumns();
+    await this.ensureBountyDualSlotColumns();
     await this.ensureDatapaasRoleGrants();
-    await this.seedIfEmpty();
   }
 
   /**
@@ -334,28 +367,6 @@ export class RdService implements OnModuleInit {
       this.logger.warn(
         `未能为 DataPaas 角色授予 public 表权限（若无 anon_ 等角色可忽略）: ${e instanceof Error ? e.message : String(e)}`,
       );
-    }
-  }
-
-  private async seedIfEmpty() {
-    const cnt = await this.db.execute(sql`SELECT count(*)::int AS c FROM rd_requirements;`);
-    const rows = this.rowsFromExecute<{ c: number }>(cnt);
-    if (Number(rows[0]?.c ?? 0) > 0) {
-      return;
-    }
-    this.logger.log('初次启动：写入 RD 演示数据到 PostgreSQL');
-    for (const r of SEED_REQUIREMENTS) {
-      await this.upsertRequirement(r);
-    }
-    for (const p of SEED_PRDS) {
-      await this.upsertPrd(p);
-    }
-    for (const s of SEED_SPECS) {
-      await this.upsertSpec(s);
-    }
-    await this.saveOrgSpecConfig(SEED_ORG_SPEC_CONFIG);
-    for (const a of SEED_ACCEPTANCE) {
-      await this.addAcceptanceRecord(a);
     }
   }
 
@@ -462,6 +473,79 @@ export class RdService implements OnModuleInit {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_bounty_tasks (
+        id TEXT PRIMARY KEY,
+        requirement_id TEXT NOT NULL REFERENCES rd_requirements(id) ON DELETE CASCADE,
+        publisher_id TEXT NOT NULL,
+        publisher_name TEXT,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        reward_coins INT NOT NULL DEFAULT 0,
+        deposit_coins INT NOT NULL DEFAULT 0,
+        consolation_coins INT NOT NULL DEFAULT 1,
+        difficulty_tag TEXT NOT NULL DEFAULT 'normal',
+        deadline_at TIMESTAMPTZ NOT NULL,
+        accept_status TEXT NOT NULL DEFAULT 'open',
+        hunter_user_id TEXT,
+        hunter_user_name TEXT,
+        accepted_at TIMESTAMPTZ,
+        delivered_at TIMESTAMPTZ,
+        settled_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+  }
+
+  /** 同一需求仅允许存在一份 PRD。 */
+  private async ensurePrdRequirementUniqueIndex(): Promise<void> {
+    await this.db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS rd_prds_requirement_id_unique_idx
+      ON rd_prds (requirement_id);
+    `);
+  }
+
+  /** 同一 PRD 仅允许存在一份规格说明书。 */
+  private async ensureSpecPrdUniqueIndex(): Promise<void> {
+    try {
+      await this.db.execute(sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS rd_specs_prd_id_unique_idx
+        ON rd_specs (prd_id);
+      `);
+    } catch (e) {
+      this.logger.warn(
+        `rd_specs 唯一索引创建失败（可能存在历史重复数据）: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  /** 同一需求仅允许存在一条研发流水线任务。 */
+  private async ensurePipelineRequirementUniqueIndex(): Promise<void> {
+    try {
+      await this.db.execute(sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS rd_pipeline_tasks_requirement_id_unique_idx
+        ON rd_pipeline_tasks (requirement_id);
+      `);
+    } catch (e) {
+      this.logger.warn(
+        `rd_pipeline_tasks 唯一索引创建失败（可能存在历史重复数据）: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  /** 同一需求仅允许存在一条验收单。 */
+  private async ensureAcceptanceRequirementUniqueIndex(): Promise<void> {
+    try {
+      await this.db.execute(sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS rd_acceptance_records_requirement_id_unique_idx
+        ON rd_acceptance_records (requirement_id);
+      `);
+    } catch (e) {
+      this.logger.warn(
+        `rd_acceptance_records 唯一索引创建失败（可能存在历史重复数据）: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
   }
 
   /** 已有库升级：各表补充 created_by / updated_by 等通用审计字段 */
@@ -586,6 +670,45 @@ export class RdService implements OnModuleInit {
         pm_coins = (bounty_points / 2),
         tm_coins = bounty_points - (bounty_points / 2)
       WHERE bounty_points > 0 AND pm_coins = 0 AND tm_coins = 0;
+    `);
+  }
+
+  /** 悬赏双槽位：PM / TM 分别领取；两槽齐满后进入 developing */
+  private async ensureBountyDualSlotColumns(): Promise<void> {
+    await this.db.execute(sql`
+      ALTER TABLE rd_bounty_tasks ADD COLUMN IF NOT EXISTS pm_user_id TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_bounty_tasks ADD COLUMN IF NOT EXISTS pm_user_name TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_bounty_tasks ADD COLUMN IF NOT EXISTS pm_accepted_at TIMESTAMPTZ;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_bounty_tasks ADD COLUMN IF NOT EXISTS tm_user_id TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_bounty_tasks ADD COLUMN IF NOT EXISTS tm_user_name TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_bounty_tasks ADD COLUMN IF NOT EXISTS tm_accepted_at TIMESTAMPTZ;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_bounty_tasks
+      SET
+        pm_user_id = hunter_user_id,
+        pm_user_name = hunter_user_name,
+        pm_accepted_at = accepted_at
+      WHERE hunter_user_id IS NOT NULL
+        AND pm_user_id IS NULL
+        AND tm_user_id IS NULL;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_bounty_tasks
+      SET accept_status = 'open'
+      WHERE pm_user_id IS NOT NULL
+        AND tm_user_id IS NULL
+        AND accept_status = 'developing';
     `);
   }
 
@@ -1003,8 +1126,112 @@ export class RdService implements OnModuleInit {
     return rows[0] ? this.rowToPrd(rows[0]) : null;
   }
 
+  async getPrdByRequirementId(requirementId: string): Promise<IPrdRow | null> {
+    const result = await this.db.execute(
+      sql`SELECT * FROM rd_prds WHERE requirement_id = ${requirementId} LIMIT 1;`,
+    );
+    const rows = this.rowsFromExecute(result);
+    return rows[0] ? this.rowToPrd(rows[0]) : null;
+  }
+
+  async listPrdsByRequirementId(requirementId: string): Promise<IPrdRow[]> {
+    const result = await this.db.execute(
+      sql`SELECT * FROM rd_prds WHERE requirement_id = ${requirementId} ORDER BY updated_at DESC;`,
+    );
+    const rows = this.rowsFromExecute(result);
+    return rows.map((row) => this.rowToPrd(row));
+  }
+
+  async getSpecByPrdId(prdId: string): Promise<ISpecRow | null> {
+    const result = await this.db.execute(sql`SELECT * FROM rd_specs WHERE prd_id = ${prdId} LIMIT 1;`);
+    const rows = this.rowsFromExecute(result);
+    return rows[0] ? this.rowToSpec(rows[0]) : null;
+  }
+
+  async listSpecsByPrdIds(prdIds: string[]): Promise<ISpecRow[]> {
+    if (!prdIds.length) return [];
+    const values = prdIds.map((id) => sql`${id}`);
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_specs
+      WHERE prd_id IN (${sql.join(values, sql`, `)})
+      ORDER BY updated_at DESC;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows.map((row) => this.rowToSpec(row));
+  }
+
+  private renderPrdMarkdown(prd: IPrdRow): string {
+    const features = (prd.featureList || [])
+      .map((feature, index) => {
+        const criteria = (feature.acceptanceCriteria || []).map((c) => `- ${c}`).join('\n');
+        return `### ${index + 1}. ${feature.name}\n\n${feature.description || ''}\n\n验收标准：\n${criteria || '- 暂无'}\n`;
+      })
+      .join('\n');
+    return [
+      `# PRD - ${prd.title || prd.id}`,
+      '',
+      `- PRD ID: ${prd.id}`,
+      `- Requirement ID: ${prd.requirementId}`,
+      `- Status: ${prd.status}`,
+      `- Version: ${prd.version}`,
+      `- Updated At: ${prd.updatedAt}`,
+      '',
+      '## 背景',
+      prd.background || '',
+      '',
+      '## 目标',
+      prd.objectives || '',
+      '',
+      '## 功能列表',
+      features || '暂无',
+      '',
+      '## 非功能性需求',
+      prd.nonFunctional || '',
+      '',
+    ].join('\n');
+  }
+
+  async buildPipelineDocsExport(requirementId: string): Promise<IPipelineDocsExportItem[]> {
+    const requirement = await this.getRequirement(requirementId);
+    if (!requirement) {
+      throw new NotFoundException('需求不存在');
+    }
+    const prds = await this.listPrdsByRequirementId(requirementId);
+    if (!prds.length) {
+      throw new NotFoundException('未找到该需求对应的 PRD');
+    }
+    const specs = await this.listSpecsByPrdIds(prds.map((prd) => prd.id));
+    const latestPrd = prds[0];
+    const latestSpec = specs[0];
+    if (!latestSpec) {
+      throw new NotFoundException('未找到该需求对应的规格说明');
+    }
+    const fsContent =
+      latestSpec.fsMarkdown?.trim() || JSON.stringify(latestSpec.functionalSpec || {}, null, 2);
+    const tsContent =
+      latestSpec.tsMarkdown?.trim() || JSON.stringify(latestSpec.technicalSpec || {}, null, 2);
+    return [
+      {
+        fileName: 'prd.md',
+        content: this.renderPrdMarkdown(latestPrd),
+      },
+      {
+        fileName: 'fs-spec.md',
+        content: fsContent,
+      },
+      {
+        fileName: 'ts-spec.md',
+        content: tsContent,
+      },
+    ];
+  }
+
   async upsertPrd(body: Partial<IPrdRow> & { id: string; requirementId: string }): Promise<IPrdRow> {
     const existing = await this.getPrd(body.id);
+    const sameRequirementPrd = await this.getPrdByRequirementId(body.requirementId);
+    if (sameRequirementPrd && sameRequirementPrd.id !== body.id) {
+      throw new BadRequestException('该需求已存在PRD，不允许重复创建');
+    }
     const now = new Date().toISOString();
     const merged: IPrdRow = existing
       ? {
@@ -1151,6 +1378,10 @@ export class RdService implements OnModuleInit {
 
   async upsertSpec(body: Partial<ISpecRow> & { id: string; prdId: string }): Promise<ISpecRow> {
     const existing = await this.getSpec(body.id);
+    const samePrdSpec = await this.getSpecByPrdId(body.prdId);
+    if (samePrdSpec && samePrdSpec.id !== body.id) {
+      throw new BadRequestException('该需求已存在规格说明书，不允许重复创建');
+    }
     const now = new Date().toISOString();
     const merged: ISpecRow = existing
       ? {
@@ -1321,10 +1552,12 @@ export class RdService implements OnModuleInit {
     `);
     const rows = this.rowsFromExecute(result);
     return rows.map((r) => {
-      const result = r.result as IAcceptanceRecordRow['result'];
+      const resultRaw = String(r.result || 'pending');
+      const result: IAcceptanceRecordRow['result'] =
+        resultRaw === 'approved' || resultRaw === 'rejected' ? resultRaw : 'pending';
       const statusRaw = (r.status as string) || result;
       const status: IAcceptanceRecordRow['status'] =
-        statusRaw === 'rejected' ? 'rejected' : 'approved';
+        statusRaw === 'approved' || statusRaw === 'rejected' ? statusRaw : 'pending';
       return {
         id: r.id as string,
         requirementId: (r.requirement_id as string) || (r.requirementId as string),
@@ -1342,6 +1575,13 @@ export class RdService implements OnModuleInit {
   }
 
   async addAcceptanceRecord(rec: IAcceptanceRecordRow): Promise<void> {
+    const existingByRequirement = await this.db.execute(sql`
+      SELECT id FROM rd_acceptance_records WHERE requirement_id = ${rec.requirementId} LIMIT 1;
+    `);
+    const existingRows = this.rowsFromExecute<{ id: string }>(existingByRequirement);
+    if (existingRows[0] && existingRows[0].id !== rec.id) {
+      throw new BadRequestException('该需求已存在验收单，不允许重复创建');
+    }
     const now = new Date().toISOString();
     const status = rec.status ?? rec.result;
     const updatedAt = rec.updatedAt ?? now;
@@ -1387,6 +1627,16 @@ export class RdService implements OnModuleInit {
     body: Partial<IPipelineTaskRow> & { id: string; requirementId: string }
   ): Promise<IPipelineTaskRow> {
     const existing = await this.getPipelineTask(body.id);
+    const sameRequirementTaskResult = await this.db.execute(sql`
+      SELECT * FROM rd_pipeline_tasks WHERE requirement_id = ${body.requirementId} LIMIT 1;
+    `);
+    const sameRequirementTaskRows = this.rowsFromExecute(sameRequirementTaskResult);
+    const sameRequirementTask = sameRequirementTaskRows[0]
+      ? this.rowToPipelineTask(sameRequirementTaskRows[0])
+      : null;
+    if (sameRequirementTask && sameRequirementTask.id !== body.id) {
+      throw new BadRequestException('该需求已存在研发流水线，不允许重复创建');
+    }
     const now = new Date().toISOString();
     const merged: IPipelineTaskRow = existing
       ? {
@@ -1562,5 +1812,288 @@ export class RdService implements OnModuleInit {
 
   async deleteProduct(id: string): Promise<void> {
     await this.db.execute(sql`DELETE FROM rd_products WHERE id = ${id};`);
+  }
+
+  private rowToBountyTask(r: Record<string, unknown>): IBountyTaskRow {
+    const t = this.tsFromRow(r);
+    const toStatus = (raw: unknown): BountyTaskStatus => {
+      const s = String(raw || 'open');
+      if (s === 'developing' || s === 'delivered' || s === 'settled' || s === 'rework') {
+        return s;
+      }
+      return 'open';
+    };
+    const toDifficulty = (raw: unknown): 'normal' | 'hard' | 'epic' => {
+      const s = String(raw || 'normal');
+      if (s === 'hard' || s === 'epic') return s;
+      return 'normal';
+    };
+    const pmUid = (r.pm_user_id as string) || (r.pmUserId as string) || null;
+    const tmUid = (r.tm_user_id as string) || (r.tmUserId as string) || null;
+    const legacyHunter = (r.hunter_user_id as string) || (r.hunterUserId as string) || null;
+    return {
+      id: String(r.id),
+      requirementId: String(r.requirement_id ?? r.requirementId),
+      publisherId: String(r.publisher_id ?? r.publisherId),
+      publisherName: (r.publisher_name as string) || (r.publisherName as string) || null,
+      title: String(r.title || ''),
+      description: String(r.description || ''),
+      rewardCoins: Number(r.reward_coins ?? r.rewardCoins ?? 0),
+      depositCoins: Number(r.deposit_coins ?? r.depositCoins ?? 0),
+      consolationCoins: Number(r.consolation_coins ?? r.consolationCoins ?? 1),
+      difficultyTag: toDifficulty(r.difficulty_tag ?? r.difficultyTag),
+      deadlineAt: this.toIso(r.deadline_at ?? r.deadlineAt),
+      acceptStatus: toStatus(r.accept_status ?? r.acceptStatus),
+      hunterUserId: legacyHunter,
+      hunterUserName: (r.hunter_user_name as string) || (r.hunterUserName as string) || null,
+      pmUserId: pmUid,
+      pmUserName: (r.pm_user_name as string) || (r.pmUserName as string) || null,
+      tmUserId: tmUid,
+      tmUserName: (r.tm_user_name as string) || (r.tmUserName as string) || null,
+      pmAcceptedAt: r.pm_accepted_at != null ? this.toIso(r.pm_accepted_at) : (r.pmAcceptedAt != null ? this.toIso(r.pmAcceptedAt) : null),
+      tmAcceptedAt: r.tm_accepted_at != null ? this.toIso(r.tm_accepted_at) : (r.tmAcceptedAt != null ? this.toIso(r.tmAcceptedAt) : null),
+      acceptedAt: (r.accepted_at as string) || (r.acceptedAt as string) || null,
+      deliveredAt: (r.delivered_at as string) || (r.deliveredAt as string) || null,
+      settledAt: (r.settled_at as string) || (r.settledAt as string) || null,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+    };
+  }
+
+  private async getBountyTaskRow(id: string): Promise<IBountyTaskRow | null> {
+    const result = await this.db.execute(sql`SELECT * FROM rd_bounty_tasks WHERE id = ${id} LIMIT 1;`);
+    const rows = this.rowsFromExecute(result);
+    return rows[0] ? this.rowToBountyTask(rows[0]) : null;
+  }
+
+  /**
+   * 悬赏接槽成功后回写需求 pm/tm 与 taskAcceptances；TM 接满双槽时进入 ai_developing。
+   */
+  private async syncRequirementAfterBountyAccept(
+    requirementId: string,
+    role: 'pm' | 'tm',
+    userId: string,
+    userName: string | undefined,
+    bothSlotsFilled: boolean,
+  ): Promise<void> {
+    const req = await this.getRequirement(requirementId);
+    if (!req) {
+      throw new NotFoundException('需求不存在');
+    }
+    if (role === 'pm') {
+      if (req.taskAcceptances.some((t) => t.role === 'pm')) {
+        throw new BadRequestException('产品经理任务已被领取');
+      }
+      if (req.pm) {
+        throw new BadRequestException('产品经理任务已被领取');
+      }
+      const record: ITaskAcceptanceRecord = {
+        id: `ta_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+        role: 'pm',
+        userId,
+        userName,
+        coins: req.pmCoins,
+        acceptedAt: new Date().toISOString(),
+      };
+      await this.upsertRequirement({
+        id: requirementId,
+        pm: userId,
+        taskAcceptances: [...req.taskAcceptances, record],
+        updatedBy: userId,
+      });
+      return;
+    }
+    if (req.taskAcceptances.some((t) => t.role === 'tm')) {
+      throw new BadRequestException('技术经理任务已被领取');
+    }
+    if (req.tm) {
+      throw new BadRequestException('技术经理任务已被领取');
+    }
+    const record: ITaskAcceptanceRecord = {
+      id: `ta_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+      role: 'tm',
+      userId,
+      userName,
+      coins: req.tmCoins,
+      acceptedAt: new Date().toISOString(),
+    };
+    await this.upsertRequirement({
+      id: requirementId,
+      tm: userId,
+      taskAcceptances: [...req.taskAcceptances, record],
+      updatedBy: userId,
+      status: bothSlotsFilled ? 'ai_developing' : req.status,
+    });
+  }
+
+  async listBountyTasks(huntOnly = false): Promise<IBountyTaskRow[]> {
+    if (huntOnly) {
+      const result = await this.db.execute(sql`
+        SELECT b.*
+        FROM rd_bounty_tasks b
+        WHERE b.accept_status = 'open'
+          AND (b.pm_user_id IS NULL OR b.tm_user_id IS NULL)
+        ORDER BY b.updated_at DESC;
+      `);
+      const rows = this.rowsFromExecute(result);
+      return rows.map((row) => this.rowToBountyTask(row));
+    }
+    const result = await this.db.execute(sql`SELECT * FROM rd_bounty_tasks ORDER BY updated_at DESC;`);
+    const rows = this.rowsFromExecute(result);
+    return rows.map((row) => this.rowToBountyTask(row));
+  }
+
+  async createBountyTask(
+    body: Partial<IBountyTaskRow> & { requirementId: string; publisherId: string; title: string }
+  ): Promise<IBountyTaskRow> {
+    const id = body.id || `bty_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const now = new Date().toISOString();
+    const rewardCoins = Math.max(0, Math.floor(Number(body.rewardCoins ?? 0)));
+    const depositCoins = Math.max(0, Math.floor(Number(body.depositCoins ?? Math.floor(rewardCoins * 0.1))));
+    const consolationCoins = Math.max(0, Math.floor(Number(body.consolationCoins ?? 1)));
+    const deadlineAt = body.deadlineAt ? this.toIso(body.deadlineAt) : new Date(Date.now() + 3600_000).toISOString();
+    const difficultyTag: 'normal' | 'hard' | 'epic' =
+      body.difficultyTag === 'epic' || body.difficultyTag === 'hard' ? body.difficultyTag : 'normal';
+
+    const dup = await this.db.execute(sql`
+      SELECT id FROM rd_bounty_tasks
+      WHERE requirement_id = ${body.requirementId}
+        AND deadline_at > NOW()
+        AND id <> ${id}
+      LIMIT 1;
+    `);
+    if (this.rowsFromExecute<{ id: string }>(dup)[0]) {
+      throw new BadRequestException('该需求已有悬赏在有效期内，截止前不可重复发布');
+    }
+
+    await this.db.execute(sql`
+      INSERT INTO rd_bounty_tasks (
+        id, requirement_id, publisher_id, publisher_name, title, description,
+        reward_coins, deposit_coins, consolation_coins, difficulty_tag, deadline_at,
+        accept_status, created_at, updated_at
+      ) VALUES (
+        ${id}, ${body.requirementId}, ${body.publisherId}, ${body.publisherName ?? null}, ${body.title},
+        ${body.description ?? ''}, ${rewardCoins}, ${depositCoins}, ${consolationCoins}, ${difficultyTag},
+        ${deadlineAt}::timestamptz, 'open', ${now}::timestamptz, ${now}::timestamptz
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        reward_coins = EXCLUDED.reward_coins,
+        deposit_coins = EXCLUDED.deposit_coins,
+        consolation_coins = EXCLUDED.consolation_coins,
+        difficulty_tag = EXCLUDED.difficulty_tag,
+        deadline_at = EXCLUDED.deadline_at,
+        updated_at = EXCLUDED.updated_at;
+    `);
+    const result = await this.db.execute(sql`SELECT * FROM rd_bounty_tasks WHERE id = ${id} LIMIT 1;`);
+    const rows = this.rowsFromExecute(result);
+    return this.rowToBountyTask(rows[0]);
+  }
+
+  async acceptBountyTask(
+    id: string,
+    body: { role: 'pm' | 'tm'; hunterUserId: string; hunterUserName?: string },
+  ): Promise<{ ok: boolean; task?: IBountyTaskRow; consolationCoins?: number; bothFilled?: boolean }> {
+    const role = body.role;
+    if (role !== 'pm' && role !== 'tm') {
+      throw new BadRequestException('role 须为 pm 或 tm');
+    }
+    const hunterUserId = String(body.hunterUserId || '').trim();
+    if (!hunterUserId) throw new BadRequestException('缺少接单用户');
+
+    const bountyBefore = await this.getBountyTaskRow(id);
+    if (!bountyBefore) {
+      throw new NotFoundException('悬赏任务不存在');
+    }
+    const pmReady = Boolean(bountyBefore.pmUserId) || Boolean(bountyBefore.hunterUserId);
+    if (role === 'tm' && !pmReady) {
+      throw new BadRequestException('请先由产品经理领取本悬赏');
+    }
+
+    const now = new Date().toISOString();
+    let result: unknown;
+    if (role === 'pm') {
+      result = await this.db.execute(sql`
+        UPDATE rd_bounty_tasks
+        SET
+          pm_user_id = ${hunterUserId},
+          pm_user_name = ${body.hunterUserName ?? null},
+          pm_accepted_at = ${now}::timestamptz,
+          accept_status = CASE WHEN tm_user_id IS NOT NULL THEN 'developing' ELSE 'open' END,
+          accepted_at = CASE WHEN tm_user_id IS NOT NULL THEN ${now}::timestamptz ELSE accepted_at END,
+          updated_at = ${now}::timestamptz
+        WHERE id = ${id}
+          AND accept_status = 'open'
+          AND pm_user_id IS NULL
+        RETURNING *;
+      `);
+    } else {
+      result = await this.db.execute(sql`
+        UPDATE rd_bounty_tasks
+        SET
+          tm_user_id = ${hunterUserId},
+          tm_user_name = ${body.hunterUserName ?? null},
+          tm_accepted_at = ${now}::timestamptz,
+          accept_status = 'developing',
+          accepted_at = ${now}::timestamptz,
+          updated_at = ${now}::timestamptz
+        WHERE id = ${id}
+          AND accept_status = 'open'
+          AND tm_user_id IS NULL
+          AND pm_user_id IS NOT NULL
+        RETURNING *;
+      `);
+    }
+    const rows = this.rowsFromExecute(result);
+    if (!rows[0]) {
+      const fallback = await this.db.execute(sql`SELECT consolation_coins FROM rd_bounty_tasks WHERE id = ${id} LIMIT 1;`);
+      const frows = this.rowsFromExecute<{ consolation_coins?: number }>(fallback);
+      return { ok: false, consolationCoins: Number(frows[0]?.consolation_coins ?? 1) };
+    }
+    const task = this.rowToBountyTask(rows[0]);
+    const bothFilled = Boolean(task.pmUserId && task.tmUserId);
+    return { ok: true, task, bothFilled };
+  }
+
+  async deliverBountyTask(id: string, actorUserId: string): Promise<IBountyTaskRow> {
+    const now = new Date().toISOString();
+    const result = await this.db.execute(sql`
+      UPDATE rd_bounty_tasks
+      SET accept_status = 'delivered', delivered_at = ${now}::timestamptz, updated_at = ${now}::timestamptz
+      WHERE id = ${id}
+        AND accept_status = 'developing'
+        AND (pm_user_id = ${actorUserId} OR tm_user_id = ${actorUserId})
+      RETURNING *;
+    `);
+    const rows = this.rowsFromExecute(result);
+    if (!rows[0]) throw new BadRequestException('任务未处于可交付状态或无权限');
+    return this.rowToBountyTask(rows[0]);
+  }
+
+  async settleBountyTask(id: string): Promise<IBountyTaskRow> {
+    const now = new Date().toISOString();
+    const result = await this.db.execute(sql`
+      UPDATE rd_bounty_tasks
+      SET accept_status = 'settled', settled_at = ${now}::timestamptz, updated_at = ${now}::timestamptz
+      WHERE id = ${id} AND accept_status = 'delivered'
+      RETURNING *;
+    `);
+    const rows = this.rowsFromExecute(result);
+    if (!rows[0]) throw new BadRequestException('任务未处于待验收状态');
+    return this.rowToBountyTask(rows[0]);
+  }
+
+  async rejectBountyTask(id: string): Promise<IBountyTaskRow> {
+    const now = new Date().toISOString();
+    const result = await this.db.execute(sql`
+      UPDATE rd_bounty_tasks
+      SET accept_status = 'rework', updated_at = ${now}::timestamptz
+      WHERE id = ${id} AND accept_status = 'delivered'
+      RETURNING *;
+    `);
+    const rows = this.rowsFromExecute(result);
+    if (!rows[0]) throw new BadRequestException('任务未处于待验收状态');
+    return this.rowToBountyTask(rows[0]);
   }
 }

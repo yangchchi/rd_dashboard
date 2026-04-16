@@ -1,4 +1,5 @@
 import { ACCESS_PERMISSION_IDS } from './access-catalog';
+import { authApi } from './auth-api';
 
 export const ACCESS_POLICY_STORAGE_KEY = '__rd_access_roles_v1';
 export const ACCESS_POLICY_UPDATED_EVENT = 'rd-access-policy-updated';
@@ -43,6 +44,17 @@ export function writeAccessRoles(roles: AccessRoleRecord[]): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(ACCESS_POLICY_STORAGE_KEY, JSON.stringify(roles));
   window.dispatchEvent(new CustomEvent(ACCESS_POLICY_UPDATED_EVENT));
+}
+
+async function fetchAndCacheRolesFromServer(): Promise<AccessRoleRecord[]> {
+  const roles = await authApi.listAccessRoles();
+  writeAccessRoles(
+    roles.map((r) => ({
+      ...r,
+      permissionIds: validPermissionSubset(r.permissionIds || []),
+    }))
+  );
+  return readAccessRoles();
 }
 
 export function getAccessRoleById(id: string | null | undefined): AccessRoleRecord | null {
@@ -101,6 +113,50 @@ export function deleteAccessRole(id: string): { ok: true } | { ok: false; reason
   if (target.builtIn) return { ok: false, reason: '内置角色不可删除' };
   writeAccessRoles(roles.filter((r) => r.id !== id));
   return { ok: true };
+}
+
+export async function refreshAccessRolesFromServer(): Promise<AccessRoleRecord[]> {
+  if (typeof window === 'undefined') return [];
+  try {
+    return await fetchAndCacheRolesFromServer();
+  } catch {
+    return readAccessRoles();
+  }
+}
+
+export async function upsertAccessRoleRemote(
+  role: Omit<AccessRoleRecord, 'updatedAt'> & { updatedAt?: string }
+): Promise<AccessRoleRecord[]> {
+  await authApi.upsertAccessRole(role.id, {
+    name: role.name,
+    description: role.description,
+    permissionIds: validPermissionSubset(role.permissionIds),
+    builtIn: role.builtIn,
+  });
+  return fetchAndCacheRolesFromServer();
+}
+
+export async function deleteAccessRoleRemote(
+  id: string
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    await authApi.deleteAccessRole(id);
+    await fetchAndCacheRolesFromServer();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : '删除失败' };
+  }
+}
+
+export async function resetAccessRolesRemote(): Promise<AccessRoleRecord[]> {
+  const roles = await authApi.resetAccessRoles();
+  writeAccessRoles(
+    roles.map((r) => ({
+      ...r,
+      permissionIds: validPermissionSubset(r.permissionIds || []),
+    }))
+  );
+  return readAccessRoles();
 }
 
 export function seedDefaultRoles(): AccessRoleRecord[] {

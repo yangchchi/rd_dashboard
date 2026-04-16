@@ -6,6 +6,7 @@ import { Streamdown } from '@/components/ui/streamdown';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -38,7 +39,6 @@ import {
 import { getCurrentUser } from '@/lib/auth';
 import { rdAuditCreate, rdAuditUpdate } from '@/lib/rd-actor';
 import { capabilityClient } from '@/lib/capability-client';
-import { parsePrdMarkdownSections } from '@/lib/prd-markdown';
 import { cn } from '@/lib/utils';
 
 function stripHtmlTags(html: string): string {
@@ -172,12 +172,7 @@ const PRDPage: React.FC = () => {
   const [generating, setGenerating] = useState(false);
   const [generatedContent, setGeneratedContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [prdPreviewTab, setPrdPreviewTab] = useState<'full' | 'structured'>('full');
-
-  const prdPreviewSections = useMemo(
-    () => parsePrdMarkdownSections(generatedContent),
-    [generatedContent]
-  );
+  const [prdPreviewTab, setPrdPreviewTab] = useState<'edit' | 'preview'>('edit');
 
   const filteredPRDList = prdList.filter((prd) => {
     const matchKeyword = prd.title.toLowerCase().includes(searchKeyword.toLowerCase()) ||
@@ -186,9 +181,14 @@ const PRDPage: React.FC = () => {
     return matchKeyword && matchStatus;
   });
 
-  const availableRequirements = requirements.filter(req => 
-    req.status === 'backlog' || req.status === 'prd_writing'
-  );
+  const availableRequirements = useMemo(() => {
+    const linkedRequirementIds = new Set(prds.map((prd) => prd.requirementId));
+    return requirements.filter(
+      (req) =>
+        (req.status === 'backlog' || req.status === 'prd_writing') &&
+        !linkedRequirementIds.has(req.id)
+    );
+  }, [prds, requirements]);
 
   const handleGeneratePRD = async () => {
     if (!selectedRequirement) {
@@ -198,10 +198,15 @@ const PRDPage: React.FC = () => {
 
     const requirement = requirements.find(r => r.id === selectedRequirement);
     if (!requirement) return;
+    const existingPrd = prds.find((item) => item.requirementId === selectedRequirement);
+    if (existingPrd) {
+      toast.error('该需求已存在PRD，不能重复生成');
+      return;
+    }
 
     setGenerating(true);
     setGeneratedContent('');
-    setPrdPreviewTab('full');
+    setPrdPreviewTab('edit');
     setIsStreaming(true);
 
     try {
@@ -342,17 +347,17 @@ const PRDPage: React.FC = () => {
         <section className="w-full">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="rd-page-title">PRD管理</h1>
+              <h1 className="rd-page-title">智能文档</h1>
               <p className="rd-page-desc mt-1">
                 管理产品需求文档，支持AI辅助生成
               </p>
             </div>
             <Button
               onClick={() => {
-                setPrdPreviewTab('full');
+                setPrdPreviewTab('edit');
                 setShowGenerateDialog(true);
               }}
-              className="shrink-0 bg-gradient-to-r from-primary to-primary/85 shadow-md shadow-primary/25 transition-[filter,box-shadow] hover:brightness-110 hover:shadow-lg hover:shadow-primary/30"
+              className="shrink-0 shadow-sm"
             >
               <Sparkles className="mr-2 h-4 w-4" />
               AI生成PRD
@@ -602,7 +607,7 @@ const PRDPage: React.FC = () => {
             if (!open) {
               setGeneratedContent('');
               setSelectedRequirement('');
-              setPrdPreviewTab('full');
+              setPrdPreviewTab('edit');
             }
           }}
         >
@@ -670,50 +675,34 @@ const PRDPage: React.FC = () => {
                   ) : (
                     <Tabs
                       value={prdPreviewTab}
-                      onValueChange={(v) => setPrdPreviewTab(v as 'full' | 'structured')}
+                      onValueChange={(v) => setPrdPreviewTab(v as 'edit' | 'preview')}
                       className="flex min-h-0 flex-col gap-3"
                     >
                       <TabsList className="grid h-10 w-full max-w-md shrink-0 grid-cols-2 rounded-full p-1">
-                        <TabsTrigger value="full" className="rounded-full text-sm">
-                          全文 Markdown
+                        <TabsTrigger value="edit" className="rounded-full text-sm">
+                          编辑
                         </TabsTrigger>
-                        <TabsTrigger value="structured" className="rounded-full text-sm">
-                          结构化
+                        <TabsTrigger value="preview" className="rounded-full text-sm">
+                          预览
                         </TabsTrigger>
                       </TabsList>
-                      <TabsContent value="full" className="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+                      <TabsContent value="edit" className="mt-0 min-h-0 flex-1 space-y-2 data-[state=inactive]:hidden">
+                        <p className="text-xs text-muted-foreground">源码查看（Markdown）；切换「预览」查看排版效果</p>
+                        <Textarea
+                          value={generatedContent}
+                          readOnly
+                          placeholder="等待 AI 输出 Markdown 内容..."
+                          className="h-[min(26rem,55vh)] resize-none font-mono text-sm leading-relaxed"
+                          spellCheck={false}
+                        />
+                      </TabsContent>
+                      <TabsContent value="preview" className="mt-0 min-h-0 flex-1 space-y-2 data-[state=inactive]:hidden">
+                        <p className="text-xs text-muted-foreground">渲染预览（只读）；查看标题、列表、表格等排版效果</p>
                         <ScrollArea className="h-[min(26rem,55vh)] w-full">
                           <div className={`${PRD_GEN_PREVIEW_BOX} p-6 md:p-8`}>
-                            <Streamdown className={PRD_GEN_STREAMDOWN_CLASS}>{generatedContent}</Streamdown>
-                          </div>
-                        </ScrollArea>
-                      </TabsContent>
-                      <TabsContent
-                        value="structured"
-                        className="mt-0 min-h-0 flex-1 space-y-3 data-[state=inactive]:hidden"
-                      >
-                        <p className="text-xs text-muted-foreground">
-                          按「## 1. …」分节展示；每块为独立阅读区，与全文同源
-                        </p>
-                        <ScrollArea className="h-[min(26rem,55vh)] w-full">
-                          <div className="space-y-4 pr-3">
-                            {prdPreviewSections.docTitle && (
-                              <div className={`${PRD_GEN_PREVIEW_BOX} px-6 py-5`}>
-                                <p className="text-lg font-semibold leading-snug text-slate-50">
-                                  {prdPreviewSections.docTitle}
-                                </p>
-                              </div>
-                            )}
-                            {prdPreviewSections.sections.map((sec, i) => (
-                              <div key={`${sec.title}-${i}`} className={`${PRD_GEN_PREVIEW_BOX} p-5 md:p-6`}>
-                                <h3 className="mb-3 border-b border-white/10 pb-2 text-base font-semibold text-foreground">
-                                  {sec.title}
-                                </h3>
-                                <Streamdown className={PRD_GEN_STREAMDOWN_CLASS}>
-                                  {sec.body || '（本节暂无内容）'}
-                                </Streamdown>
-                              </div>
-                            ))}
+                            <Streamdown className={PRD_GEN_STREAMDOWN_CLASS}>
+                              {generatedContent || '暂无内容，请等待 AI 生成'}
+                            </Streamdown>
                           </div>
                         </ScrollArea>
                       </TabsContent>
@@ -730,7 +719,7 @@ const PRDPage: React.FC = () => {
                   setShowGenerateDialog(false);
                   setGeneratedContent('');
                   setSelectedRequirement('');
-                  setPrdPreviewTab('full');
+                  setPrdPreviewTab('edit');
                 }}
                 disabled={generating}
               >

@@ -140,6 +140,13 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
 
   const submitAcceptance = (approved: boolean) => {
     if (!selectedRequirement) return;
+    const existingRecord = acceptanceHistory.find((r) => r.requirementId === selectedRequirement.id);
+    if (existingRecord) {
+      toast.error('该需求已存在验收单，不允许重复创建');
+      setIsAcceptDialogOpen(false);
+      setIsRejectDialogOpen(false);
+      return;
+    }
     
     const now = new Date().toISOString();
     const actorId = getCurrentUser()?.id?.trim() || currentProfile.user_id?.trim();
@@ -206,7 +213,10 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
     void deleteRequirement.mutateAsync(reqId).then(() => toast.success('需求已删除'));
   };
 
-  const pendingRequirements = requirements.filter(r => r.status === 'pending_acceptance');
+  const requirementIdsWithAcceptance = new Set(acceptanceHistory.map((r) => r.requirementId));
+  const pendingRequirements = requirements.filter(
+    (r) => r.status === 'pending_acceptance' && !requirementIdsWithAcceptance.has(r.id)
+  );
   const releasedRequirements = requirements.filter(r => r.status === 'released');
 
   const renderRequirementCard = (req: IRequirement) => (
@@ -235,21 +245,6 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
               onView={() => handleViewDetail(req.id)}
               onEdit={() => handleEditRequirement(req.id)}
               onDelete={() => handleDeleteRequirement(req.id)}
-              extraActions={[
-                {
-                  key: 'submit-review',
-                  label: '提交审核',
-                  icon: <Send className="h-4 w-4" />,
-                  onClick: () => handleAcceptClick(req),
-                },
-                {
-                  key: 'reject-review',
-                  label: '驳回',
-                  icon: <XCircle className="h-4 w-4" />,
-                  onClick: () => handleRejectClick(req),
-                  variant: 'destructive',
-                },
-              ]}
             />
           )}
         </div>
@@ -280,6 +275,25 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
             </button>
           </div>
         </div>
+        {req.status === 'pending_acceptance' && (
+          <div className="mt-4 flex justify-end gap-2">
+            <Button
+              size="sm"
+              onClick={() => handleAcceptClick(req)}
+            >
+              <Send className="mr-1 h-4 w-4" />
+              验收
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => handleRejectClick(req)}
+            >
+              <XCircle className="mr-1 h-4 w-4" />
+              驳回
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -363,8 +377,20 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
                               <CardTitle className="text-lg mt-1">{req?.title ?? '未知需求'}</CardTitle>
                             </div>
                             <div className="flex shrink-0 items-center gap-2">
-                              <Badge variant={record.result === 'approved' ? 'default' : 'destructive'}>
-                                {record.result === 'approved' ? '已通过' : '已驳回'}
+                              <Badge
+                                variant={
+                                  record.result === 'approved'
+                                    ? 'default'
+                                    : record.result === 'rejected'
+                                      ? 'destructive'
+                                      : 'outline'
+                                }
+                              >
+                                {record.result === 'approved'
+                                  ? '已通过'
+                                  : record.result === 'rejected'
+                                    ? '已驳回'
+                                    : '待验收'}
                               </Badge>
                               {req && (
                                 <ListRowActionsMenu

@@ -21,4 +21,13 @@ function Label({
   )
 }
 
-export { Label }
+/** 表单必填：`text-destructive`（依赖 tailwind 中 `destructive` 色与 CSS 变量 `--destructive`） */
+function RequiredMark({ className, ...props }: React.ComponentProps<"span">) {
+  return (
+    <span className={cn("text-destructive", className)} aria-hidden="true" {...props}>
+      *
+    </span>
+  )
+}
+
+export { Label, RequiredMark }

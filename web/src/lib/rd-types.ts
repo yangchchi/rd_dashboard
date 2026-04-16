@@ -22,6 +22,37 @@ export interface ITaskAcceptanceRecord {
   acceptedAt: string;
 }
 
+export type BountyTaskStatus = 'open' | 'developing' | 'delivered' | 'settled' | 'rework';
+
+export interface IBountyTask {
+  id: string;
+  requirementId: string;
+  publisherId: string;
+  publisherName?: string;
+  title: string;
+  description: string;
+  rewardCoins: number;
+  depositCoins: number;
+  consolationCoins: number;
+  difficultyTag: 'normal' | 'hard' | 'epic';
+  deadlineAt: string;
+  acceptStatus: BountyTaskStatus;
+  /** @deprecated 旧版单人猎人 */
+  hunterUserId?: string;
+  hunterUserName?: string;
+  pmUserId?: string;
+  pmUserName?: string;
+  tmUserId?: string;
+  tmUserName?: string;
+  pmAcceptedAt?: string;
+  tmAcceptedAt?: string;
+  acceptedAt?: string;
+  deliveredAt?: string;
+  settledAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** 产品目录（结构化元数据；需求里的「所属产品」可与 name 对齐） */
 export type ProductLifecycleStatus = 'active' | 'archived';
 
@@ -161,8 +192,8 @@ export interface IAcceptanceRecord {
     experience: number;
   };
   feedback: string;
-  result: 'approved' | 'rejected';
-  status?: 'approved' | 'rejected';
+  result: 'pending' | 'approved' | 'rejected';
+  status?: 'pending' | 'approved' | 'rejected';
   createdAt: string;
   updatedAt?: string;
   createdBy?: string;

@@ -7,6 +7,7 @@ import {
 import { rdApi } from './rd-api';
 import type {
   IAcceptanceRecord,
+  IBountyTask,
   IOrganizationSpecConfig,
   IPipelineTask,
   IPrd,
@@ -22,6 +23,8 @@ export const rdKeys = {
   acceptance: ['rd', 'acceptance'] as const,
   pipelineTasks: ['rd', 'pipeline-tasks'] as const,
   products: ['rd', 'products'] as const,
+  bountyTasks: ['rd', 'bounty-tasks'] as const,
+  bountyHuntTasks: ['rd', 'bounty-hunt-tasks'] as const,
 };
 
 export function useRequirementsList() {
@@ -281,6 +284,88 @@ export function useDeletePipelineTask() {
     mutationFn: (id: string) => rdApi.deletePipelineTask(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rdKeys.pipelineTasks });
+    },
+  });
+}
+
+export function useBountyTasksList() {
+  return useQuery({
+    queryKey: rdKeys.bountyTasks,
+    queryFn: () => rdApi.listBountyTasks(),
+  });
+}
+
+export function useBountyHuntTasksList() {
+  return useQuery({
+    queryKey: rdKeys.bountyHuntTasks,
+    queryFn: () => rdApi.listHuntBountyTasks(),
+  });
+}
+
+export function useCreateBountyTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<IBountyTask> & { requirementId: string; publisherId: string; title: string }) =>
+      rdApi.createBountyTask(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rdKeys.bountyTasks });
+      void qc.invalidateQueries({ queryKey: rdKeys.bountyHuntTasks });
+    },
+  });
+}
+
+export function useAcceptBountyTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      id: string;
+      role: 'pm' | 'tm';
+      hunterUserId: string;
+      hunterUserName?: string;
+    }) =>
+      rdApi.acceptBountyTask(args.id, {
+        role: args.role,
+        hunterUserId: args.hunterUserId,
+        hunterUserName: args.hunterUserName,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rdKeys.bountyTasks });
+      void qc.invalidateQueries({ queryKey: rdKeys.bountyHuntTasks });
+      void qc.invalidateQueries({ queryKey: rdKeys.requirements });
+    },
+  });
+}
+
+export function useDeliverBountyTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; actorUserId: string }) =>
+      rdApi.deliverBountyTask(args.id, args.actorUserId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rdKeys.bountyTasks });
+      void qc.invalidateQueries({ queryKey: rdKeys.bountyHuntTasks });
+    },
+  });
+}
+
+export function useSettleBountyTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => rdApi.settleBountyTask(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rdKeys.bountyTasks });
+      void qc.invalidateQueries({ queryKey: rdKeys.bountyHuntTasks });
+    },
+  });
+}
+
+export function useRejectBountyTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => rdApi.rejectBountyTask(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rdKeys.bountyTasks });
+      void qc.invalidateQueries({ queryKey: rdKeys.bountyHuntTasks });
     },
   });
 }

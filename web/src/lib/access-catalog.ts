@@ -31,6 +31,7 @@ export type AccessMenuKey =
   | 'spec'
   | 'pipeline'
   | 'acceptance'
+  | 'bounty_hunt'
   | 'products'
   | 'settings_org_spec'
   | 'settings_plugins'
@@ -50,28 +51,28 @@ export const ACCESS_PERMISSION_LIST: AccessPermissionDef[] = [
   },
   {
     id: 'page.requirements',
-    label: '需求（列表 / 采集 / 详情 / 编辑）',
+    label: '需求管理（列表 / 采集 / 详情 / 编辑）',
     group: g('requirements'),
     kind: 'route',
     menuKey: 'requirements',
   },
   {
     id: 'page.prd',
-    label: 'PRD 文档',
+    label: '智能文档',
     group: g('prd_spec'),
     kind: 'route',
     menuKey: 'prd',
   },
   {
     id: 'page.spec',
-    label: '规格说明书',
+    label: '技术基准',
     group: g('prd_spec'),
     kind: 'route',
     menuKey: 'spec',
   },
   {
     id: 'page.pipeline',
-    label: 'AI 流水线',
+    label: '交付引擎',
     group: g('delivery'),
     kind: 'route',
     menuKey: 'pipeline',
@@ -84,8 +85,15 @@ export const ACCESS_PERMISSION_LIST: AccessPermissionDef[] = [
     menuKey: 'acceptance',
   },
   {
+    id: 'page.bounty_hunt',
+    label: '狩猎场',
+    group: g('delivery'),
+    kind: 'route',
+    menuKey: 'bounty_hunt',
+  },
+  {
     id: 'page.products',
-    label: '产品管理',
+    label: '产品主数据',
     group: g('product'),
     kind: 'route',
     menuKey: 'products',
@@ -188,6 +196,7 @@ export function requiredRoutePermission(pathname: string): string | null {
   if (p.startsWith('/specification')) return 'page.spec';
   if (p.startsWith('/ai-pipeline')) return 'page.pipeline';
   if (p.startsWith('/acceptance')) return 'page.acceptance';
+  if (p.startsWith('/bounty-hunt')) return 'page.bounty_hunt';
   if (p.startsWith('/products')) return 'page.products';
   if (p.startsWith('/org-spec-config')) return 'page.org_spec';
   if (p === '/plugins' || p.startsWith('/plugins/') || p === '/skills' || p.startsWith('/skills/'))

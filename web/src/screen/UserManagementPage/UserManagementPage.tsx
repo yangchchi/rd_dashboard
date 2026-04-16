@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Label, RequiredMark } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,7 @@ import { authApi } from '@/lib/auth-api';
 import { getCurrentUser, updateStoredCurrentUser } from '@/lib/auth';
 import {
   ACCESS_POLICY_UPDATED_EVENT,
+  refreshAccessRolesFromServer,
   readAccessRoles,
   type AccessRoleRecord,
 } from '@/lib/access-policy-storage';
@@ -54,6 +55,11 @@ const UserManagementPage: React.FC = () => {
     });
   }, []);
 
+  const reloadRolesFromServer = useCallback(async () => {
+    await refreshAccessRolesFromServer();
+    reloadRoles();
+  }, [reloadRoles]);
+
   const loadUsers = async () => {
     setLoading(true);
     try {
@@ -68,13 +74,13 @@ const UserManagementPage: React.FC = () => {
 
   useEffect(() => {
     void loadUsers();
-    reloadRoles();
+    void reloadRolesFromServer();
     const h = () => reloadRoles();
     window.addEventListener(ACCESS_POLICY_UPDATED_EVENT, h);
     return () => window.removeEventListener(ACCESS_POLICY_UPDATED_EVENT, h);
     // loadUsers 在挂载时拉取一次即可
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reloadRoles, reloadRolesFromServer]);
 
   const resetCreateForm = () => {
     setUsername('');
@@ -158,11 +164,15 @@ const UserManagementPage: React.FC = () => {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>新建用户</DialogTitle>
-            <DialogDescription>填写登录凭据与基础资料，带 * 为必填</DialogDescription>
+            <DialogDescription>
+              填写登录凭据与基础资料，带 <RequiredMark /> 为必填
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
-              <Label htmlFor="um-username">用户名 *</Label>
+              <Label htmlFor="um-username">
+                用户名 <RequiredMark />
+              </Label>
               <Input
                 id="um-username"
                 autoComplete="username"
@@ -173,7 +183,9 @@ const UserManagementPage: React.FC = () => {
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="um-password">密码 *</Label>
+              <Label htmlFor="um-password">
+                密码 <RequiredMark />
+              </Label>
               <Input
                 id="um-password"
                 type="password"

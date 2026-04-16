@@ -92,7 +92,7 @@ const PluginConfigPage: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-[1400px] mx-auto space-y-6">
+    <div className="w-full space-y-6">
       <section className="w-full flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 rd-page-title">

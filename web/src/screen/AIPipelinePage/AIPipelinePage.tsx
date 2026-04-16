@@ -36,6 +36,7 @@ import {
   Loader2,
   Plus,
   GitCommitHorizontal,
+  Download,
 } from 'lucide-react';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import { Streamdown } from '@/components/ui/streamdown';
@@ -51,6 +52,7 @@ import {
   useUpsertPipelineTask,
 } from '@/lib/rd-hooks';
 import { gitBlobViewerUrl } from '@/lib/git-web-url';
+import { rdApi } from '@/lib/rd-api';
 import type {
   IGitCommitRecord,
   IPipelinePublishedDocument,
@@ -145,8 +147,27 @@ const AIPipelinePage: React.FC = () => {
   });
   const logsEndRef = useRef<HTMLDivElement>(null);
 
+  const formatFileTimestamp = () => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  };
+
   const selectedTask = tasks.find(t => t.id === selectedTaskId);
   const selectedRequirement = requirements.find((r) => r.id === createForm.requirementId);
+  const requirementIdsWithPipeline = new Set(tasks.map((t) => t.requirementId));
+  const prdIdsWithSpec = new Set(specs.map((s) => s.prdId));
+  const requirementIdsWithPrd = new Set(prds.map((p) => p.requirementId));
+  const requirementIdsWithSpec = new Set(
+    prds.filter((p) => prdIdsWithSpec.has(p.id)).map((p) => p.requirementId)
+  );
+  const availableRequirementsForPipeline = requirements.filter(
+    (r) =>
+      ((!requirementIdsWithPipeline.has(r.id) &&
+        requirementIdsWithPrd.has(r.id) &&
+        requirementIdsWithSpec.has(r.id)) ||
+        r.id === createForm.requirementId)
+  );
   const productForSelectedRequirement = findProductForRequirement(selectedRequirement, products);
   const defaultPipelineName = selectedRequirement ? `${selectedRequirement.title}-生产流水线` : '';
   const selectedTaskCommitStore = selectedTask?.commitStore;
@@ -323,6 +344,25 @@ const AIPipelinePage: React.FC = () => {
     }
   };
 
+  const handleDownloadDocs = async (task: IPipelineTask) => {
+    try {
+      const blob = await rdApi.downloadPipelineDocsZip(task.requirementId);
+      const url = window.URL.createObjectURL(blob);
+      const anchor = window.document.createElement('a');
+      const safeTitle = task.requirementTitle.replace(/[\\/:*?"<>|]/g, '_').trim() || task.requirementId;
+      anchor.href = url;
+      anchor.download = `${safeTitle}-${formatFileTimestamp()}.zip`;
+      window.document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('文档打包下载已开始');
+    } catch (error) {
+      logger.error('下载流水线文档失败', error);
+      toast.error('下载失败，请稍后重试');
+    }
+  };
+
   const handleCodeReview = async () => {
     if (!selectedTask) return;
     
@@ -360,6 +400,11 @@ const AIPipelinePage: React.FC = () => {
       toast.error('请先选择需求');
       return;
     }
+    const existingTask = tasks.find((t) => t.requirementId === createForm.requirementId);
+    if (existingTask) {
+      toast.error('该需求已存在研发流水线，不允许重复创建');
+      return;
+    }
     if (!isValidGitUrl(createForm.gitUrl)) {
       toast.error('请输入有效的Git地址（https/ssh且以.git结尾）');
       return;
@@ -386,6 +431,7 @@ const AIPipelinePage: React.FC = () => {
     try {
       const payload = {
         pipelineName: createForm.name.trim(),
+        requirementTitle: selectedRequirement?.title || createForm.name.trim(),
         gitUrl: createForm.gitUrl.trim(),
         branch: createForm.branch.trim(),
         remarks: createForm.remarks.trim(),
@@ -641,6 +687,12 @@ const AIPipelinePage: React.FC = () => {
                                 onClick: () => handleAction('rollback', task.id),
                                 disabled: task.status === 'completed',
                                 variant: 'destructive',
+                              },
+                              {
+                                key: 'download',
+                                label: '下载',
+                                icon: <Download className="size-3" />,
+                                onClick: () => handleDownloadDocs(task),
                               },
                               ...(task.status === 'completed' && task.pipelineMeta?.sandboxUrl?.trim()
                                 ? [
@@ -1036,15 +1088,15 @@ const AIPipelinePage: React.FC = () => {
       </div>
 
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+          <DialogHeader className="shrink-0">
             <DialogTitle>创建流水线</DialogTitle>
             <DialogDescription>
               配置流水线基础信息，必须关联 PRD 与规格，并对接 Git 仓库地址。
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-2 pr-1">
             <div className="space-y-2">
               <label className="text-sm font-medium">关联需求（主线）</label>
               <Select
@@ -1055,13 +1107,16 @@ const AIPipelinePage: React.FC = () => {
                   <SelectValue placeholder="请先选择需求" />
                 </SelectTrigger>
                 <SelectContent>
-                  {requirements.map((r) => (
+                  {availableRequirementsForPipeline.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       {r.title} ({r.id})
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                仅展示满足前置依赖（已存在 PRD 与规格说明）且尚未创建流水线的需求。
+              </p>
             </div>
 
             <div className="space-y-2">
@@ -1162,7 +1217,7 @@ const AIPipelinePage: React.FC = () => {
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t pt-4 bg-background">
             <Button
               variant="outline"
               onClick={() => {

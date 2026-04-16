@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
 
 import { AuthService } from './auth.service';
 
@@ -52,5 +52,34 @@ export class AuthController {
   @Delete('users/:id')
   deleteUser(@Param('id') id: string) {
     return this.authService.deleteUser(id);
+  }
+
+  @Get('access-roles')
+  listAccessRoles() {
+    return this.authService.listAccessRoles();
+  }
+
+  @Put('access-roles/:id')
+  putAccessRole(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      name: string;
+      description?: string;
+      permissionIds?: string[];
+      builtIn?: boolean;
+    }
+  ) {
+    return this.authService.upsertAccessRole(id, body);
+  }
+
+  @Delete('access-roles/:id')
+  deleteAccessRole(@Param('id') id: string) {
+    return this.authService.deleteAccessRole(id);
+  }
+
+  @Post('access-roles/reset')
+  resetAccessRoles() {
+    return this.authService.resetAccessRoles();
   }
 }

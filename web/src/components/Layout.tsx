@@ -22,6 +22,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -40,19 +41,27 @@ import {
   User,
   LogOut,
   Bell,
+  Coins,
+  Sun,
+  Moon,
+  Monitor,
   ChevronsUpDown,
   ChevronRight,
   Settings,
   Package,
   UserCog,
   KeyRound,
+  Swords,
+  ShipWheel,
 } from "lucide-react";
+import { useTheme } from "next-themes";
 import { useCurrentUserProfile } from "@/hooks/useCurrentUserProfile";
 import { useAccessControl } from "@/hooks/useAccessControl";
 import { menuKeyAllowed, type AccessMenuKey } from "@/lib/access-catalog";
 import { clearAuthSession, getCurrentUser } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { RequireRouteAccess } from "@/components/require-route-access";
+import { useRequirementsList } from "@/lib/rd-hooks";
 
 const isDashboardPath = (pathname: string) =>
   pathname === "/" || pathname === "/dashboard";
@@ -111,6 +120,8 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
   const userInfo = useCurrentUserProfile();
   const authUser = getCurrentUser();
   const avatarSrc = authUser?.avatarUrl?.trim() || userInfo.avatar?.trim();
+  const { theme, resolvedTheme, setTheme } = useTheme();
+  const { data: requirements = [] } = useRequirementsList();
   const { permissions } = useAccessControl();
 
   const navOk = (key: AccessMenuKey) => menuKeyAllowed(key, permissions);
@@ -122,6 +133,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
     navOk("settings_permissions");
 
   const [settingsOpen, setSettingsOpen] = useState(() => isSettingsSectionActive(pathname));
+  const [themeMounted, setThemeMounted] = useState(false);
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -132,6 +144,27 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
       setSettingsOpen(true);
     }
   }, [pathname]);
+
+  useEffect(() => {
+    setThemeMounted(true);
+  }, []);
+
+  const themeLabel =
+    theme === "light"
+      ? "白天"
+      : theme === "dark"
+        ? "黑夜"
+        : `自动（当前${resolvedTheme === "dark" ? "黑夜" : "白天"}）`;
+
+  const coinStats = requirements.reduce((sum, req) => {
+    const records = req.taskAcceptances ?? [];
+    for (const record of records) {
+      if (record.userId === userInfo.user_id) {
+        sum += Number(record.coins) || 0;
+      }
+    }
+    return sum;
+  }, 0);
 
   const handleLogout = async () => {
     clearAuthSession();
@@ -145,22 +178,24 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton size="lg" asChild>
-                <Link href="/" className="gap-3">
-                  <div
-                    className={cn(
-                      "flex aspect-square size-10 items-center justify-center rounded-xl",
-                      "border border-primary/25 bg-primary/10 shadow-[0_0_24px_hsl(217_91%_60%_/_0.2)]"
-                    )}
-                  >
-                    <Cpu className="size-5 text-primary" />
-                  </div>
-                  <div className="grid flex-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
-                    <span className="truncate font-bold text-[hsl(210_40%_98%)] text-base tracking-tight">
+                <Link href="/" className="gap-3 items-start">
+                  <span className="flex shrink-0 pt-0.5">
+                    <ShipWheel
+                      className="h-10 w-10 text-blue-700 dark:text-cyan-100"
+                      aria-hidden
+                    />
+                  </span>
+                  <div className="grid min-w-0 flex-1 gap-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
+                    <span className="truncate bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-600 bg-clip-text text-base font-extrabold leading-none tracking-wide text-transparent drop-shadow-[0_2px_4px_rgba(59,130,246,0.35)] dark:from-cyan-200 dark:via-blue-200 dark:to-purple-200 dark:drop-shadow-[0_2px_6px_rgba(125,211,252,0.45)]">
                       AI智研平台
                     </span>
-                    <span className="truncate text-[10px] uppercase tracking-widest text-muted-foreground">
-                      R&D Management
-                    </span>
+                    <div className="flex min-w-0 max-w-full items-center gap-1.5">
+                      <span className="h-px w-6 shrink-0 bg-gradient-to-r from-transparent via-blue-500/70 to-blue-500/30 dark:via-cyan-300/80 dark:to-cyan-300/30" />
+                      <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-700/90 dark:text-cyan-100/90">
+                        AI-Driven SDLC
+                      </span>
+                      <span className="h-px w-6 shrink-0 bg-gradient-to-l from-transparent via-blue-500/70 to-blue-500/30 dark:via-cyan-300/80 dark:to-cyan-300/30" />
+                    </div>
                   </div>
                 </Link>
               </SidebarMenuButton>
@@ -201,42 +236,13 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                   </SidebarMenuItem>
                 ) : null}
 
-                {navOk("requirements") ? (
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={isActivePath(pathname, "/requirements")}
-                      tooltip="需求列表"
-                      className={menuButtonClass(isActivePath(pathname, "/requirements"))}
-                    >
-                      <Link href="/requirements" className="gap-3">
-                        <List
-                          className={cn(
-                            "size-5",
-                            isActivePath(pathname, "/requirements")
-                              ? "text-primary"
-                              : "text-muted-foreground"
-                          )}
-                        />
-                        <span
-                          className={cn(
-                            isActivePath(pathname, "/requirements")
-                              ? "font-semibold text-primary"
-                              : "text-sidebar-foreground/85"
-                          )}
-                        >
-                          需求清单
-                        </span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ) : null}
-
                 {(
                   [
-                    { path: "/prd", label: "PRD文档", icon: FileText, key: "prd" as const },
-                    { path: "/specification", label: "规格说明书", icon: Settings2, key: "spec" as const },
-                    { path: "/ai-pipeline", label: "流水线", icon: Cpu, key: "pipeline" as const },
+                    { path: "/bounty-hunt", label: "狩猎场", icon: Swords, key: "bounty_hunt" as const },
+                    { path: "/requirements", label: "需求管理", icon: List, key: "requirements" as const },
+                    { path: "/prd", label: "智能文档", icon: FileText, key: "prd" as const },
+                    { path: "/specification", label: "技术基准", icon: Settings2, key: "spec" as const },
+                    { path: "/ai-pipeline", label: "交付引擎", icon: Cpu, key: "pipeline" as const },
                     { path: "/acceptance", label: "验收中心", icon: CheckCircle, key: "acceptance" as const },
                   ] as const
                 )
@@ -277,7 +283,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                     <SidebarMenuButton
                       asChild
                       isActive={isActivePath(pathname, "/products")}
-                      tooltip="产品管理"
+                      tooltip="产品主数据"
                       className={menuButtonClass(isActivePath(pathname, "/products"))}
                     >
                       <Link href="/products" className="gap-3">
@@ -296,7 +302,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                               : "text-sidebar-foreground/85"
                           )}
                         >
-                          产品管理
+                          产品主数据
                         </span>
                       </Link>
                     </SidebarMenuButton>
@@ -467,6 +473,64 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                   "shadow-md"
                 )}
               >
+                <DropdownMenuItem
+                  className="cursor-default focus:bg-accent focus:text-accent-foreground"
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  <div className="flex w-full items-center justify-between gap-4">
+                    <span className="text-sm text-muted-foreground">主题</span>
+                    <div
+                      className={cn(
+                        "inline-flex rounded-full border border-border bg-card p-1 shadow-sm",
+                        !themeMounted && "pointer-events-none opacity-60"
+                      )}
+                      role="radiogroup"
+                      aria-label="主题切换"
+                    >
+                      {[
+                        { id: "light", label: "浅色", icon: Sun },
+                        { id: "dark", label: "深色", icon: Moon },
+                        { id: "system", label: "跟随系统", icon: Monitor },
+                      ].map((item) => {
+                        const Icon = item.icon;
+                        const active = themeMounted && theme === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            aria-label={item.label}
+                            disabled={!themeMounted}
+                            onClick={() => setTheme(item.id)}
+                            className={cn(
+                              "relative flex size-8 items-center justify-center rounded-full transition-colors",
+                              active ? "text-background" : "text-foreground hover:bg-accent/80"
+                            )}
+                          >
+                            {active ? (
+                              <span className="absolute inset-0 rounded-full bg-foreground shadow-sm" aria-hidden />
+                            ) : null}
+                            <Icon className="relative z-[1] size-4 shrink-0" strokeWidth={active ? 2.25 : 1.75} />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="cursor-default focus:bg-accent focus:text-accent-foreground"
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  <span className="flex w-full items-center justify-between gap-4">
+                    <span className="flex items-center gap-1.5 text-muted-foreground">
+                      <Coins className="size-4 text-amber-500" />
+                      金币
+                    </span>
+                    <span className="font-mono font-medium text-amber-600">{coinStats}</span>
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem asChild className="focus:bg-accent focus:text-accent-foreground">
                   <Link href="/settings">
                     <Settings className="mr-2 size-4" />

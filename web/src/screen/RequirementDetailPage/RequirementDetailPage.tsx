@@ -3,11 +3,11 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getCurrentUser, onStoredUserUpdated } from '@/lib/auth';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Streamdown } from '@/components/ui/streamdown';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { UserDisplay } from '@/components/business-ui/user-display';
-import { toast } from 'sonner';
 import {
   ArrowLeft,
   FileText,
@@ -30,7 +30,6 @@ import {
   usePrdsList,
   useRequirement,
   useSpecsList,
-  useAcceptRequirementTask,
   useAcceptanceRecords,
   usePipelineTasksList,
 } from '@/lib/rd-hooks';
@@ -87,35 +86,9 @@ const getStatusColor = (status: string) => {
   return colorMap[status] || 'bg-slate-500';
 };
 
-const LEGACY_USER_ROLE_KEY = '__global_rd_userRole';
-
-/** 与权限角色 role_pm / role_tm 对齐；无 accessRoleId 时回退到原型里的 session 角色 */
-function getAcceptTaskActorFlags(): { isPmActor: boolean; isTmActor: boolean } {
-  const u = getCurrentUser();
-  const accessRoleId = u?.accessRoleId?.trim() || null;
-  let legacy: string | null = null;
-  if (typeof window !== 'undefined') {
-    try {
-      legacy = sessionStorage.getItem(LEGACY_USER_ROLE_KEY);
-    } catch {
-      legacy = null;
-    }
-  }
-  const isPmActor =
-    accessRoleId === 'role_pm' ||
-    accessRoleId === 'role_admin' ||
-    (accessRoleId == null && legacy === 'pm');
-  const isTmActor =
-    accessRoleId === 'role_tm' ||
-    accessRoleId === 'role_admin' ||
-    (accessRoleId == null && legacy === 'tm');
-  return { isPmActor, isTmActor };
-}
-
 const RequirementDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const acceptTask = useAcceptRequirementTask();
   const { data: requirement, isLoading: reqLoading } = useRequirement(id);
   const { data: prds = [] } = usePrdsList();
   const { data: specs = [] } = useSpecsList();
@@ -236,8 +209,6 @@ const RequirementDetailPage: React.FC = () => {
   const priorityInfo = priorityConfig[requirement.priority];
   const StatusIcon = statusInfo?.icon || Clock;
   void authVersion;
-  const authUser = getCurrentUser();
-  const { isPmActor, isTmActor } = getAcceptTaskActorFlags();
   const tags = (requirement as IRequirement & { tags?: string[] }).tags;
 
   const pmClaimed =
@@ -249,40 +220,6 @@ const RequirementDetailPage: React.FC = () => {
   const submitterDisplay = requirement.submitterName?.trim() || requirement.submitter;
   const pmDisplay = pmAcceptance?.userName?.trim() || requirement.pm;
   const tmDisplay = tmAcceptance?.userName?.trim() || requirement.tm;
-
-  const canAcceptPm = isPmActor && !pmClaimed && Boolean(authUser?.id);
-
-  const canAcceptTm = isTmActor && !tmClaimed && Boolean(authUser?.id);
-
-  const handleAcceptPm = async () => {
-    if (!authUser?.id) return;
-    try {
-      await acceptTask.mutateAsync({
-        requirementId: requirement.id,
-        role: 'pm',
-        userId: authUser.id,
-        userName: authUser.name || authUser.username,
-      });
-      toast.success(`已接受任务，已登记为本需求的产品经理`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : '领取失败');
-    }
-  };
-
-  const handleAcceptTm = async () => {
-    if (!authUser?.id) return;
-    try {
-      await acceptTask.mutateAsync({
-        requirementId: requirement.id,
-        role: 'tm',
-        userId: authUser.id,
-        userName: authUser.name || authUser.username,
-      });
-      toast.success(`已接受任务，已登记为本需求的技术经理`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : '领取失败');
-    }
-  };
 
   const pmCoins = requirement.pmCoins ?? 0;
   const tmCoins = requirement.tmCoins ?? 0;
@@ -310,7 +247,7 @@ const RequirementDetailPage: React.FC = () => {
         }
       `}</style>
 
-      <div className="w-full max-w-[1400px] mx-auto space-y-6 page-enter">
+      <div className="w-full space-y-6 page-enter">
         {/* 顶部导航 */}
         <section className="w-full flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -372,19 +309,7 @@ const RequirementDetailPage: React.FC = () => {
                   {pmDisplay ? (
                     <span className="text-sm text-foreground">{pmDisplay}</span>
                   ) : (
-                    <div className="space-y-2">
-                      <span className="text-sm text-muted-foreground block">待领取</span>
-                      {canAcceptPm ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={() => void handleAcceptPm()}
-                          disabled={acceptTask.isPending}
-                        >
-                          接受任务
-                        </Button>
-                      ) : null}
-                    </div>
+                    <span className="text-sm text-muted-foreground">待领取</span>
                   )}
                 </div>
                 <div>
@@ -392,20 +317,7 @@ const RequirementDetailPage: React.FC = () => {
                   {tmDisplay ? (
                     <span className="text-sm text-foreground">{tmDisplay}</span>
                   ) : (
-                    <div className="space-y-2">
-                      <span className="text-sm text-muted-foreground block">待领取</span>
-                      {canAcceptTm ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => void handleAcceptTm()}
-                          disabled={acceptTask.isPending}
-                        >
-                          接受任务
-                        </Button>
-                      ) : null}
-                    </div>
+                    <span className="text-sm text-muted-foreground">待领取</span>
                   )}
                 </div>
                 <div>
@@ -435,11 +347,6 @@ const RequirementDetailPage: React.FC = () => {
                   </p>
                 </div>
               </div>
-              {(canAcceptPm || canAcceptTm) && (
-                <p className="mt-4 text-xs text-muted-foreground">
-                  产品经理、技术经理可在本页点击「接受任务」，系统会自动回填对应负责人字段。
-                </p>
-              )}
             </CardContent>
           </Card>
         </section>
@@ -493,9 +400,15 @@ const RequirementDetailPage: React.FC = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm leading-relaxed text-foreground">
-                  {requirement.description}
-                </p>
+                <div className="text-sm text-foreground [&_.streamdown]:max-w-none">
+                  {requirement.description?.trim() ? (
+                    <Streamdown className="prose prose-sm dark:prose-invert max-w-none text-foreground prose-headings:scroll-mt-4 prose-p:leading-relaxed prose-li:my-0.5 prose-table:text-sm">
+                      {requirement.description}
+                    </Streamdown>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">暂无描述</p>
+                  )}
+                </div>
               </CardContent>
             </Card>
 

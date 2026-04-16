@@ -1,4 +1,5 @@
 import type { ILoginResponse, IUser } from './rd-types';
+import type { AccessRoleRecord } from './access-policy-storage';
 
 const BASE = '/api/auth';
 
@@ -68,6 +69,32 @@ export const authApi = {
   deleteUser(id: string) {
     return json<void>(`/users/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+    });
+  },
+
+  listAccessRoles() {
+    return json<AccessRoleRecord[]>('/access-roles');
+  },
+
+  upsertAccessRole(
+    id: string,
+    role: { name: string; description?: string; permissionIds: string[]; builtIn?: boolean }
+  ) {
+    return json<AccessRoleRecord>(`/access-roles/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(role),
+    });
+  },
+
+  deleteAccessRole(id: string) {
+    return json<void>(`/access-roles/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  resetAccessRoles() {
+    return json<AccessRoleRecord[]>('/access-roles/reset', {
+      method: 'POST',
     });
   },
 };

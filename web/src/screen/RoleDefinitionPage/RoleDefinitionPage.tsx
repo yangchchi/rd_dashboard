@@ -33,9 +33,11 @@ import {
 import {
   ACCESS_POLICY_STORAGE_KEY,
   ACCESS_POLICY_UPDATED_EVENT,
-  deleteAccessRole,
+  deleteAccessRoleRemote,
   readAccessRoles,
-  upsertAccessRole,
+  refreshAccessRolesFromServer,
+  resetAccessRolesRemote,
+  upsertAccessRoleRemote,
   type AccessRoleRecord,
 } from '@/lib/access-policy-storage';
 import { cn } from '@/lib/utils';
@@ -62,12 +64,17 @@ const RoleDefinitionPage: React.FC = () => {
     setRoles(readAccessRoles());
   }, []);
 
-  useEffect(() => {
+  const reloadFromServer = useCallback(async () => {
+    await refreshAccessRolesFromServer();
     reload();
+  }, [reload]);
+
+  useEffect(() => {
+    void reloadFromServer();
     const h = () => reload();
     window.addEventListener(ACCESS_POLICY_UPDATED_EVENT, h);
     return () => window.removeEventListener(ACCESS_POLICY_UPDATED_EVENT, h);
-  }, [reload]);
+  }, [reload, reloadFromServer]);
 
   const groups = useMemo(() => grouped(), []);
 
@@ -96,26 +103,30 @@ const RoleDefinitionPage: React.FC = () => {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!name.trim()) {
       toast.error('请填写角色名称');
       return;
     }
     const id = editing?.id ?? `role_${Date.now()}`;
-    upsertAccessRole({
-      id,
-      name: name.trim(),
-      description: description.trim() || undefined,
-      permissionIds: [...permSet],
-      builtIn: editing?.builtIn,
-    });
-    toast.success(editing ? '角色已更新' : '角色已创建');
-    setDialogOpen(false);
-    reload();
+    try {
+      await upsertAccessRoleRemote({
+        id,
+        name: name.trim(),
+        description: description.trim() || undefined,
+        permissionIds: [...permSet],
+        builtIn: editing?.builtIn,
+      });
+      toast.success(editing ? '角色已更新' : '角色已创建');
+      setDialogOpen(false);
+      reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '保存失败');
+    }
   };
 
-  const handleDelete = (r: AccessRoleRecord) => {
-    const res = deleteAccessRole(r.id);
+  const handleDelete = async (r: AccessRoleRecord) => {
+    const res = await deleteAccessRoleRemote(r.id);
     if (!res.ok) {
       toast.error(res.reason);
       return;
@@ -124,13 +135,15 @@ const RoleDefinitionPage: React.FC = () => {
     reload();
   };
 
-  const handleResetBuiltins = () => {
+  const handleResetBuiltins = async () => {
     if (!window.confirm('将清除本地角色定义并恢复内置模板，是否继续？')) return;
-    localStorage.removeItem(ACCESS_POLICY_STORAGE_KEY);
-    readAccessRoles();
-    window.dispatchEvent(new CustomEvent(ACCESS_POLICY_UPDATED_EVENT));
-    reload();
-    toast.success('已恢复默认角色');
+    try {
+      await resetAccessRolesRemote();
+      reload();
+      toast.success('已恢复默认角色');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '恢复失败');
+    }
   };
 
   return (
@@ -164,7 +177,7 @@ const RoleDefinitionPage: React.FC = () => {
         </CardHeader>
         <CardContent className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            策略存储键：<code className="font-mono text-[11px]">{ACCESS_POLICY_STORAGE_KEY}</code>
+            服务端持久化策略（本地缓存键：<code className="font-mono text-[11px]">{ACCESS_POLICY_STORAGE_KEY}</code>）
           </p>
           <Table>
             <TableHeader>

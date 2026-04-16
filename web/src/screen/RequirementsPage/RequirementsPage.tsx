@@ -134,7 +134,7 @@ const RequirementsPage: React.FC = () => {
         <section className="w-full">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h1 className="rd-page-title">需求列表</h1>
+              <h1 className="rd-page-title">需求清单</h1>
               <p className="rd-page-desc mt-1">管理所有需求，支持看板/列表视图、搜索与筛选</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">

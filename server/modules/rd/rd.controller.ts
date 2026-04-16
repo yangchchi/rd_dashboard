@@ -1,8 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
+import JSZip from 'jszip';
+import { buildZipContentDisposition } from './rd-download-header';
 
 import {
   RdService,
   type IAcceptanceRecordRow,
+  type IBountyTaskRow,
   type IPrdRow,
   type IPipelineTaskRow,
   type IProductRow,
@@ -13,6 +17,12 @@ import {
 @Controller(['rd', 'api/rd'])
 export class RdController {
   constructor(private readonly rd: RdService) {}
+
+  private timestamp() {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  }
 
   @Get('requirements')
   listRequirements(): Promise<IRequirementRow[]> {
@@ -157,6 +167,24 @@ export class RdController {
     return this.rd.deletePipelineTask(id);
   }
 
+  @Get('pipeline-docs/download')
+  async downloadPipelineDocs(
+    @Query('requirementId') requirementId: string,
+    @Res() res: Response,
+  ) {
+    const docs = await this.rd.buildPipelineDocsExport(requirementId);
+    const requirement = await this.rd.getRequirement(requirementId);
+    const zip = new JSZip();
+    docs.forEach((doc) => {
+      zip.file(doc.fileName, doc.content);
+    });
+    const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    const zipBaseName = `${requirement?.title || requirementId || '未命名需求'}-${this.timestamp()}`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', buildZipContentDisposition(zipBaseName));
+    res.send(buffer);
+  }
+
   @Get('products')
   listProducts(): Promise<IProductRow[]> {
     return this.rd.listProducts();
@@ -175,5 +203,43 @@ export class RdController {
   @Delete('products/:id')
   deleteProduct(@Param('id') id: string) {
     return this.rd.deleteProduct(id);
+  }
+
+  @Get('bounty-tasks')
+  listBountyTasks(): Promise<IBountyTaskRow[]> {
+    return this.rd.listBountyTasks(false);
+  }
+
+  @Get('bounty-tasks/hunt')
+  listHuntBountyTasks(): Promise<IBountyTaskRow[]> {
+    return this.rd.listBountyTasks(true);
+  }
+
+  @Post('bounty-tasks')
+  createBountyTask(@Body() body: Partial<IBountyTaskRow> & { requirementId: string; publisherId: string; title: string }) {
+    return this.rd.createBountyTask(body);
+  }
+
+  @Post('bounty-tasks/:id/accept')
+  acceptBountyTask(
+    @Param('id') id: string,
+    @Body() body: { role: 'pm' | 'tm'; hunterUserId: string; hunterUserName?: string }
+  ) {
+    return this.rd.acceptBountyTask(id, body);
+  }
+
+  @Post('bounty-tasks/:id/deliver')
+  deliverBountyTask(@Param('id') id: string, @Body() body: { actorUserId: string }) {
+    return this.rd.deliverBountyTask(id, body.actorUserId);
+  }
+
+  @Post('bounty-tasks/:id/settle')
+  settleBountyTask(@Param('id') id: string) {
+    return this.rd.settleBountyTask(id);
+  }
+
+  @Post('bounty-tasks/:id/reject')
+  rejectBountyTask(@Param('id') id: string) {
+    return this.rd.rejectBountyTask(id);
   }
 }

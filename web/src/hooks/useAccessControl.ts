@@ -10,6 +10,7 @@ import {
 import {
   ACCESS_POLICY_UPDATED_EVENT,
   getAccessRoleById,
+  refreshAccessRolesFromServer,
   readAccessRoles,
 } from '@/lib/access-policy-storage';
 import { getCurrentUser, onStoredUserUpdated } from '@/lib/auth';
@@ -114,9 +115,14 @@ export function useAccessControl() {
     const onStorage = (e: StorageEvent) => {
       if (e.key === '__rd_access_roles_v1') bump();
     };
+    const onUserUpdated = () => {
+      void refreshAccessRolesFromServer();
+      bump();
+    };
     window.addEventListener(ACCESS_POLICY_UPDATED_EVENT, onPolicy);
     window.addEventListener('storage', onStorage);
-    const offUser = onStoredUserUpdated(bump);
+    const offUser = onStoredUserUpdated(onUserUpdated);
+    void refreshAccessRolesFromServer();
     return () => {
       window.removeEventListener(ACCESS_POLICY_UPDATED_EVENT, onPolicy);
       window.removeEventListener('storage', onStorage);

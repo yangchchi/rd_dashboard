@@ -19,6 +19,7 @@ import {
 } from '@/lib/access-catalog';
 import {
   ACCESS_POLICY_UPDATED_EVENT,
+  refreshAccessRolesFromServer,
   readAccessRoles,
   type AccessRoleRecord,
 } from '@/lib/access-policy-storage';
@@ -29,12 +30,17 @@ const PermissionManagementPage: React.FC = () => {
 
   const reload = useCallback(() => setRoles(readAccessRoles()), []);
 
-  useEffect(() => {
+  const reloadFromServer = useCallback(async () => {
+    await refreshAccessRolesFromServer();
     reload();
+  }, [reload]);
+
+  useEffect(() => {
+    void reloadFromServer();
     const h = () => reload();
     window.addEventListener(ACCESS_POLICY_UPDATED_EVENT, h);
     return () => window.removeEventListener(ACCESS_POLICY_UPDATED_EVENT, h);
-  }, [reload]);
+  }, [reload, reloadFromServer]);
 
   const roleHas = (role: AccessRoleRecord, permId: string) => role.permissionIds.includes(permId);
 

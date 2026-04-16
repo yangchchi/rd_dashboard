@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleInit, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import { DRIZZLE_DATABASE } from '../../database/database.constants';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
@@ -29,6 +29,34 @@ export interface IUserView {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface IAccessRoleRecord {
+  id: string;
+  name: string;
+  description?: string;
+  permissionIds: string[];
+  builtIn?: boolean;
+  updatedAt: string;
+}
+
+const DEFAULT_PERMISSION_IDS = [
+  'page.dashboard',
+  'page.requirements',
+  'page.prd',
+  'page.spec',
+  'page.pipeline',
+  'page.acceptance',
+  'page.bounty_hunt',
+  'page.products',
+  'page.org_spec',
+  'page.plugins',
+  'page.users',
+  'page.roles',
+  'page.permissions',
+  'action.users.create',
+  'action.users.delete',
+  'action.users.assign_role',
+];
 
 @Injectable()
 export class AuthService implements OnModuleInit {
@@ -105,6 +133,8 @@ export class AuthService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.ensureUsersTable();
+    await this.ensureAccessRolesTable();
+    await this.seedDefaultAccessRolesIfEmpty();
     await this.ensureDefaultAdmin();
   }
 
@@ -135,6 +165,143 @@ export class AuthService implements OnModuleInit {
     await this.db.execute(sql`
       ALTER TABLE rd_users ADD COLUMN IF NOT EXISTS access_role_id TEXT;
     `);
+  }
+
+  private nowIso(): string {
+    return new Date().toISOString();
+  }
+
+  private roleRowToView(row: Record<string, unknown>): IAccessRoleRecord {
+    const permissionIds = Array.isArray(row.permission_ids)
+      ? row.permission_ids
+      : Array.isArray(row.permissionIds)
+        ? row.permissionIds
+        : [];
+    return {
+      id: String(row.id || ''),
+      name: String(row.name || ''),
+      description:
+        typeof row.description === 'string' && row.description.trim() !== ''
+          ? row.description.trim()
+          : undefined,
+      permissionIds: permissionIds
+        .filter((v) => typeof v === 'string' && v.trim() !== '')
+        .map((v) => String(v).trim()),
+      builtIn: Boolean(row.built_in ?? row.builtIn),
+      updatedAt: this.toIso(row.updated_at ?? row.updatedAt),
+    };
+  }
+
+  private defaultAccessRoles(): IAccessRoleRecord[] {
+    const t = this.nowIso();
+    return [
+      {
+        id: 'role_admin',
+        name: '系统管理员',
+        description: '用户、角色与权限治理',
+        builtIn: true,
+        updatedAt: t,
+        permissionIds: [...DEFAULT_PERMISSION_IDS],
+      },
+      {
+        id: 'role_stakeholder',
+        name: '干系人',
+        description: '提交与验收为主，可看需求与流水线只读入口',
+        builtIn: true,
+        updatedAt: t,
+        permissionIds: [
+          'page.dashboard',
+          'page.requirements',
+          'page.pipeline',
+          'page.acceptance',
+          'page.products',
+        ],
+      },
+      {
+        id: 'role_pm',
+        name: '产品经理',
+        description: '需求与 PRD、验收协同',
+        builtIn: true,
+        updatedAt: t,
+        permissionIds: [
+          'page.dashboard',
+          'page.requirements',
+          'page.prd',
+          'page.pipeline',
+          'page.acceptance',
+          'page.products',
+          'page.org_spec',
+        ],
+      },
+      {
+        id: 'role_tm',
+        name: '技术经理',
+        description: '规格、流水线与插件配置',
+        builtIn: true,
+        updatedAt: t,
+        permissionIds: [
+          'page.dashboard',
+          'page.requirements',
+          'page.prd',
+          'page.spec',
+          'page.pipeline',
+          'page.acceptance',
+          'page.products',
+          'page.org_spec',
+          'page.plugins',
+        ],
+      },
+    ];
+  }
+
+  private normalizePermissionIds(ids: string[]): string[] {
+    const seen = new Set<string>();
+    for (const raw of ids) {
+      if (typeof raw !== 'string') continue;
+      const v = raw.trim();
+      if (!v) continue;
+      seen.add(v);
+    }
+    return [...seen];
+  }
+
+  private async ensureAccessRolesTable(): Promise<void> {
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_access_roles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        permission_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        built_in BOOLEAN NOT NULL DEFAULT FALSE,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+  }
+
+  private async seedDefaultAccessRolesIfEmpty(): Promise<void> {
+    const result = await this.db.execute(sql`SELECT COUNT(1)::int AS count FROM rd_access_roles;`);
+    const rows = this.rowsFromExecute<{ count?: number | string }>(result);
+    const count = Number(rows[0]?.count || 0);
+    if (count > 0) return;
+    for (const role of this.defaultAccessRoles()) {
+      await this.db.execute(sql`
+        INSERT INTO rd_access_roles (id, name, description, permission_ids, built_in, updated_at)
+        VALUES (
+          ${role.id},
+          ${role.name},
+          ${role.description ?? null},
+          ${JSON.stringify(role.permissionIds)}::jsonb,
+          ${Boolean(role.builtIn)},
+          ${role.updatedAt}::timestamptz
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          description = EXCLUDED.description,
+          permission_ids = EXCLUDED.permission_ids,
+          built_in = EXCLUDED.built_in,
+          updated_at = EXCLUDED.updated_at;
+      `);
+    }
   }
 
   async ensureDefaultAdmin(): Promise<void> {
@@ -199,6 +366,82 @@ export class AuthService implements OnModuleInit {
 
   async deleteUser(id: string): Promise<void> {
     await this.db.execute(sql`DELETE FROM rd_users WHERE id = ${id};`);
+  }
+
+  async listAccessRoles(): Promise<IAccessRoleRecord[]> {
+    const result = await this.db.execute(sql`
+      SELECT id, name, description, permission_ids, built_in, updated_at
+      FROM rd_access_roles
+      ORDER BY built_in DESC, updated_at DESC, id ASC;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows.map((row) => this.roleRowToView(row));
+  }
+
+  async upsertAccessRole(
+    id: string,
+    body: { name: string; description?: string; permissionIds?: string[]; builtIn?: boolean }
+  ): Promise<IAccessRoleRecord> {
+    const roleId = id.trim();
+    const roleName = body.name.trim();
+    if (!roleId) throw new BadRequestException('角色 id 不能为空');
+    if (!roleName) throw new BadRequestException('角色名称不能为空');
+    const permissionIds = this.normalizePermissionIds(body.permissionIds ?? []);
+    const now = this.nowIso();
+
+    await this.db.execute(sql`
+      INSERT INTO rd_access_roles (id, name, description, permission_ids, built_in, updated_at)
+      VALUES (
+        ${roleId},
+        ${roleName},
+        ${body.description?.trim() || null},
+        ${JSON.stringify(permissionIds)}::jsonb,
+        ${Boolean(body.builtIn)},
+        ${now}::timestamptz
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        description = EXCLUDED.description,
+        permission_ids = EXCLUDED.permission_ids,
+        built_in = CASE
+          WHEN rd_access_roles.built_in = TRUE THEN TRUE
+          ELSE EXCLUDED.built_in
+        END,
+        updated_at = EXCLUDED.updated_at;
+    `);
+
+    const result = await this.db.execute(sql`
+      SELECT id, name, description, permission_ids, built_in, updated_at
+      FROM rd_access_roles
+      WHERE id = ${roleId}
+      LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute(result);
+    if (!rows[0]) {
+      throw new BadRequestException('保存角色失败');
+    }
+    return this.roleRowToView(rows[0]);
+  }
+
+  async deleteAccessRole(id: string): Promise<void> {
+    const roleId = id.trim();
+    if (!roleId) throw new BadRequestException('角色 id 不能为空');
+    const existed = await this.db.execute(sql`
+      SELECT id, built_in
+      FROM rd_access_roles
+      WHERE id = ${roleId}
+      LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute<{ id?: string; built_in?: boolean }>(existed);
+    if (!rows[0]?.id) throw new BadRequestException('角色不存在');
+    if (rows[0].built_in) throw new BadRequestException('内置角色不可删除');
+    await this.db.execute(sql`DELETE FROM rd_access_roles WHERE id = ${roleId};`);
+  }
+
+  async resetAccessRoles(): Promise<IAccessRoleRecord[]> {
+    await this.db.execute(sql`DELETE FROM rd_access_roles;`);
+    await this.seedDefaultAccessRolesIfEmpty();
+    return this.listAccessRoles();
   }
 
   async updateUserAccessRole(id: string, accessRoleId: string | null): Promise<IUserView> {

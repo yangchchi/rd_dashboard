@@ -7,16 +7,36 @@ import { toast } from 'sonner';
 import { format, addDays, startOfDay } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
+import { Label, RequiredMark } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { TiptapEditorComplete } from '@/components/business-ui/tiptap-editor';
-import { CalendarIcon, Save, Send, Sparkles, Loader2, ChevronsUpDown, Check } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Slider } from '@/components/ui/slider';
+import {
+  Bot,
+  CalendarIcon,
+  Save,
+  Send,
+  Sparkles,
+  Loader2,
+  ChevronsUpDown,
+  Check,
+  Coins,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { IRequirement, IUser, IProduct } from '@/lib/rd-types';
 import { authApi } from '@/lib/auth-api';
@@ -31,21 +51,16 @@ const PRIORITY_OPTIONS = [
   { value: 'P3', label: 'P3 - 低优先级', color: 'bg-slate-500' },
 ];
 
+const PRIORITY_BOUNTY_MAP: Record<string, number> = {
+  P0: 200,
+  P1: 88,
+  P2: 48,
+  P3: 20,
+};
+
 const STORAGE_KEY = '__global_rd_requirement_draft';
 
 const defaultExpectedDate = () => addDays(startOfDay(new Date()), 7);
-
-function stripHtmlTags(html: string): string {
-  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function plainTextToTipTapHtml(text: string): string {
-  const esc = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const t = text.trim();
-  if (!t) return '<p></p>';
-  return `<p>${esc(t)}</p>`;
-}
 
 function newProductId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -55,6 +70,12 @@ function newProductId(): string {
 }
 
 type RequirementOptimizeStreamChunk = { content?: string };
+
+function difficultyFromCoins(coins: number): 'normal' | 'hard' | 'epic' {
+  if (coins >= 201) return 'epic';
+  if (coins >= 81) return 'hard';
+  return 'normal';
+}
 
 const RequirementInputPage: React.FC = () => {
   const router = useRouter();
@@ -66,7 +87,6 @@ const RequirementInputPage: React.FC = () => {
   const [expectedDate, setExpectedDate] = useState<Date>(() => defaultExpectedDate());
   const [priority, setPriority] = useState<string>('P1');
   const [product, setProduct] = useState('');
-  const [bountyPoints, setBountyPoints] = useState<number>(0);
   const [pmCandidateUserId, setPmCandidateUserId] = useState<string>('');
   const [tmCandidateUserId, setTmCandidateUserId] = useState<string>('');
   const [users, setUsers] = useState<IUser[]>([]);
@@ -75,6 +95,25 @@ const RequirementInputPage: React.FC = () => {
   const [productSearch, setProductSearch] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showAiAssistant, setShowAiAssistant] = useState(false);
+  const [rewardCoins, setRewardCoins] = useState<number[]>([PRIORITY_BOUNTY_MAP.P1]);
+  const [syncBounty, setSyncBounty] = useState(true);
+  const [bountyEdited, setBountyEdited] = useState(false);
+
+  const recommendedBounty = PRIORITY_BOUNTY_MAP[priority] ?? PRIORITY_BOUNTY_MAP.P1;
+  const bountyPoints = rewardCoins[0] || 0;
+  const difficultyLabel =
+    bountyPoints >= 201
+      ? '史诗（推荐 201+）'
+      : bountyPoints >= 81
+        ? '困难（推荐 81-200）'
+        : '普通（推荐 20-80）';
+
+  useEffect(() => {
+    if (!bountyEdited) {
+      setRewardCoins([recommendedBounty]);
+    }
+  }, [recommendedBounty, bountyEdited]);
 
   const filteredProducts = useMemo(() => {
     const q = productSearch.trim().toLowerCase();
@@ -97,7 +136,7 @@ const RequirementInputPage: React.FC = () => {
   }, []);
 
   const handleAiOptimize = async () => {
-    const plain = stripHtmlTags(description);
+    const plain = description.trim();
     if (!plain) {
       toast.error('请先填写需求描述');
       return;
@@ -124,8 +163,9 @@ const RequirementInputPage: React.FC = () => {
         return;
       }
 
-      setDescription(plainTextToTipTapHtml(optimized));
+      setDescription(optimized);
       toast.success('AI 优化完成', { description: '已用优化后的描述替换编辑器内容' });
+      setShowAiAssistant(false);
     } catch {
       toast.error('AI 优化失败', { description: '请稍后重试' });
     } finally {
@@ -141,6 +181,7 @@ const RequirementInputPage: React.FC = () => {
       priority,
       product,
       bountyPoints,
+      syncBounty,
       savedAt: new Date().toISOString(),
     };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
@@ -158,11 +199,15 @@ const RequirementInputPage: React.FC = () => {
       );
       setPriority(draft.priority || 'P1');
       setProduct(draft.product || '');
-      setBountyPoints(
-        typeof draft.bountyPoints === 'number' && Number.isFinite(draft.bountyPoints)
-          ? Math.max(0, Math.floor(draft.bountyPoints))
-          : 0
-      );
+      const draftBounty = Number(draft.bountyPoints);
+      if (Number.isFinite(draftBounty) && draftBounty >= 20) {
+        setRewardCoins([Math.floor(draftBounty)]);
+        setBountyEdited(true);
+      } else {
+        setRewardCoins([PRIORITY_BOUNTY_MAP[draft.priority || 'P1'] ?? PRIORITY_BOUNTY_MAP.P1]);
+        setBountyEdited(false);
+      }
+      setSyncBounty(draft.syncBounty !== false);
       toast.success('草稿已恢复');
     }
   };
@@ -202,7 +247,7 @@ const RequirementInputPage: React.FC = () => {
       toast.error('请填写需求标题');
       return;
     }
-    if (!stripHtmlTags(description)) {
+    if (!description.trim()) {
       toast.error('请填写需求描述');
       return;
     }
@@ -214,7 +259,7 @@ const RequirementInputPage: React.FC = () => {
       toast.error('请选择业务优先级');
       return;
     }
-    const bounty = Math.max(0, Math.floor(Number(bountyPoints) || 0));
+    const bounty = syncBounty ? bountyPoints : 0;
 
     setIsSubmitting(true);
 
@@ -240,6 +285,26 @@ const RequirementInputPage: React.FC = () => {
       };
 
       await upsertRequirement.mutateAsync(requirement);
+
+      if (syncBounty && bounty > 0) {
+        try {
+          const actor = userInfo.user_id?.trim() || requirement.submitter;
+          await rdApi.createBountyTask({
+            requirementId: requirement.id,
+            publisherId: actor,
+            publisherName: userInfo.name || userInfo.userName || actor,
+            title: requirement.title,
+            description: requirement.description,
+            rewardCoins: bounty,
+            difficultyTag: difficultyFromCoins(bounty),
+            deadlineAt: new Date(Date.now() + 1000 * 60 * 60).toISOString(),
+          });
+        } catch {
+          toast.warning('需求已提交，但同步发布悬赏失败', {
+            description: '你可以稍后前往「狩猎场」手动发布悬赏任务',
+          });
+        }
+      }
 
       sessionStorage.removeItem(STORAGE_KEY);
 
@@ -286,27 +351,83 @@ const RequirementInputPage: React.FC = () => {
         }
       `}</style>
 
-      <div className="requirement-input-page w-full max-w-4xl mx-auto">
-        <section className="w-full mb-6">
-          <div className="flex items-center justify-between">
+      <div className="requirement-input-page w-full space-y-6">
+        <section className="w-full">
+          <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="rd-page-title">需求采集</h1>
               <p className="rd-page-desc mt-1">
                 提交业务需求；可使用 AI 将描述优化为更清晰的执行级表述
               </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mt-1 h-auto px-0 text-muted-foreground hover:text-foreground"
+                onClick={() => router.push('/requirements')}
+              >
+                返回需求列表
+              </Button>
             </div>
-            <Button variant="outline" onClick={handleSaveDraft} disabled={!title && !description}>
-              <Save className="mr-2 h-4 w-4" />
-              保存草稿
-            </Button>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              {/* <Button type="button" variant="outline" onClick={() => setShowAiAssistant(true)}>
+                <Sparkles className="mr-2 h-4 w-4" />
+                AI助手
+              </Button> */}
+              <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={!title && !description}>
+                <Save className="mr-2 h-4 w-4" />
+                保存
+              </Button>
+              <Button type="button" onClick={handleSubmit} disabled={isSubmitting}>
+                {isSubmitting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="mr-2 h-4 w-4" />
+                )}
+                {isSubmitting ? '提交中...' : '提交需求'}
+              </Button>
+            </div>
           </div>
         </section>
 
-        <section className="w-full space-y-6">
+        <Dialog open={showAiAssistant} onOpenChange={setShowAiAssistant}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Bot className="h-5 w-5 text-primary" />
+                AI助手
+              </DialogTitle>
+              <DialogDescription>
+                基于已填写的需求描述，将其优化为更清晰、可执行的表述（与「需求描述」旁的「AI优化」相同）。请先写好需求描述再开始。
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:justify-end">
+              <Button type="button" variant="outline" onClick={() => setShowAiAssistant(false)}>
+                关闭
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleAiOptimize()}
+                disabled={isAnalyzing || !description.trim()}
+              >
+                {isAnalyzing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="mr-2 h-4 w-4" />
+                )}
+                {isAnalyzing ? '优化中...' : '开始优化'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <section className="w-full">
           <Card>
             <CardHeader>
               <CardTitle>基本信息</CardTitle>
-              <CardDescription>填写需求的基本信息，带 * 为必填项</CardDescription>
+              <CardDescription>
+                填写需求的基本信息，带 <RequiredMark /> 为必填项
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
@@ -394,7 +515,7 @@ const RequirementInputPage: React.FC = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="title">
-                  需求标题 <span className="text-destructive">*</span>
+                  需求标题 <RequiredMark />
                 </Label>
                 <Input
                   id="title"
@@ -407,14 +528,14 @@ const RequirementInputPage: React.FC = () => {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label>
-                    需求描述 <span className="text-destructive">*</span>
+                    需求描述 <RequiredMark />
                   </Label>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={handleAiOptimize}
-                    disabled={isAnalyzing || !stripHtmlTags(description)}
+                    disabled={isAnalyzing || !description.trim()}
                   >
                     {isAnalyzing ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -424,16 +545,19 @@ const RequirementInputPage: React.FC = () => {
                     {isAnalyzing ? 'AI 优化中...' : 'AI优化'}
                   </Button>
                 </div>
-                <TiptapEditorComplete
+                <p className="text-xs text-muted-foreground">支持 Markdown 格式（标题、列表、表格等）</p>
+                <Textarea
                   value={description}
-                  onValueChange={setDescription}
-                  placeholder="请详细描述您的需求背景、业务场景、期望解决的问题等..."
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="请详细描述需求背景、业务场景、期望解决的问题等（支持 Markdown）…"
+                  className="min-h-[280px] resize-none font-mono text-sm leading-relaxed md:min-h-[320px]"
+                  spellCheck={false}
                 />
               </div>
 
               <div className="space-y-2">
                 <Label>
-                  期望上线时间 <span className="text-destructive">*</span>
+                  期望上线时间 <RequiredMark />
                 </Label>
                 <Popover>
                   <PopoverTrigger asChild>
@@ -462,25 +586,6 @@ const RequirementInputPage: React.FC = () => {
                     />
                   </PopoverContent>
                 </Popover>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="bounty">金币</Label>
-                <Input
-                  id="bounty"
-                  type="number"
-                  min={0}
-                  step={1}
-                  placeholder="0"
-                  value={Number.isFinite(bountyPoints) ? bountyPoints : 0}
-                  onChange={(e) => {
-                    const v = e.target.value === '' ? 0 : parseInt(e.target.value, 10);
-                    setBountyPoints(Number.isFinite(v) && v >= 0 ? v : 0);
-                  }}
-                />
-                <p className="text-xs text-muted-foreground">
-                  提交人设定的总金币；产品经理与技术经理各得一半（奇数时 PM 略少）。验收通过并发布后金币才对领取人生效。
-                </p>
               </div>
 
               <div className="grid gap-6 sm:grid-cols-2">
@@ -524,50 +629,84 @@ const RequirementInputPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label>
-                  业务优先级 <span className="text-destructive">*</span>
-                </Label>
-                <Select value={priority} onValueChange={setPriority}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择业务优先级" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PRIORITY_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        <div className="flex items-center gap-2">
-                          <span className={cn('w-2 h-2 rounded-full', option.color)} />
-                          {option.label}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="grid gap-6 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>
+                    业务优先级 <RequiredMark />
+                  </Label>
+                  <Select value={priority} onValueChange={setPriority}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择业务优先级" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PRIORITY_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          <div className="flex items-center gap-2">
+                            <span className={cn('w-2 h-2 rounded-full', option.color)} />
+                            {option.label}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>提交人</Label>
+                  <div className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
+                      {(userInfo.name || 'U')[0].toUpperCase()}
+                    </div>
+                    <span className="text-sm">{userInfo.name || '当前用户'}</span>
+                  </div>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label>提交人</Label>
-                <div className="flex items-center gap-2 p-3 border rounded-lg bg-muted/30">
-                  <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-sm font-medium">
-                    {(userInfo.name || 'U')[0].toUpperCase()}
+              <div className="grid gap-6 sm:grid-cols-2">
+                <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                      <span className="flex items-center gap-1.5">
+                        <Coins className="h-4 w-4 text-amber-500" />
+                        金币奖励 <span className="font-mono tabular-nums text-amber-600">{bountyPoints}</span>
+                      </span>
+                    </div>
+                  <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+                    
+                    <Slider
+                      min={20}
+                      max={300}
+                      step={1}
+                      value={rewardCoins}
+                      onValueChange={(next) => {
+                        setRewardCoins(next);
+                        setBountyEdited(true);
+                      }}
+                    />
+                    <p className="text-xs text-muted-foreground">难度等级：{difficultyLabel}</p>
+                    <p></p>
                   </div>
-                  <span className="text-sm">{userInfo.name || '当前用户'}</span>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sync-bounty">同步悬赏</Label>
+                  <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+                    <label htmlFor="sync-bounty" className="flex cursor-pointer items-center gap-2">
+                      <Checkbox
+                        id="sync-bounty"
+                        checked={syncBounty}
+                        onCheckedChange={(checked) => setSyncBounty(checked === true)}
+                      />
+                      <span className="text-sm text-foreground">
+                        {syncBounty ? '勾选同步发布悬赏令' : '暂不发布悬赏令'}
+                      </span>
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      勾选同步发布悬赏令，你可以在
+                      <span className="mx-1 font-medium text-foreground">[狩猎场]</span>
+                      进行查看
+                    </p>
+                  </div>
                 </div>
               </div>
             </CardContent>
-            <CardFooter className="flex justify-end gap-3 border-t pt-6">
-              <Button variant="outline" onClick={() => router.push('/requirements')}>
-                取消
-              </Button>
-              <Button onClick={handleSubmit} disabled={isSubmitting}>
-                {isSubmitting ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="mr-2 h-4 w-4" />
-                )}
-                {isSubmitting ? '提交中...' : '提交需求'}
-              </Button>
-            </CardFooter>
           </Card>
         </section>
       </div>

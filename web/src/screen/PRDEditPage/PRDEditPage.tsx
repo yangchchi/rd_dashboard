@@ -285,7 +285,7 @@ const PRDEditPage: React.FC = () => {
         }
       `}</style>
 
-      <div className="mx-auto flex w-full max-w-[1400px] min-h-[calc(100svh-6rem)] flex-col space-y-6 px-0">
+      <div className="flex w-full min-h-[calc(100svh-6rem)] flex-col space-y-6 px-0">
         {/* 页面头部 */}
         <section className="w-full">
           <div className="flex items-start justify-between">
@@ -311,13 +311,13 @@ const PRDEditPage: React.FC = () => {
                 <Badge variant="secondary">只读模式</Badge>
               ) : (
                 <>
-                  <Button
+                  {/* <Button
                     variant="outline"
                     onClick={() => setShowAIAssistant(true)}
                   >
                     <Sparkles className="mr-2 h-4 w-4" />
                     AI助手
-                  </Button>
+                  </Button> */}
                   <Button variant="outline" onClick={savePRD}>
                     <Save className="mr-2 h-4 w-4" />
                     保存

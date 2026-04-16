@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { useCurrentUserProfile } from '@/hooks/useCurrentUserProfile';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
   DropdownMenu,
@@ -189,7 +188,7 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
       <div className="w-full kanban-container relative">
         <div className="glow-orb top-0 right-0 opacity-50" />
 
-        {showToolbar ? (
+        {/* {showToolbar ? (
           <section
             className={`w-full flex items-center mb-8 ${hidePageHeading ? 'justify-end' : 'justify-between'}`}
           >
@@ -245,11 +244,10 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
               </DropdownMenu>
             </div>
           </section>
-        ) : null}
+        ) : null} */}
 
-        <section className="w-full mb-2">
-          <ScrollArea className="w-full whitespace-nowrap">
-            <div className="flex gap-5 pb-4">
+        <section className="mb-2 w-full">
+            <div className="grid grid-cols-1 gap-5 pb-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
               {columns.map((column) => {
                 const columnReqs = getColumnRequirements(column.status);
                 const isDropTarget = dragOverColumn === column.id;
@@ -257,7 +255,7 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
                 return (
                   <div
                     key={column.id}
-                    className={`rd-surface-card rd-surface-card-hover flex flex-col w-80 shrink-0 p-4 transition-all duration-300 ${
+                    className={`rd-surface-card rd-surface-card-hover flex min-w-0 flex-col p-4 transition-all duration-300 ${
                       isDropTarget ? 'column-drop-active' : ''
                     }`}
                     onDragOver={(e) => handleDragOver(e, column.id)}
@@ -373,8 +371,6 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
                 );
               })}
             </div>
-            <ScrollBar orientation="horizontal" />
-          </ScrollArea>
         </section>
       </div>
     </>

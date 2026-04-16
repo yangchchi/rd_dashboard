@@ -76,7 +76,7 @@ const OrgSpecConfigPage: React.FC = () => {
   };
 
   return (
-    <div className="w-full max-w-[1400px] mx-auto space-y-6">
+    <div className="w-full space-y-6">
       <section className="w-full flex items-center justify-between">
         <div>
           <h1 className="rd-page-title">组织编码规范（对齐 OpenSpec SDD）</h1>
