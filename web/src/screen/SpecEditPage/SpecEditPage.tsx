@@ -738,7 +738,7 @@ const SpecEditPage: React.FC = () => {
                 onClick={handleSave}
               >
                 <Save className="mr-2 size-4" />
-                保存草稿
+                保存
               </Button>
               <Button onClick={handleSubmit}>
                 <CheckCircle className="mr-2 size-4" />

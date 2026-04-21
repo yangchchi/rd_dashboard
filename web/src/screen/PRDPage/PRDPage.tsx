@@ -63,7 +63,7 @@ function formatPrdDateTime(iso: string): string {
 const PRD_GEN_PREVIEW_BOX =
   'rounded-xl border border-white/[0.08] bg-card/90 shadow-inner shadow-black/20 ring-1 ring-white/5 backdrop-blur-xl';
 const PRD_GEN_STREAMDOWN_CLASS =
-  'prose prose-sm max-w-none prose-invert prose-headings:scroll-mt-2 prose-headings:text-foreground prose-headings:font-semibold prose-h1:text-2xl prose-h1:mb-2 prose-h1:leading-tight prose-h2:text-xl prose-h2:mt-6 prose-h2:mb-3 prose-h2:pb-2 prose-h2:border-b prose-h2:border-white/10 prose-h3:text-base prose-h3:mt-4 prose-h3:mb-2 prose-p:text-foreground/90 prose-p:leading-relaxed prose-li:my-0.5 prose-li:text-foreground/90 prose-hr:border-white/10 prose-strong:text-foreground prose-table:text-sm prose-th:border-white/15 prose-td:border-white/10 text-foreground/95';
+  'prose prose-sm max-w-none prose-invert break-words prose-headings:scroll-mt-2 prose-headings:text-foreground prose-headings:font-semibold prose-h1:text-2xl prose-h1:mb-2 prose-h1:leading-tight prose-h2:text-xl prose-h2:mt-6 prose-h2:mb-3 prose-h2:pb-2 prose-h2:border-b prose-h2:border-white/10 prose-h3:text-base prose-h3:mt-4 prose-h3:mb-2 prose-p:text-foreground/90 prose-p:leading-relaxed prose-li:my-0.5 prose-li:text-foreground/90 prose-hr:border-white/10 prose-strong:text-foreground prose-table:text-sm prose-th:border-white/15 prose-td:border-white/10 prose-pre:max-w-full prose-pre:overflow-x-auto text-foreground/95';
 
 interface IPrdListItem {
   id: string;
@@ -611,8 +611,8 @@ const PRDPage: React.FC = () => {
             }
           }}
         >
-          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
-            <DialogHeader>
+          <DialogContent className="mx-auto flex h-[92dvh] max-h-[92dvh] w-[calc(100vw-1.5rem)] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden p-4 sm:w-[calc(100vw-2rem)] sm:max-w-4xl sm:p-6">
+            <DialogHeader className="shrink-0">
               <DialogTitle className="flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-primary" />
                 AI生成PRD
@@ -622,7 +622,7 @@ const PRDPage: React.FC = () => {
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-4 py-4">
+            <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto py-3 sm:py-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium">选择需求</label>
                 <Select 
@@ -652,7 +652,7 @@ const PRDPage: React.FC = () => {
                   </SelectContent>
                 </Select>
                 {selectedRequirement && (
-                  <p className="text-xs text-muted-foreground leading-relaxed">
+                  <p className="line-clamp-2 text-xs text-muted-foreground leading-relaxed">
                     {stripHtmlTags(
                       requirements.find((r) => r.id === selectedRequirement)?.description ?? ''
                     )}
@@ -661,7 +661,7 @@ const PRDPage: React.FC = () => {
               </div>
 
               {isStreaming && (
-                <div className="space-y-3 min-h-0">
+                <div className="min-h-0 min-w-0 flex flex-1 flex-col space-y-3">
                   <div className="flex items-center gap-2 shrink-0">
                     <Loader2 className="h-4 w-4 animate-spin text-primary" />
                     <span className="text-sm text-muted-foreground">AI正在生成PRD...</span>
@@ -676,9 +676,9 @@ const PRDPage: React.FC = () => {
                     <Tabs
                       value={prdPreviewTab}
                       onValueChange={(v) => setPrdPreviewTab(v as 'edit' | 'preview')}
-                      className="flex min-h-0 flex-col gap-3"
+                      className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden"
                     >
-                      <TabsList className="grid h-10 w-full max-w-md shrink-0 grid-cols-2 rounded-full p-1">
+                      <TabsList className="grid h-10 w-full max-w-full shrink-0 grid-cols-2 rounded-full p-1 sm:max-w-md">
                         <TabsTrigger value="edit" className="rounded-full text-sm">
                           编辑
                         </TabsTrigger>
@@ -686,20 +686,23 @@ const PRDPage: React.FC = () => {
                           预览
                         </TabsTrigger>
                       </TabsList>
-                      <TabsContent value="edit" className="mt-0 min-h-0 flex-1 space-y-2 data-[state=inactive]:hidden">
+                      <TabsContent value="edit" className="mt-0 min-h-0 min-w-0 flex-1 space-y-2 overflow-hidden data-[state=inactive]:hidden">
                         <p className="text-xs text-muted-foreground">源码查看（Markdown）；切换「预览」查看排版效果</p>
-                        <Textarea
-                          value={generatedContent}
-                          readOnly
-                          placeholder="等待 AI 输出 Markdown 内容..."
-                          className="h-[min(26rem,55vh)] resize-none font-mono text-sm leading-relaxed"
-                          spellCheck={false}
-                        />
+                        <div className="w-full overflow-hidden">
+                          <Textarea
+                            value={generatedContent}
+                            readOnly
+                            wrap="soft"
+                            placeholder="等待 AI 输出 Markdown 内容..."
+                            className="h-[clamp(9rem,30dvh,18rem)] w-full max-w-full resize-none overflow-x-auto whitespace-pre-wrap break-all font-mono text-sm leading-relaxed sm:h-[min(26rem,55vh)]"
+                            spellCheck={false}
+                          />
+                        </div>
                       </TabsContent>
-                      <TabsContent value="preview" className="mt-0 min-h-0 flex-1 space-y-2 data-[state=inactive]:hidden">
+                      <TabsContent value="preview" className="mt-0 min-h-0 min-w-0 flex-1 space-y-2 overflow-hidden data-[state=inactive]:hidden">
                         <p className="text-xs text-muted-foreground">渲染预览（只读）；查看标题、列表、表格等排版效果</p>
-                        <ScrollArea className="h-[min(26rem,55vh)] w-full">
-                          <div className={`${PRD_GEN_PREVIEW_BOX} p-6 md:p-8`}>
+                        <ScrollArea className="h-[clamp(9rem,30dvh,18rem)] w-full sm:h-[min(26rem,55vh)]">
+                          <div className={`${PRD_GEN_PREVIEW_BOX} w-full overflow-x-auto p-4 sm:p-6 md:p-8`}>
                             <Streamdown className={PRD_GEN_STREAMDOWN_CLASS}>
                               {generatedContent || '暂无内容，请等待 AI 生成'}
                             </Streamdown>
@@ -712,7 +715,7 @@ const PRDPage: React.FC = () => {
               )}
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="shrink-0 pt-2">
               <Button
                 variant="outline"
                 onClick={() => {
