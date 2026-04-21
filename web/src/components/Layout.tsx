@@ -61,7 +61,7 @@ import { menuKeyAllowed, type AccessMenuKey } from "@/lib/access-catalog";
 import { clearAuthSession, getCurrentUser } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { RequireRouteAccess } from "@/components/require-route-access";
-import { useRequirementsList } from "@/lib/rd-hooks";
+import { useMarkSiteMessageRead, useRequirementsList, useSiteMessagesList } from "@/lib/rd-hooks";
 
 const isDashboardPath = (pathname: string) =>
   pathname === "/" || pathname === "/dashboard";
@@ -158,6 +158,13 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
 
   const displayName = userInfo.name || authUser?.username || "用户";
 
+  const siteUserId = userInfo.user_id?.trim() || authUser?.id?.trim() || "";
+  const { data: siteMessages = [], isLoading: siteMessagesLoading } = useSiteMessagesList(
+    siteUserId || undefined
+  );
+  const markSiteRead = useMarkSiteMessageRead();
+  const unreadSiteCount = siteMessages.filter((m) => !m.readAt).length;
+
   const coinStats = requirements.reduce((sum, req) => {
     const records = req.taskAcceptances ?? [];
     for (const record of records) {
@@ -240,7 +247,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
 
                 {(
                   [
-                    { path: "/bounty-hunt", label: "狩猎场", icon: Swords, key: "bounty_hunt" as const },
+                    { path: "/bounty-hunt", label: "赏金猎场", icon: Swords, key: "bounty_hunt" as const },
                     { path: "/requirements", label: "需求管理", icon: List, key: "requirements" as const },
                     { path: "/prd", label: "智能文档", icon: FileText, key: "prd" as const },
                     { path: "/specification", label: "技术基准", icon: Settings2, key: "spec" as const },
@@ -436,15 +443,65 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
             aria-label="切换侧边栏"
           />
           <div className="ml-auto flex items-center gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="size-9 shrink-0 rounded-lg border-border bg-muted/40 text-foreground shadow-none hover:bg-muted/60"
-              aria-label="通知"
-            >
-              <Bell className="size-[18px] stroke-[1.75]" />
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="relative size-9 shrink-0 rounded-lg border-border bg-muted/40 text-foreground shadow-none hover:bg-muted/60"
+                  aria-label="站内信"
+                >
+                  <Bell className="size-[18px] stroke-[1.75]" />
+                  {unreadSiteCount > 0 ? (
+                    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground">
+                      {unreadSiteCount > 99 ? "99+" : unreadSiteCount}
+                    </span>
+                  ) : null}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="w-[min(100vw-2rem,24rem)] max-h-[min(80vh,28rem)] overflow-hidden border-border bg-popover/95 p-0 backdrop-blur-xl shadow-md"
+              >
+                <div className="border-b border-border px-3 py-2">
+                  <p className="text-xs font-semibold text-foreground">站内信</p>
+                  <p className="text-[11px] text-muted-foreground">悬赏与系统通知</p>
+                </div>
+                <div className="max-h-80 overflow-y-auto">
+                  {!siteUserId ? (
+                    <p className="px-3 py-6 text-center text-sm text-muted-foreground">登录后查看站内信</p>
+                  ) : siteMessagesLoading ? (
+                    <p className="px-3 py-6 text-center text-sm text-muted-foreground">加载中…</p>
+                  ) : siteMessages.length === 0 ? (
+                    <p className="px-3 py-6 text-center text-sm text-muted-foreground">暂无消息</p>
+                  ) : (
+                    siteMessages.map((m) => (
+                      <DropdownMenuItem key={m.id} asChild className="cursor-pointer p-0 focus:bg-transparent">
+                        <Link
+                          href={m.linkUrl}
+                          className={cn(
+                            "flex w-full flex-col gap-1 border-b border-border/70 px-3 py-3 text-left last:border-0",
+                            !m.readAt && "bg-accent/45"
+                          )}
+                          onClick={() => {
+                            if (!m.readAt && siteUserId) {
+                              void markSiteRead.mutate({ messageId: m.id, userId: siteUserId });
+                            }
+                          }}
+                        >
+                          <span className="text-xs font-semibold text-primary">{m.title}</span>
+                          <span className="text-sm leading-relaxed text-foreground">{m.body}</span>
+                          <span className="text-xs font-medium text-primary underline underline-offset-2">
+                            前往赏金猎场
+                          </span>
+                        </Link>
+                      </DropdownMenuItem>
+                    ))
+                  )}
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <div className="h-7 w-px shrink-0 bg-border" aria-hidden />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

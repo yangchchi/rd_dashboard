@@ -15,6 +15,9 @@ import type {
   ISpecification,
 } from './rd-types';
 
+export const rdSiteMessagesQueryKey = (userId: string | undefined) =>
+  ['rd', 'site-messages', userId ?? ''] as const;
+
 export const rdKeys = {
   requirements: ['rd', 'requirements'] as const,
   prds: ['rd', 'prds'] as const,
@@ -310,6 +313,27 @@ export function useCreateBountyTask() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rdKeys.bountyTasks });
       void qc.invalidateQueries({ queryKey: rdKeys.bountyHuntTasks });
+      void qc.invalidateQueries({ queryKey: ['rd', 'site-messages'] });
+    },
+  });
+}
+
+export function useSiteMessagesList(userId: string | undefined) {
+  return useQuery({
+    queryKey: rdSiteMessagesQueryKey(userId),
+    queryFn: () => rdApi.listSiteMessages(userId!),
+    enabled: Boolean(userId?.trim()),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useMarkSiteMessageRead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { messageId: string; userId: string }) =>
+      rdApi.markSiteMessageRead(args.messageId, args.userId),
+    onSuccess: (_data, args) => {
+      void qc.invalidateQueries({ queryKey: rdSiteMessagesQueryKey(args.userId) });
     },
   });
 }

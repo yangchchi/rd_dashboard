@@ -71,9 +71,16 @@ export type ProductLifecycleStatus = 'active' | 'archived';
 
 export interface IProduct {
   id: string;
+  /** 产品编码（主数据唯一业务键，可与名称并列展示） */
+  code?: string;
   name: string;
   description: string;
+  /** 产品负责人 */
   owner?: string;
+  /** 技术经理 */
+  technicalManager?: string;
+  /** 产品类型（如自研系统、平台型产品等） */
+  productType?: string;
   sandboxUrl?: string;
   productionUrl?: string;
   gitUrl?: string;
@@ -222,7 +229,9 @@ export interface IUser {
   phone?: string;
   /** 头像地址（https 或 data:image 等，仅存于本机登录态时可由个人设置写入） */
   avatarUrl?: string;
-  /** 与「角色定义」中的角色 id 对应，用于菜单/页面/按钮级权限 */
+  /** 与「角色定义」中的角色 id 对应，用于菜单/页面/按钮级权限（并集） */
+  accessRoleIds?: string[];
+  /** 主展示用角色，与 accessRoleIds 由内建优先级推导同步 */
   accessRoleId?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -231,6 +240,19 @@ export interface IUser {
 export interface ILoginResponse {
   token: string;
   user: IUser;
+}
+
+/** 站内信 */
+export interface ISiteMessage {
+  id: string;
+  recipientUserId: string;
+  title: string;
+  body: string;
+  linkUrl: string;
+  readAt?: string;
+  createdAt: string;
+  kind?: string;
+  relatedBountyTaskId?: string;
 }
 
 export type PipelineTaskStatus =

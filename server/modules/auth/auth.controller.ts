@@ -37,6 +37,7 @@ export class AuthController {
       email?: string;
       phone?: string;
       accessRoleId?: string | null;
+      accessRoleIds?: string[];
     }
   ) {
     return this.authService.createUser(body.username, body.password, {
@@ -44,15 +45,16 @@ export class AuthController {
       email: body.email,
       phone: body.phone,
       accessRoleId: body.accessRoleId,
+      accessRoleIds: body.accessRoleIds,
     });
   }
 
   @Patch('users/:id')
   patchUser(
     @Param('id') id: string,
-    @Body() body: { accessRoleId?: string | null }
+    @Body() body: { accessRoleIds?: string[]; accessRoleId?: string | null },
   ) {
-    return this.authService.updateUserAccessRole(id, body.accessRoleId ?? null);
+    return this.authService.patchUserAccessRoles(id, body);
   }
 
   @Delete('users/:id')

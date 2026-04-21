@@ -141,27 +141,27 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
   const submitAcceptance = (approved: boolean) => {
     if (!selectedRequirement) return;
     const existingRecord = acceptanceHistory.find((r) => r.requirementId === selectedRequirement.id);
-    if (existingRecord) {
+    if (existingRecord && existingRecord.result !== 'pending') {
       toast.error('该需求已存在验收单，不允许重复创建');
       setIsAcceptDialogOpen(false);
       setIsRejectDialogOpen(false);
       return;
     }
-    
+
     const now = new Date().toISOString();
     const actorId = getCurrentUser()?.id?.trim() || currentProfile.user_id?.trim();
     const reviewerId = actorId || currentProfile.name || 'unknown';
     const newRecord: IAcceptanceRecord = {
-      id: `acc-${Date.now()}`,
+      id: existingRecord?.result === 'pending' ? existingRecord.id : `acc-${Date.now()}`,
       requirementId: selectedRequirement.id,
       reviewer: reviewerId,
       scores,
       feedback,
       result: approved ? 'approved' : 'rejected',
       status: approved ? 'approved' : 'rejected',
-      createdAt: now,
+      createdAt: existingRecord?.createdAt ?? now,
       updatedAt: now,
-      createdBy: reviewerId,
+      createdBy: existingRecord?.createdBy ?? reviewerId,
       updatedBy: reviewerId,
     };
 
@@ -213,10 +213,11 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
     void deleteRequirement.mutateAsync(reqId).then(() => toast.success('需求已删除'));
   };
 
-  const requirementIdsWithAcceptance = new Set(acceptanceHistory.map((r) => r.requirementId));
-  const pendingRequirements = requirements.filter(
-    (r) => r.status === 'pending_acceptance' && !requirementIdsWithAcceptance.has(r.id)
+  /** 提测/交付创建的占位单 result 为 pending，应出现在「待验收」；仅已通过/已驳回的验收进入「验收历史」 */
+  const completedAcceptanceHistory = acceptanceHistory.filter(
+    (r) => r.result === 'approved' || r.result === 'rejected'
   );
+  const pendingRequirements = requirements.filter((r) => r.status === 'pending_acceptance');
   const releasedRequirements = requirements.filter(r => r.status === 'released');
 
   const renderRequirementCard = (req: IRequirement) => (
@@ -355,7 +356,7 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
             </TabsContent>
 
             <TabsContent value="history" className="mt-6">
-              {acceptanceHistory.length === 0 ? (
+              {completedAcceptanceHistory.length === 0 ? (
                 <Empty>
                   <EmptyHeader>
                     <EmptyMedia variant="icon">
@@ -367,7 +368,7 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
                 </Empty>
               ) : (
                 <div className="space-y-4">
-                  {acceptanceHistory.map(record => {
+                  {completedAcceptanceHistory.map(record => {
                     const req = requirements.find(r => r.id === record.requirementId) || allRequirements.find(r => r.id === record.requirementId);
                     return (
                       <Card key={record.id} className="border-l-4 border-l-slate-400 shadow-sm">

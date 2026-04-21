@@ -86,7 +86,7 @@ export const ACCESS_PERMISSION_LIST: AccessPermissionDef[] = [
   },
   {
     id: 'page.bounty_hunt',
-    label: '狩猎场',
+    label: '赏金猎场',
     group: g('delivery'),
     kind: 'route',
     menuKey: 'bounty_hunt',

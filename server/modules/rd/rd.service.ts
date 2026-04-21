@@ -11,6 +11,9 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
 import { DEFAULT_AI_SKILLS } from '../../../shared/ai-skill-defaults';
 
+/** 与前端 access-policy 内置角色 id 一致（rd_user_access_roles / rd_users.access_role_id 回退） */
+const BUILTIN_ACCESS_ROLE_PM = 'role_pm';
+const BUILTIN_ACCESS_ROLE_TM = 'role_tm';
 
 export type RequirementStatus =
   | 'backlog'
@@ -263,9 +266,12 @@ export interface IPipelineDocsExportItem {
 /** 产品目录（与需求「所属产品」可同名关联，此处存结构化元数据） */
 export interface IProductRow {
   id: string;
+  code?: string | null;
   name: string;
   description: string;
   owner?: string | null;
+  technicalManager?: string | null;
+  productType?: string | null;
   sandboxUrl?: string | null;
   productionUrl?: string | null;
   gitUrl?: string | null;
@@ -305,6 +311,19 @@ export interface IBountyTaskRow {
   settledAt?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** 站内信（赏金通知等） */
+export interface ISiteMessageRow {
+  id: string;
+  recipientUserId: string;
+  title: string;
+  body: string;
+  linkUrl: string;
+  readAt?: string | null;
+  createdAt: string;
+  kind?: string | null;
+  relatedBountyTaskId?: string | null;
 }
 
 export interface IAiSkillConfig {
@@ -353,6 +372,7 @@ export class RdService implements OnModuleInit {
     await this.ensureProductSchemaUpgrade();
     await this.ensureRequirementExtraColumns();
     await this.ensureBountyDualSlotColumns();
+    await this.ensureSiteMessagesTable();
     await this.ensureAiSkillTables();
     await this.ensureAiSkillDefaults();
     await this.ensureDatapaasRoleGrants();
@@ -758,7 +778,27 @@ export class RdService implements OnModuleInit {
     `);
   }
 
-  /** 悬赏双槽位：PM / TM 分别领取；两槽齐满后进入 developing */
+  private async ensureSiteMessagesTable(): Promise<void> {
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_site_messages (
+        id TEXT PRIMARY KEY,
+        recipient_user_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        link_url TEXT NOT NULL,
+        read_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        kind TEXT,
+        related_bounty_task_id TEXT
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_site_messages_recipient_created
+      ON rd_site_messages (recipient_user_id, created_at DESC);
+    `);
+  }
+
+  /** 悬赏双槽位：PM / TM 分别领取；齐满后 bounty 任务进入 developing（需求流转不由领取驱动） */
   private async ensureBountyDualSlotColumns(): Promise<void> {
     await this.db.execute(sql`
       ALTER TABLE rd_bounty_tasks ADD COLUMN IF NOT EXISTS pm_user_id TEXT;
@@ -802,6 +842,15 @@ export class RdService implements OnModuleInit {
     try {
       await this.db.execute(sql`
         ALTER TABLE rd_products DROP COLUMN IF EXISTS extras;
+      `);
+      await this.db.execute(sql`
+        ALTER TABLE rd_products ADD COLUMN IF NOT EXISTS code TEXT;
+      `);
+      await this.db.execute(sql`
+        ALTER TABLE rd_products ADD COLUMN IF NOT EXISTS technical_manager TEXT;
+      `);
+      await this.db.execute(sql`
+        ALTER TABLE rd_products ADD COLUMN IF NOT EXISTS product_type TEXT;
       `);
     } catch (e) {
       this.logger.warn(
@@ -973,9 +1022,12 @@ export class RdService implements OnModuleInit {
     const status: IProductRow['status'] = st === 'archived' ? 'archived' : 'active';
     return {
       id: r.id as string,
+      code: (r.code as string) || null,
       name: (r.name as string) || '',
       description: (r.description as string) || '',
       owner: (r.owner as string) || null,
+      technicalManager: (r.technical_manager as string) || (r.technicalManager as string) || null,
+      productType: (r.product_type as string) || (r.productType as string) || null,
       sandboxUrl: (r.sandbox_url as string) || (r.sandboxUrl as string) || null,
       productionUrl: (r.production_url as string) || (r.productionUrl as string) || null,
       gitUrl: (r.git_url as string) || (r.gitUrl as string) || null,
@@ -1214,6 +1266,62 @@ export class RdService implements OnModuleInit {
     return (await this.getRequirement(merged.id))!;
   }
 
+  /** 用户是否拥有指定访问角色（含多角色与历史单列回退） */
+  private async userHasAccessRole(userId: string, roleId: string): Promise<boolean> {
+    const rid = String(roleId || '').trim();
+    const uid = String(userId || '').trim();
+    if (!rid || !uid) return false;
+    const junction = await this.db.execute(sql`
+      SELECT 1 FROM rd_user_access_roles WHERE user_id = ${uid} AND role_id = ${rid} LIMIT 1;
+    `);
+    if (this.rowsFromExecute(junction).length > 0) return true;
+    const legacy = await this.db.execute(sql`
+      SELECT access_role_id FROM rd_users WHERE id = ${uid} LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute<{ access_role_id?: string | null }>(legacy);
+    const raw = rows[0]?.access_role_id;
+    return typeof raw === 'string' && raw.trim() === rid;
+  }
+
+  /**
+   * 校验用户是否可领取 PM/TM 槽位：若需求指定了候选人则仅该用户；否则须为对应内置角色。
+   */
+  private async assertUserMayClaimRequirementSlot(
+    req: IRequirementRow,
+    role: 'pm' | 'tm',
+    userId: string,
+  ): Promise<void> {
+    const uid = String(userId || '').trim();
+    if (!uid) {
+      throw new BadRequestException('缺少用户标识');
+    }
+    if (role === 'pm') {
+      const designated = String(req.pmCandidateUserId || '').trim();
+      if (designated) {
+        if (uid !== designated) {
+          throw new BadRequestException('本需求已指定产品经理领取人，仅指定用户可领取');
+        }
+        return;
+      }
+      const ok = await this.userHasAccessRole(uid, BUILTIN_ACCESS_ROLE_PM);
+      if (!ok) {
+        throw new BadRequestException('仅产品经理角色可领取产品经理任务');
+      }
+      return;
+    }
+    const designated = String(req.tmCandidateUserId || '').trim();
+    if (designated) {
+      if (uid !== designated) {
+        throw new BadRequestException('本需求已指定技术经理领取人，仅指定用户可领取');
+      }
+      return;
+    }
+    const okTm = await this.userHasAccessRole(uid, BUILTIN_ACCESS_ROLE_TM);
+    if (!okTm) {
+      throw new BadRequestException('仅技术经理角色可领取技术经理任务');
+    }
+  }
+
   /**
    * 产品经理 / 技术经理领取任务，写入领取记录；金币在需求状态为已发布后生效。
    */
@@ -1232,6 +1340,7 @@ export class RdService implements OnModuleInit {
     if (!userId) {
       throw new BadRequestException('缺少用户标识');
     }
+    await this.assertUserMayClaimRequirementSlot(req, body.role, userId);
     if (body.role === 'pm') {
       if (req.taskAcceptances.some((t) => t.role === 'pm')) {
         throw new BadRequestException('产品经理任务已被领取');
@@ -1545,9 +1654,22 @@ export class RdService implements OnModuleInit {
   }
 
   async upsertSpec(body: Partial<ISpecRow> & { id: string; prdId: string }): Promise<ISpecRow> {
-    const existing = await this.getSpec(body.id);
-    const samePrdSpec = await this.getSpecByPrdId(body.prdId);
-    if (samePrdSpec && samePrdSpec.id !== body.id) {
+    const specId = String(body.id || '').trim();
+    const prdId = String(body.prdId || '').trim();
+    if (!specId) {
+      throw new BadRequestException('规格ID不能为空');
+    }
+    if (!prdId) {
+      throw new BadRequestException('关联PRD不能为空');
+    }
+    const linkedPrd = await this.getPrd(prdId);
+    if (!linkedPrd) {
+      throw new BadRequestException('关联PRD不存在或已删除');
+    }
+
+    const existing = await this.getSpec(specId);
+    const samePrdSpec = await this.getSpecByPrdId(prdId);
+    if (samePrdSpec && samePrdSpec.id !== specId) {
       throw new BadRequestException('该需求已存在规格说明书，不允许重复创建');
     }
     const now = new Date().toISOString();
@@ -1564,8 +1686,8 @@ export class RdService implements OnModuleInit {
           updatedBy: body.updatedBy !== undefined ? body.updatedBy : existing.updatedBy ?? null,
         }
       : {
-          id: body.id,
-          prdId: body.prdId,
+          id: specId,
+          prdId,
           fsMarkdown: body.fsMarkdown,
           tsMarkdown: body.tsMarkdown,
           functionalSpec: body.functionalSpec || { apis: [], uiComponents: [], interactions: [] },
@@ -1582,38 +1704,49 @@ export class RdService implements OnModuleInit {
           createdBy: body.createdBy ?? body.updatedBy ?? null,
           updatedBy: body.updatedBy ?? body.createdBy ?? null,
         };
-    await this.db.execute(sql`
-      INSERT INTO rd_specs (
-        id, prd_id, fs_markdown, ts_markdown, functional_spec, technical_spec,
-        machine_readable_json, status, reviews,
-        created_by, updated_by, created_at, updated_at
-      ) VALUES (
-        ${merged.id},
-        ${merged.prdId},
-        ${merged.fsMarkdown ?? null},
-        ${merged.tsMarkdown ?? null},
-        ${JSON.stringify(merged.functionalSpec)}::jsonb,
-        ${JSON.stringify(merged.technicalSpec)}::jsonb,
-        ${merged.machineReadableJson},
-        ${merged.status},
-        ${JSON.stringify(merged.reviews || [])}::jsonb,
-        ${merged.createdBy ?? null},
-        ${merged.updatedBy ?? null},
-        ${merged.createdAt}::timestamptz,
-        ${merged.updatedAt}::timestamptz
-      )
-      ON CONFLICT (id) DO UPDATE SET
-        prd_id = EXCLUDED.prd_id,
-        fs_markdown = EXCLUDED.fs_markdown,
-        ts_markdown = EXCLUDED.ts_markdown,
-        functional_spec = EXCLUDED.functional_spec,
-        technical_spec = EXCLUDED.technical_spec,
-        machine_readable_json = EXCLUDED.machine_readable_json,
-        status = EXCLUDED.status,
-        reviews = EXCLUDED.reviews,
-        updated_by = EXCLUDED.updated_by,
-        updated_at = EXCLUDED.updated_at;
-    `);
+    try {
+      await this.db.execute(sql`
+        INSERT INTO rd_specs (
+          id, prd_id, fs_markdown, ts_markdown, functional_spec, technical_spec,
+          machine_readable_json, status, reviews,
+          created_by, updated_by, created_at, updated_at
+        ) VALUES (
+          ${merged.id},
+          ${merged.prdId},
+          ${merged.fsMarkdown ?? null},
+          ${merged.tsMarkdown ?? null},
+          ${JSON.stringify(merged.functionalSpec)}::jsonb,
+          ${JSON.stringify(merged.technicalSpec)}::jsonb,
+          ${merged.machineReadableJson},
+          ${merged.status},
+          ${JSON.stringify(merged.reviews || [])}::jsonb,
+          ${merged.createdBy ?? null},
+          ${merged.updatedBy ?? null},
+          ${merged.createdAt}::timestamptz,
+          ${merged.updatedAt}::timestamptz
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          prd_id = EXCLUDED.prd_id,
+          fs_markdown = EXCLUDED.fs_markdown,
+          ts_markdown = EXCLUDED.ts_markdown,
+          functional_spec = EXCLUDED.functional_spec,
+          technical_spec = EXCLUDED.technical_spec,
+          machine_readable_json = EXCLUDED.machine_readable_json,
+          status = EXCLUDED.status,
+          reviews = EXCLUDED.reviews,
+          updated_by = EXCLUDED.updated_by,
+          updated_at = EXCLUDED.updated_at;
+      `);
+    } catch (e) {
+      const code = (e as { code?: string })?.code;
+      if (code === '23503') {
+        throw new BadRequestException('关联PRD不存在或已删除');
+      }
+      if (code === '23505') {
+        throw new BadRequestException('该需求已存在规格说明书，不允许重复创建');
+      }
+      throw e;
+    }
     return (await this.getSpec(merged.id))!;
   }
 
@@ -1667,10 +1800,6 @@ export class RdService implements OnModuleInit {
       reviews: [...(spec.reviews || []), record],
       updatedBy: actor,
     });
-    const prd = await this.getPrd(spec.prdId);
-    if (prd) {
-      await this.upsertRequirement({ id: prd.requirementId, status: 'ai_developing', updatedBy: actor });
-    }
     return next;
   }
 
@@ -1744,17 +1873,35 @@ export class RdService implements OnModuleInit {
 
   async addAcceptanceRecord(rec: IAcceptanceRecordRow): Promise<void> {
     const existingByRequirement = await this.db.execute(sql`
-      SELECT id FROM rd_acceptance_records WHERE requirement_id = ${rec.requirementId} LIMIT 1;
+      SELECT id, result FROM rd_acceptance_records WHERE requirement_id = ${rec.requirementId} LIMIT 1;
     `);
-    const existingRows = this.rowsFromExecute<{ id: string }>(existingByRequirement);
-    if (existingRows[0] && existingRows[0].id !== rec.id) {
-      throw new BadRequestException('该需求已存在验收单，不允许重复创建');
-    }
+    const existingRows = this.rowsFromExecute<{ id: string; result: string }>(existingByRequirement);
     const now = new Date().toISOString();
     const status = rec.status ?? rec.result;
     const updatedAt = rec.updatedAt ?? now;
     const createdBy = rec.createdBy ?? rec.reviewer;
     const updatedBy = rec.updatedBy ?? rec.reviewer;
+
+    if (existingRows[0]) {
+      const ex = existingRows[0];
+      const resultRaw = String(ex.result || '');
+      if (resultRaw !== 'pending') {
+        throw new BadRequestException('该需求已存在验收单，不允许重复创建');
+      }
+      await this.db.execute(sql`
+        UPDATE rd_acceptance_records SET
+          reviewer = ${rec.reviewer},
+          scores = ${JSON.stringify(rec.scores)}::jsonb,
+          feedback = ${rec.feedback},
+          result = ${rec.result},
+          status = ${status},
+          updated_by = ${updatedBy},
+          updated_at = ${updatedAt}::timestamptz
+        WHERE id = ${ex.id};
+      `);
+      return;
+    }
+
     await this.db.execute(sql`
       INSERT INTO rd_acceptance_records (
         id, requirement_id, reviewer, scores, feedback, result, status,
@@ -1879,6 +2026,14 @@ export class RdService implements OnModuleInit {
         updated_by = EXCLUDED.updated_by,
         updated_at = EXCLUDED.updated_at;
     `);
+    if (!existing) {
+      const actor = merged.updatedBy ?? merged.createdBy ?? null;
+      await this.upsertRequirement({
+        id: merged.requirementId,
+        status: 'ai_developing',
+        updatedBy: actor ?? undefined,
+      });
+    }
     return (await this.getPipelineTask(merged.id))!;
   }
 
@@ -1915,9 +2070,13 @@ export class RdService implements OnModuleInit {
       ? {
           ...existing,
           ...body,
+          code: body.code !== undefined ? nullIfEmpty(body.code) : existing.code,
           name: body.name !== undefined ? String(body.name) : existing.name,
           description: body.description !== undefined ? String(body.description) : existing.description,
           owner: body.owner !== undefined ? nullIfEmpty(body.owner) : existing.owner,
+          technicalManager:
+            body.technicalManager !== undefined ? nullIfEmpty(body.technicalManager) : existing.technicalManager,
+          productType: body.productType !== undefined ? nullIfEmpty(body.productType) : existing.productType,
           sandboxUrl: body.sandboxUrl !== undefined ? nullIfEmpty(body.sandboxUrl) : existing.sandboxUrl,
           productionUrl: body.productionUrl !== undefined ? nullIfEmpty(body.productionUrl) : existing.productionUrl,
           gitUrl: body.gitUrl !== undefined ? nullIfEmpty(body.gitUrl) : existing.gitUrl,
@@ -1929,9 +2088,12 @@ export class RdService implements OnModuleInit {
         }
       : {
           id: body.id,
+          code: nullIfEmpty(body.code),
           name: String(body.name || '').trim(),
           description: String(body.description ?? ''),
           owner: nullIfEmpty(body.owner),
+          technicalManager: nullIfEmpty(body.technicalManager),
+          productType: nullIfEmpty(body.productType),
           sandboxUrl: nullIfEmpty(body.sandboxUrl),
           productionUrl: nullIfEmpty(body.productionUrl),
           gitUrl: nullIfEmpty(body.gitUrl),
@@ -1948,13 +2110,17 @@ export class RdService implements OnModuleInit {
 
     await this.db.execute(sql`
       INSERT INTO rd_products (
-        id, name, description, owner, sandbox_url, production_url, git_url,
+        id, code, name, description, owner, technical_manager, product_type,
+        sandbox_url, production_url, git_url,
         status, created_by, updated_by, created_at, updated_at
       ) VALUES (
         ${merged.id},
+        ${merged.code ?? null},
         ${merged.name.trim()},
         ${merged.description},
         ${merged.owner ?? null},
+        ${merged.technicalManager ?? null},
+        ${merged.productType ?? null},
         ${merged.sandboxUrl ?? null},
         ${merged.productionUrl ?? null},
         ${merged.gitUrl ?? null},
@@ -1965,9 +2131,12 @@ export class RdService implements OnModuleInit {
         ${merged.updatedAt}::timestamptz
       )
       ON CONFLICT (id) DO UPDATE SET
+        code = EXCLUDED.code,
         name = EXCLUDED.name,
         description = EXCLUDED.description,
         owner = EXCLUDED.owner,
+        technical_manager = EXCLUDED.technical_manager,
+        product_type = EXCLUDED.product_type,
         sandbox_url = EXCLUDED.sandbox_url,
         production_url = EXCLUDED.production_url,
         git_url = EXCLUDED.git_url,
@@ -2035,14 +2204,13 @@ export class RdService implements OnModuleInit {
   }
 
   /**
-   * 悬赏接槽成功后回写需求 pm/tm 与 taskAcceptances；TM 接满双槽时进入 ai_developing。
+   * 悬赏接槽成功后回写需求 pm/tm 与 taskAcceptances；不改变需求 status（AI开发中由创建流水线驱动）。
    */
   private async syncRequirementAfterBountyAccept(
     requirementId: string,
     role: 'pm' | 'tm',
     userId: string,
     userName: string | undefined,
-    bothSlotsFilled: boolean,
   ): Promise<void> {
     const req = await this.getRequirement(requirementId);
     if (!req) {
@@ -2090,7 +2258,6 @@ export class RdService implements OnModuleInit {
       tm: userId,
       taskAcceptances: [...req.taskAcceptances, record],
       updatedBy: userId,
-      status: bothSlotsFilled ? 'ai_developing' : req.status,
     });
   }
 
@@ -2109,6 +2276,119 @@ export class RdService implements OnModuleInit {
     const result = await this.db.execute(sql`SELECT * FROM rd_bounty_tasks ORDER BY updated_at DESC;`);
     const rows = this.rowsFromExecute(result);
     return rows.map((row) => this.rowToBountyTask(row));
+  }
+
+  private rowToSiteMessage(r: Record<string, unknown>): ISiteMessageRow {
+    return {
+      id: r.id as string,
+      recipientUserId: (r.recipient_user_id as string) || (r.recipientUserId as string),
+      title: String(r.title ?? ''),
+      body: String(r.body ?? ''),
+      linkUrl: (r.link_url as string) || (r.linkUrl as string) || '/bounty-hunt',
+      readAt:
+        r.read_at != null
+          ? this.toIso(r.read_at)
+          : r.readAt != null
+            ? this.toIso(r.readAt)
+            : null,
+      createdAt: this.toIso(r.created_at ?? r.createdAt),
+      kind: (r.kind as string) || null,
+      relatedBountyTaskId:
+        (r.related_bounty_task_id as string) || (r.relatedBountyTaskId as string) || null,
+    };
+  }
+
+  /**
+   * 角色为产品经理或技术经理的用户 id（去重）。
+   */
+  private async listPmAndTmUserIds(): Promise<string[]> {
+    const junction = await this.db.execute(sql`
+      SELECT user_id AS id FROM rd_user_access_roles
+      WHERE role_id IN (${BUILTIN_ACCESS_ROLE_PM}, ${BUILTIN_ACCESS_ROLE_TM});
+    `);
+    const legacy = await this.db.execute(sql`
+      SELECT id FROM rd_users
+      WHERE access_role_id IN (${BUILTIN_ACCESS_ROLE_PM}, ${BUILTIN_ACCESS_ROLE_TM});
+    `);
+    const ids = new Set<string>();
+    for (const row of this.rowsFromExecute<{ id: string }>(junction)) {
+      if (row.id) ids.add(row.id);
+    }
+    for (const row of this.rowsFromExecute<{ id: string }>(legacy)) {
+      if (row.id) ids.add(row.id);
+    }
+    return [...ids];
+  }
+
+  /**
+   * 新发悬赏时通知所有 PM/TM（不含发起人本人）；失败仅记日志，不影响主流程。
+   */
+  private async notifyPmAndTmOnBountyPublished(params: {
+    publisherId: string;
+    publisherName: string;
+    taskTitle: string;
+    bountyTaskId: string;
+  }): Promise<void> {
+    try {
+      const recipients = (await this.listPmAndTmUserIds()).filter(
+        (id) => id && id !== params.publisherId,
+      );
+      if (recipients.length === 0) return;
+
+      const title = '【悬赏通知】';
+      const body = `金主【${params.publisherName}】发起了一条悬赏任务【${params.taskTitle}】，请速到赏金猎场查看`;
+      /** 站内可导航的相对路径；前端也可拼接 origin 作绝对链接 */
+      const linkUrl = `/bounty-hunt`;
+      const now = new Date().toISOString();
+      const kind = 'bounty_notice';
+
+      for (const uid of recipients) {
+        const mid = `msg_${params.bountyTaskId}_${uid}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        await this.db.execute(sql`
+          INSERT INTO rd_site_messages (
+            id, recipient_user_id, title, body, link_url, read_at, created_at, kind, related_bounty_task_id
+          ) VALUES (
+            ${mid}, ${uid}, ${title}, ${body}, ${linkUrl}, NULL, ${now}::timestamptz, ${kind}, ${params.bountyTaskId}
+          );
+        `);
+      }
+    } catch (e) {
+      this.logger.warn(
+        `悬赏站内信广播失败: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  async listSiteMessages(recipientUserId: string): Promise<ISiteMessageRow[]> {
+    const uid = String(recipientUserId || '').trim();
+    if (!uid) return [];
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_site_messages
+      WHERE recipient_user_id = ${uid}
+      ORDER BY created_at DESC
+      LIMIT 200;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows.map((row) => this.rowToSiteMessage(row));
+  }
+
+  async markSiteMessageRead(messageId: string, recipientUserId: string): Promise<ISiteMessageRow> {
+    const mid = String(messageId || '').trim();
+    const uid = String(recipientUserId || '').trim();
+    if (!mid) throw new BadRequestException('缺少消息 id');
+    if (!uid) throw new BadRequestException('缺少用户标识');
+    const now = new Date().toISOString();
+    const result = await this.db.execute(sql`
+      UPDATE rd_site_messages
+      SET read_at = ${now}::timestamptz
+      WHERE id = ${mid} AND recipient_user_id = ${uid}
+      RETURNING *;
+    `);
+    const rows = this.rowsFromExecute(result);
+    if (!rows[0]) {
+      throw new NotFoundException('消息不存在');
+    }
+    return this.rowToSiteMessage(rows[0]);
   }
 
   async createBountyTask(
@@ -2156,7 +2436,19 @@ export class RdService implements OnModuleInit {
     `);
     const result = await this.db.execute(sql`SELECT * FROM rd_bounty_tasks WHERE id = ${id} LIMIT 1;`);
     const rows = this.rowsFromExecute(result);
-    return this.rowToBountyTask(rows[0]);
+    const task = this.rowToBountyTask(rows[0]);
+
+    const pubName =
+      String(body.publisherName ?? '')
+        .trim() || task.publisherId;
+    void this.notifyPmAndTmOnBountyPublished({
+      publisherId: body.publisherId,
+      publisherName: pubName,
+      taskTitle: body.title,
+      bountyTaskId: id,
+    });
+
+    return task;
   }
 
   async acceptBountyTask(
@@ -2174,6 +2466,11 @@ export class RdService implements OnModuleInit {
     if (!bountyBefore) {
       throw new NotFoundException('悬赏任务不存在');
     }
+    const reqForClaim = await this.getRequirement(bountyBefore.requirementId);
+    if (!reqForClaim) {
+      throw new NotFoundException('关联需求不存在');
+    }
+    await this.assertUserMayClaimRequirementSlot(reqForClaim, role, hunterUserId);
     const pmReady = Boolean(bountyBefore.pmUserId) || Boolean(bountyBefore.hunterUserId);
     if (role === 'tm' && !pmReady) {
       throw new BadRequestException('请先由产品经理领取本悬赏');
@@ -2221,6 +2518,13 @@ export class RdService implements OnModuleInit {
     }
     const task = this.rowToBountyTask(rows[0]);
     const bothFilled = Boolean(task.pmUserId && task.tmUserId);
+    /** 赏金仅写 rd_bounty_tasks；须同步 rd_requirements.pm/tm 与 task_acceptances，否则仪表盘等依赖需求表的逻辑得到 null。 */
+    await this.syncRequirementAfterBountyAccept(
+      bountyBefore.requirementId,
+      role,
+      hunterUserId,
+      body.hunterUserName,
+    );
     return { ok: true, task, bothFilled };
   }
 

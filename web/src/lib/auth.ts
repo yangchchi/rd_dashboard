@@ -29,6 +29,20 @@ export function saveAuthSession(token: string, user: IUser): void {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
   clearAiSkillCache();
+  if (typeof window !== 'undefined') {
+    try {
+      if (user.accessRoleIds?.length) {
+        sessionStorage.setItem('__global_rd_userRoles', JSON.stringify(user.accessRoleIds));
+      } else {
+        sessionStorage.removeItem('__global_rd_userRoles');
+      }
+      if (user.accessRoleId) {
+        sessionStorage.setItem('__global_rd_userRole', user.accessRoleId);
+      }
+    } catch {
+      // ignore storage quota / private mode
+    }
+  }
   emitStoredUserUpdated();
 }
 
@@ -40,7 +54,7 @@ export function clearAuthSession(): void {
 }
 
 export function updateStoredCurrentUser(
-  updates: Partial<Pick<IUser, 'name' | 'email' | 'phone' | 'avatarUrl' | 'accessRoleId'>>
+  updates: Partial<Pick<IUser, 'name' | 'email' | 'phone' | 'avatarUrl' | 'accessRoleId' | 'accessRoleIds'>>
 ): IUser | null {
   if (typeof window === 'undefined') return null;
   const current = getCurrentUser();

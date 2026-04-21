@@ -53,9 +53,12 @@ function hrefWithProtocol(u: string): string {
 }
 
 const emptyForm = () => ({
+  code: '',
   name: '',
   description: '',
   owner: '',
+  technicalManager: '',
+  productType: '',
   sandboxUrl: '',
   productionUrl: '',
   gitUrl: '',
@@ -96,9 +99,12 @@ const ProductManagementPage: React.FC = () => {
   const openEdit = (p: IProduct) => {
     setEditingId(p.id);
     setForm({
+      code: p.code || '',
       name: p.name,
       description: p.description,
       owner: p.owner || '',
+      technicalManager: p.technicalManager || '',
+      productType: p.productType || '',
       sandboxUrl: p.sandboxUrl || '',
       productionUrl: p.productionUrl || '',
       gitUrl: p.gitUrl || '',
@@ -119,9 +125,12 @@ const ProductManagementPage: React.FC = () => {
       const existing = products.find((p) => p.id === id);
       await rdApi.upsertProduct({
         id,
+        code: form.code.trim() || undefined,
         name,
         description: form.description.trim(),
         owner: form.owner.trim() || undefined,
+        technicalManager: form.technicalManager.trim() || undefined,
+        productType: form.productType.trim() || undefined,
         sandboxUrl: form.sandboxUrl.trim() || undefined,
         productionUrl: form.productionUrl.trim() || undefined,
         gitUrl: form.gitUrl.trim() || undefined,
@@ -199,10 +208,19 @@ const ProductManagementPage: React.FC = () => {
               <TableHeader>
                 <TableRow className="border-border hover:bg-transparent">
                   <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    产品编码
+                  </TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                     产品名称
                   </TableHead>
                   <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    负责人
+                    产品负责人
+                  </TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    技术经理
+                  </TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    产品类型
                   </TableHead>
                   <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                     沙箱
@@ -224,6 +242,13 @@ const ProductManagementPage: React.FC = () => {
               <TableBody>
                 {products.map((p) => (
                   <TableRow key={p.id} className="border-border">
+                    <TableCell className="max-w-[120px] font-mono text-sm">
+                      {p.code?.trim() ? (
+                        <span title={p.code}>{p.code}</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell className="max-w-[220px]">
                       <div className="font-medium text-foreground">{p.name}</div>
                       {p.description ? (
@@ -231,6 +256,8 @@ const ProductManagementPage: React.FC = () => {
                       ) : null}
                     </TableCell>
                     <TableCell className="text-sm">{p.owner?.trim() || '—'}</TableCell>
+                    <TableCell className="text-sm">{p.technicalManager?.trim() || '—'}</TableCell>
+                    <TableCell className="text-sm">{p.productType?.trim() || '—'}</TableCell>
                     <TableCell>
                       <UrlCell url={p.sandboxUrl} />
                     </TableCell>
@@ -285,9 +312,19 @@ const ProductManagementPage: React.FC = () => {
         <DialogContent className="max-h-[min(90vh,640px)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingId ? '编辑产品' : '新增产品'}</DialogTitle>
-            <DialogDescription>填写产品名称、描述、负责人及各环境地址。</DialogDescription>
+            <DialogDescription>填写产品编码、名称、负责人、技术经理、类型及环境与仓库地址。</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-1">
+            <div className="grid gap-2">
+              <Label htmlFor="pm-code">产品编码</Label>
+              <Input
+                id="pm-code"
+                value={form.code}
+                onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
+                placeholder="例如：PRD-CORE-001"
+                className="rd-input-glass font-mono text-sm"
+              />
+            </div>
             <div className="grid gap-2">
               <Label htmlFor="pm-name">
                 产品名称 <RequiredMark />
@@ -301,6 +338,36 @@ const ProductManagementPage: React.FC = () => {
               />
             </div>
             <div className="grid gap-2">
+              <Label htmlFor="pm-owner">产品负责人</Label>
+              <Input
+                id="pm-owner"
+                value={form.owner}
+                onChange={(e) => setForm((f) => ({ ...f, owner: e.target.value }))}
+                placeholder="姓名或账号"
+                className="rd-input-glass"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="pm-tm">技术经理</Label>
+              <Input
+                id="pm-tm"
+                value={form.technicalManager}
+                onChange={(e) => setForm((f) => ({ ...f, technicalManager: e.target.value }))}
+                placeholder="姓名或账号"
+                className="rd-input-glass"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="pm-type">产品类型</Label>
+              <Input
+                id="pm-type"
+                value={form.productType}
+                onChange={(e) => setForm((f) => ({ ...f, productType: e.target.value }))}
+                placeholder="例如：自研业务系统、平台型产品、商业套件"
+                className="rd-input-glass"
+              />
+            </div>
+            <div className="grid gap-2">
               <Label htmlFor="pm-desc">描述</Label>
               <Textarea
                 id="pm-desc"
@@ -308,16 +375,6 @@ const ProductManagementPage: React.FC = () => {
                 onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                 placeholder="产品定位、边界说明等"
                 className="min-h-[88px] rd-input-glass"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pm-owner">负责人</Label>
-              <Input
-                id="pm-owner"
-                value={form.owner}
-                onChange={(e) => setForm((f) => ({ ...f, owner: e.target.value }))}
-                placeholder="姓名或账号"
-                className="rd-input-glass"
               />
             </div>
             <div className="grid gap-2">

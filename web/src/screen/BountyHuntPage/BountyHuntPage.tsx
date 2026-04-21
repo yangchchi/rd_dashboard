@@ -17,8 +17,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { useAccessControl } from '@/hooks/useAccessControl';
 import { useCurrentUserProfile } from '@/hooks/useCurrentUserProfile';
+import { getCurrentUser } from '@/lib/auth';
+import { mayClaimPmSlot, mayClaimTmSlot } from '@/lib/requirement-claim';
 import {
   useAcceptBountyTask,
   useAddAcceptanceRecord,
@@ -29,6 +30,7 @@ import {
   useRejectBountyTask,
   useRequirementsList,
   useSettleBountyTask,
+  usePipelineTasksList,
   useUpsertRequirement,
 } from '@/lib/rd-hooks';
 import type { IBountyTask, IRequirement } from '@/lib/rd-types';
@@ -142,10 +144,10 @@ function playChaChing() {
 const BountyHuntPage: React.FC = () => {
   const REDUCE_MOTION_STORAGE_KEY = '__rd_bounty_hunt_reduce_motion';
   const profile = useCurrentUserProfile();
-  const { can } = useAccessControl();
   const { data: huntTasks = [], isLoading } = useBountyHuntTasksList();
   const { data: allTasks = [] } = useBountyTasksList();
   const { data: requirements = [] } = useRequirementsList();
+  const { data: pipelineTasks = [] } = usePipelineTasksList();
   const createBounty = useCreateBountyTask();
   const acceptBounty = useAcceptBountyTask();
   const deliverBounty = useDeliverBountyTask();
@@ -203,6 +205,10 @@ const BountyHuntPage: React.FC = () => {
     () => new Map(requirements.map((r) => [r.id, r])),
     [requirements]
   );
+  const requirementIdsWithPipeline = useMemo(
+    () => new Set(pipelineTasks.map((t) => t.requirementId)),
+    [pipelineTasks]
+  );
 
   /** 截止未过的悬赏占用需求；截止后可再次发布 */
   const requirementsAvailableForPublish = useMemo(() => {
@@ -217,6 +223,9 @@ const BountyHuntPage: React.FC = () => {
   const difficultyLabel =
     difficulty === 'epic' ? '史诗（推荐 201+）' : difficulty === 'hard' ? '困难（推荐 81-200）' : '普通（推荐 20-80）';
   const actor = profile.user_id?.trim() || '';
+  const currentUser = getCurrentUser();
+  const myAccessRoleId = currentUser?.accessRoleId ?? null;
+  const myAccessRoleIds = currentUser?.accessRoleIds;
 
   const myDevelopingTasks = useMemo(
     () =>
@@ -312,7 +321,7 @@ const BountyHuntPage: React.FC = () => {
           updatedAt: new Date().toISOString(),
         });
       }
-      toast.success('悬赏已发布，任务已飞入狩猎场');
+      toast.success('悬赏已发布，任务已飞入赏金猎场');
       if (!reduceMotion) {
         setShowPublishFlyIn(true);
         window.setTimeout(() => setShowPublishFlyIn(false), 900);
@@ -326,9 +335,6 @@ const BountyHuntPage: React.FC = () => {
       toast.error(e instanceof Error ? e.message : '发布失败');
     }
   };
-
-  const canTakePmSlot = can('page.prd');
-  const canTakeTmSlot = can('page.spec');
 
   const handleAcceptSlot = async (taskId: string, role: 'pm' | 'tm') => {
     if (!actor) {
@@ -347,7 +353,7 @@ const BountyHuntPage: React.FC = () => {
       });
       if (result.ok) {
         if (result.bothFilled) {
-          toast.success('双槽已满，需求已进入开发中');
+          toast.success('双槽已满；需求进入「AI开发中」请在流水线页创建研发流水线');
         } else if (role === 'pm') {
           toast.success('已领取产品经理槽位，尚待技术经理领取');
         } else {
@@ -366,6 +372,10 @@ const BountyHuntPage: React.FC = () => {
   const handleDeliver = async (task: IBountyTask) => {
     if (!actor) {
       toast.error('未识别当前用户，无法交付');
+      return;
+    }
+    if (!requirementIdsWithPipeline.has(task.requirementId)) {
+      toast.error('请先为该需求创建研发流水线后再提测/交付');
       return;
     }
     try {
@@ -516,10 +526,10 @@ const BountyHuntPage: React.FC = () => {
         <div>
           <h1 className="rd-page-title flex items-center gap-2">
             <Swords className="h-6 w-6 text-primary" />
-            狩猎场
+            赏金猎场
           </h1>
           <p className="rd-page-desc mt-1">
-            悬赏需产品经理与技术经理分别接槽；两槽都满后进入开发中。工序上请先接 PM，再接 TM。
+            悬赏需产品经理与技术经理分别接槽；领取不改变需求流转状态。「AI开发中」请在流水线页创建研发流水线后生效。工序上请先接 PM，再接 TM。
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -624,7 +634,7 @@ const BountyHuntPage: React.FC = () => {
 
       <section className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
         {isLoading ? (
-          <div className="text-sm text-muted-foreground">加载狩猎场任务中...</div>
+          <div className="text-sm text-muted-foreground">加载赏金猎场任务中...</div>
         ) : null}
         {!isLoading && huntTasks.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
@@ -632,7 +642,20 @@ const BountyHuntPage: React.FC = () => {
           </div>
         ) : null}
         {huntTasks.map((task) => {
-          const pickupDeadline = resolvePickupDeadline(task, requirementById.get(task.requirementId));
+          const linkedReq = requirementById.get(task.requirementId);
+          const canTakePmThis = mayClaimPmSlot(
+            linkedReq,
+            actor || undefined,
+            myAccessRoleId,
+            myAccessRoleIds,
+          );
+          const canTakeTmThis = mayClaimTmSlot(
+            linkedReq,
+            actor || undefined,
+            myAccessRoleId,
+            myAccessRoleIds,
+          );
+          const pickupDeadline = resolvePickupDeadline(task, linkedReq);
           const countdown = formatCountdown(pickupDeadline);
           const isUrgent = countdown !== '已截止' && Number(countdown.slice(0, 2)) === 0;
           const pmTaken = Boolean(task.pmUserId || task.hunterUserId);
@@ -710,7 +733,7 @@ const BountyHuntPage: React.FC = () => {
                     lockingTm ||
                     deadlinePassed ||
                     pmTaken ||
-                    !canTakePmSlot
+                    !canTakePmThis
                   }
                   onClick={() => void handleAcceptSlot(task.id, 'pm')}
                 >
@@ -732,7 +755,7 @@ const BountyHuntPage: React.FC = () => {
                     deadlinePassed ||
                     tmTaken ||
                     tmNeedsPm ||
-                    !canTakeTmSlot
+                    !canTakeTmThis
                   }
                   onClick={() => void handleAcceptSlot(task.id, 'tm')}
                 >
@@ -746,8 +769,10 @@ const BountyHuntPage: React.FC = () => {
                   )}
                 </Button>
               </div>
-              {!canTakePmSlot && !canTakeTmSlot ? (
-                <p className="text-center text-xs text-muted-foreground">当前账号无 PRD/规格权限，无法接槽</p>
+              {!canTakePmThis && !canTakeTmThis ? (
+                <p className="text-center text-xs text-muted-foreground">
+                  当前账号无权领取该需求的 PM/TM（需为指定领取人，或未指定时须为产品经理/技术经理角色）
+                </p>
               ) : null}
             </article>
           );
@@ -775,7 +800,9 @@ const BountyHuntPage: React.FC = () => {
               {myDevelopingTasks.length === 0 ? (
                 <p className="text-sm text-muted-foreground">暂无开发中任务</p>
               ) : (
-                myDevelopingTasks.map((task) => (
+                myDevelopingTasks.map((task) => {
+                  const hasPipeline = requirementIdsWithPipeline.has(task.requirementId);
+                  return (
                   <div key={task.id} className="rounded-md border border-border bg-background/60 p-3">
                     <div className="mb-3 flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
@@ -794,9 +821,10 @@ const BountyHuntPage: React.FC = () => {
                         <span className="text-[11px] font-medium text-muted-foreground">{bountyStatusBracket(task)}</span>
                       </div>
                     </div>
-                    <div className="relative">
+                    <div className="relative space-y-1.5">
                       <Button
                         size="sm"
+                        variant={hasPipeline ? 'default' : 'secondary'}
                         onClick={(e) => {
                           if (deliverTargetRef.current) {
                             spawnFlight(
@@ -808,13 +836,22 @@ const BountyHuntPage: React.FC = () => {
                           }
                           void handleDeliver(task);
                         }}
-                        disabled={deliverBounty.isPending || addAcceptanceRecord.isPending}
+                        disabled={
+                          deliverBounty.isPending ||
+                          addAcceptanceRecord.isPending ||
+                          upsertRequirement.isPending ||
+                          !hasPipeline
+                        }
                       >
                         提测/交付
                       </Button>
+                      {!hasPipeline ? (
+                        <p className="text-xs text-muted-foreground">须先在「交付引擎」为该需求创建流水线后方可提测/交付</p>
+                      ) : null}
                     </div>
                   </div>
-                ))
+                );
+                })
               )}
               {myDeliveredTasks.length > 0 ? (
                 <p className="text-xs text-muted-foreground">已交付待验收：{myDeliveredTasks.length} 条</p>

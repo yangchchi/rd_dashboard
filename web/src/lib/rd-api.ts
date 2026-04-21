@@ -14,6 +14,7 @@ import type {
   ITaskAcceptanceRecord,
   ISpecification,
   IAiSkillConfig,
+  ISiteMessage,
 } from './rd-types';
 
 const BASE = '/api/rd';
@@ -48,11 +49,17 @@ function splitBountyLocal(bounty: number): { pmCoins: number; tmCoins: number } 
 
 function mapProduct(p: Record<string, unknown>): IProduct {
   const st = (p.status as string) || 'active';
+  const codeRaw = p.code != null ? String(p.code).trim() : '';
+  const tmRaw = p.technicalManager ?? p.technical_manager;
+  const ptRaw = p.productType ?? p.product_type;
   return {
     id: p.id as string,
+    code: codeRaw || undefined,
     name: (p.name as string) || '',
     description: (p.description as string) || '',
     owner: (p.owner as string) || undefined,
+    technicalManager: tmRaw != null && String(tmRaw).trim() ? String(tmRaw).trim() : undefined,
+    productType: ptRaw != null && String(ptRaw).trim() ? String(ptRaw).trim() : undefined,
     sandboxUrl: (p.sandboxUrl as string) || (p.sandbox_url as string) || undefined,
     productionUrl: (p.productionUrl as string) || (p.production_url as string) || undefined,
     gitUrl: (p.gitUrl as string) || (p.git_url as string) || undefined,
@@ -506,6 +513,20 @@ export const rdApi = {
     return rows.map(mapBountyTask);
   },
 
+  async listSiteMessages(userId: string): Promise<ISiteMessage[]> {
+    const q = encodeURIComponent(userId);
+    const rows = await json<Record<string, unknown>[]>(`/site-messages?userId=${q}`);
+    return rows.map(mapSiteMessage);
+  },
+
+  async markSiteMessageRead(messageId: string, userId: string): Promise<ISiteMessage> {
+    const raw = await json<Record<string, unknown>>(`/site-messages/${encodeURIComponent(messageId)}/read`, {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+    return mapSiteMessage(raw);
+  },
+
   async createBountyTask(
     body: Partial<IBountyTask> & { requirementId: string; publisherId: string; title: string }
   ): Promise<IBountyTask> {
@@ -554,6 +575,22 @@ export const rdApi = {
     return mapBountyTask(raw);
   },
 };
+
+function mapSiteMessage(row: Record<string, unknown>): ISiteMessage {
+  const readRaw = row.readAt ?? row.read_at;
+  return {
+    id: row.id as string,
+    recipientUserId: (row.recipientUserId as string) || (row.recipient_user_id as string) || '',
+    title: String(row.title ?? ''),
+    body: String(row.body ?? ''),
+    linkUrl: (row.linkUrl as string) || (row.link_url as string) || '/bounty-hunt',
+    readAt: readRaw != null && String(readRaw) !== '' ? String(readRaw) : undefined,
+    createdAt: (row.createdAt as string) || (row.created_at as string) || '',
+    kind: (row.kind as string) || undefined,
+    relatedBountyTaskId:
+      (row.relatedBountyTaskId as string) || (row.related_bounty_task_id as string) || undefined,
+  };
+}
 
 function mapPipelineTask(row: Record<string, unknown>): IPipelineTask {
   const logs = (row.logs as IPipelineLogEntry[]) || [];

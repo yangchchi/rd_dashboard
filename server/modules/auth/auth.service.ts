@@ -32,7 +32,9 @@ export interface IUserView {
   name?: string;
   email?: string;
   phone?: string;
-  /** 前端 RBAC 角色 id（存于 localStorage 策略中的角色定义） */
+  /** 绑定的访问角色 id 列表，权限为并集 */
+  accessRoleIds: string[];
+  /** 用于兼容旧客户端与列展示的主角色（由内建优先级推导） */
   accessRoleId?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -94,11 +96,50 @@ export class AuthService implements OnModuleInit {
     return d.toISOString();
   }
 
+  /** 多角色时的「主」列值，与 rd_users.access_role_id 同步 */
+  private pickPrimaryAccessRoleId(roleIds: string[]): string | null {
+    const normalized = this.normalizeAccessRoleIds(roleIds);
+    if (normalized.length === 0) return null;
+    const order = ['role_admin', 'role_tm', 'role_pm', 'role_stakeholder'];
+    for (const o of order) {
+      if (normalized.includes(o)) return o;
+    }
+    return [...normalized].sort()[0] ?? null;
+  }
+
+  private normalizeAccessRoleIds(ids: string[]): string[] {
+    const seen = new Set<string>();
+    for (const raw of ids) {
+      if (typeof raw !== 'string') continue;
+      const v = raw.trim();
+      if (!v) continue;
+      seen.add(v);
+    }
+    return [...seen].sort();
+  }
+
+  private mergeRoleIdsFromRow(row: Record<string, unknown>, legacyAccessRoleId: string | null): string[] {
+    const raw = row.role_ids ?? row.roleIds;
+    let fromAgg: string[] = [];
+    if (Array.isArray(raw)) {
+      fromAgg = raw
+        .filter((x) => typeof x === 'string' && String(x).trim() !== '')
+        .map((x) => String(x).trim());
+    }
+    if (fromAgg.length > 0) return this.normalizeAccessRoleIds(fromAgg);
+    if (legacyAccessRoleId) return [legacyAccessRoleId];
+    return [];
+  }
+
   private rowToUserView(row: Record<string, unknown>): IUserView {
     const fullName = row.full_name ?? row.fullName;
     const email = row.email;
     const phone = row.phone;
-    const accessRoleId = row.access_role_id ?? row.accessRoleId;
+    const legacyRaw = row.access_role_id ?? row.accessRoleId;
+    const legacyAccessRoleId =
+      typeof legacyRaw === 'string' && legacyRaw.trim() !== '' ? legacyRaw.trim() : null;
+    const accessRoleIds = this.mergeRoleIdsFromRow(row, legacyAccessRoleId);
+    const primary = this.pickPrimaryAccessRoleId(accessRoleIds);
     return {
       id: row.id as string,
       username: row.username as string,
@@ -110,10 +151,8 @@ export class AuthService implements OnModuleInit {
         typeof email === 'string' && email.trim() !== '' ? email.trim() : undefined,
       phone:
         typeof phone === 'string' && phone.trim() !== '' ? phone.trim() : undefined,
-      accessRoleId:
-        typeof accessRoleId === 'string' && accessRoleId.trim() !== ''
-          ? accessRoleId.trim()
-          : null,
+      accessRoleIds,
+      accessRoleId: primary,
       createdAt: this.toIso(row.created_at ?? row.createdAt),
       updatedAt: this.toIso(row.updated_at ?? row.updatedAt),
     };
@@ -141,6 +180,8 @@ export class AuthService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.ensureUsersTable();
+    await this.ensureUserAccessRolesTable();
+    await this.migrateLegacyUserRolesIntoJunction();
     await this.ensureAccessRolesTable();
     await this.seedDefaultAccessRolesIfEmpty();
     await this.ensureDefaultAdmin();
@@ -181,6 +222,68 @@ export class AuthService implements OnModuleInit {
       ON rd_users (feishu_open_id)
       WHERE feishu_open_id IS NOT NULL;
     `);
+  }
+
+  /** 用户与访问角色的多对多 */
+  private async ensureUserAccessRolesTable(): Promise<void> {
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_user_access_roles (
+        user_id TEXT NOT NULL REFERENCES rd_users(id) ON DELETE CASCADE,
+        role_id TEXT NOT NULL,
+        PRIMARY KEY (user_id, role_id)
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS rd_user_access_roles_role_id_idx ON rd_user_access_roles (role_id);
+    `);
+  }
+
+  /** 将历史 access_role_id 迁入联接表（可重复执行） */
+  private async migrateLegacyUserRolesIntoJunction(): Promise<void> {
+    await this.db.execute(sql`
+      INSERT INTO rd_user_access_roles (user_id, role_id)
+      SELECT id, trim(access_role_id) FROM rd_users
+      WHERE access_role_id IS NOT NULL AND trim(access_role_id) <> ''
+      ON CONFLICT DO NOTHING;
+    `);
+  }
+
+  private async fetchUserRoleIds(userId: string): Promise<string[]> {
+    const result = await this.db.execute(sql`
+      SELECT role_id FROM rd_user_access_roles WHERE user_id = ${userId} ORDER BY role_id ASC;
+    `);
+    const rows = this.rowsFromExecute<{ role_id?: string }>(result);
+    return this.normalizeAccessRoleIds(
+      rows.map((r) => (typeof r.role_id === 'string' ? r.role_id : '')).filter(Boolean),
+    );
+  }
+
+  private async replaceUserAccessRoles(userId: string, roleIds: string[]): Promise<void> {
+    const ids = this.normalizeAccessRoleIds(roleIds);
+    const primary = this.pickPrimaryAccessRoleId(ids);
+    await this.db.execute(sql`DELETE FROM rd_user_access_roles WHERE user_id = ${userId};`);
+    for (const rid of ids) {
+      await this.db.execute(sql`
+        INSERT INTO rd_user_access_roles (user_id, role_id) VALUES (${userId}, ${rid});
+      `);
+    }
+    await this.db.execute(sql`
+      UPDATE rd_users SET access_role_id = ${primary}, updated_at = NOW() WHERE id = ${userId};
+    `);
+  }
+
+  private async viewWithAccessRoles(base: IUserView): Promise<IUserView> {
+    const fromJunction = await this.fetchUserRoleIds(base.id);
+    const merged =
+      fromJunction.length > 0
+        ? fromJunction
+        : base.accessRoleIds.length > 0
+          ? base.accessRoleIds
+          : base.accessRoleId
+            ? [base.accessRoleId]
+            : [];
+    const primary = this.pickPrimaryAccessRoleId(merged);
+    return { ...base, accessRoleIds: merged, accessRoleId: primary };
   }
 
   private getFeishuAppId(): string {
@@ -344,8 +447,23 @@ export class AuthService implements OnModuleInit {
 
   async listUsers(): Promise<IUserView[]> {
     const result = await this.db.execute(sql`
-      SELECT id, username, full_name, email, phone, access_role_id, created_at, updated_at
-      FROM rd_users ORDER BY created_at DESC;
+      SELECT
+        u.id,
+        u.username,
+        u.full_name,
+        u.email,
+        u.phone,
+        u.access_role_id,
+        u.created_at,
+        u.updated_at,
+        COALESCE(
+          array_agg(rar.role_id ORDER BY rar.role_id) FILTER (WHERE rar.role_id IS NOT NULL),
+          ARRAY[]::text[]
+        ) AS role_ids
+      FROM rd_users u
+      LEFT JOIN rd_user_access_roles rar ON rar.user_id = u.id
+      GROUP BY u.id, u.username, u.full_name, u.email, u.phone, u.access_role_id, u.created_at, u.updated_at
+      ORDER BY u.created_at DESC;
     `);
     const rows = this.rowsFromExecute(result);
     return rows.map((row) => this.rowToUserView(row));
@@ -354,7 +472,13 @@ export class AuthService implements OnModuleInit {
   async createUser(
     username: string,
     password: string,
-    profile?: { name?: string; email?: string; phone?: string; accessRoleId?: string | null }
+    profile?: {
+      name?: string;
+      email?: string;
+      phone?: string;
+      accessRoleId?: string | null;
+      accessRoleIds?: string[];
+    }
   ): Promise<IUserView> {
     const now = new Date().toISOString();
     const userId = `usr_${Date.now()}`;
@@ -362,10 +486,16 @@ export class AuthService implements OnModuleInit {
     const fullName = profile?.name?.trim() || null;
     const email = profile?.email?.trim() || null;
     const phone = profile?.phone?.trim() || null;
-    const accessRoleId =
-      typeof profile?.accessRoleId === 'string' && profile.accessRoleId.trim() !== ''
-        ? profile.accessRoleId.trim()
-        : null;
+    let roleIds: string[] = [];
+    if (Array.isArray(profile?.accessRoleIds) && profile.accessRoleIds.length > 0) {
+      roleIds = this.normalizeAccessRoleIds(profile.accessRoleIds);
+    } else if (
+      typeof profile?.accessRoleId === 'string' &&
+      profile.accessRoleId.trim() !== ''
+    ) {
+      roleIds = [profile.accessRoleId.trim()];
+    }
+    const initialPrimary = this.pickPrimaryAccessRoleId(roleIds);
     await this.db.execute(sql`
       INSERT INTO rd_users (id, username, password_hash, full_name, email, phone, access_role_id, created_at, updated_at)
       VALUES (
@@ -375,7 +505,7 @@ export class AuthService implements OnModuleInit {
         ${fullName},
         ${email},
         ${phone},
-        ${accessRoleId},
+        ${initialPrimary},
         ${now}::timestamptz,
         ${now}::timestamptz
       )
@@ -385,7 +515,13 @@ export class AuthService implements OnModuleInit {
     if (!user) {
       throw new Error('创建用户失败');
     }
-    return this.rowToUserView(user as unknown as Record<string, unknown>);
+    await this.replaceUserAccessRoles(user.id, roleIds);
+    const row = await this.db.execute(sql`
+      SELECT * FROM rd_users WHERE id = ${user.id} LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute(row);
+    const base = this.rowToUserView(rows[0] as Record<string, unknown>);
+    return this.viewWithAccessRoles(base);
   }
 
   async deleteUser(id: string): Promise<void> {
@@ -459,28 +595,57 @@ export class AuthService implements OnModuleInit {
     const rows = this.rowsFromExecute<{ id?: string; built_in?: boolean }>(existed);
     if (!rows[0]?.id) throw new BadRequestException('角色不存在');
     if (rows[0].built_in) throw new BadRequestException('内置角色不可删除');
+    await this.db.execute(sql`DELETE FROM rd_user_access_roles WHERE role_id = ${roleId};`);
     await this.db.execute(sql`DELETE FROM rd_access_roles WHERE id = ${roleId};`);
   }
 
   async resetAccessRoles(): Promise<IAccessRoleRecord[]> {
+    await this.db.execute(sql`DELETE FROM rd_user_access_roles;`);
     await this.db.execute(sql`DELETE FROM rd_access_roles;`);
     await this.seedDefaultAccessRolesIfEmpty();
     return this.listAccessRoles();
   }
 
-  async updateUserAccessRole(id: string, accessRoleId: string | null): Promise<IUserView> {
-    await this.db.execute(sql`
-      UPDATE rd_users
-      SET access_role_id = ${accessRoleId}, updated_at = NOW()
-      WHERE id = ${id};
-    `);
+  async patchUserAccessRoles(
+    id: string,
+    body: { accessRoleIds?: string[]; accessRoleId?: string | null },
+  ): Promise<IUserView> {
+    let roleIds: string[] = [];
+    if (Array.isArray(body.accessRoleIds)) {
+      roleIds = this.normalizeAccessRoleIds(body.accessRoleIds);
+    } else if ('accessRoleId' in body) {
+      const v =
+        typeof body.accessRoleId === 'string' && body.accessRoleId.trim() !== ''
+          ? body.accessRoleId.trim()
+          : null;
+      roleIds = v ? [v] : [];
+    } else {
+      throw new BadRequestException('请提供 accessRoleIds 或 accessRoleId');
+    }
+    await this.replaceUserAccessRoles(id, roleIds);
     const result = await this.db.execute(sql`
-      SELECT id, username, full_name, email, phone, access_role_id, created_at, updated_at
-      FROM rd_users WHERE id = ${id} LIMIT 1;
+      SELECT
+        u.id,
+        u.username,
+        u.full_name,
+        u.email,
+        u.phone,
+        u.access_role_id,
+        u.created_at,
+        u.updated_at,
+        COALESCE(
+          array_agg(rar.role_id ORDER BY rar.role_id) FILTER (WHERE rar.role_id IS NOT NULL),
+          ARRAY[]::text[]
+        ) AS role_ids
+      FROM rd_users u
+      LEFT JOIN rd_user_access_roles rar ON rar.user_id = u.id
+      WHERE u.id = ${id}
+      GROUP BY u.id, u.username, u.full_name, u.email, u.phone, u.access_role_id, u.created_at, u.updated_at
+      LIMIT 1;
     `);
     const rows = this.rowsFromExecute(result);
     if (!rows[0]) {
-      throw new Error('用户不存在');
+      throw new BadRequestException('用户不存在');
     }
     return this.rowToUserView(rows[0]);
   }
@@ -507,9 +672,11 @@ export class AuthService implements OnModuleInit {
       }
     );
 
+    const base = this.rowToUserView(user as unknown as Record<string, unknown>);
+    const userView = await this.viewWithAccessRoles(base);
     return {
       token,
-      user: this.rowToUserView(user as unknown as Record<string, unknown>),
+      user: userView,
     };
   }
 
@@ -627,9 +794,11 @@ export class AuthService implements OnModuleInit {
       }
     );
 
+    const base = this.rowToUserView(user as unknown as Record<string, unknown>);
+    const userView = await this.viewWithAccessRoles(base);
     return {
       token,
-      user: this.rowToUserView(user as unknown as Record<string, unknown>),
+      user: userView,
     };
   }
 }

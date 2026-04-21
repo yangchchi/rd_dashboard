@@ -12,13 +12,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 import { useAccessControl } from '@/hooks/useAccessControl';
 import { authApi } from '@/lib/auth-api';
 import { getCurrentUser, updateStoredCurrentUser } from '@/lib/auth';
@@ -31,6 +30,19 @@ import {
 import type { IUser } from '@/lib/rd-types';
 import { toast } from 'sonner';
 
+function roleIdsLabel(ids: string[], roles: AccessRoleRecord[]): string {
+  if (ids.length === 0) return '未分配（仅仪表板）';
+  return ids
+    .map((id) => roles.find((r) => r.id === id)?.name ?? id)
+    .join('、');
+}
+
+function userRoleIds(u: IUser): string[] {
+  if (Array.isArray(u.accessRoleIds) && u.accessRoleIds.length > 0) return u.accessRoleIds;
+  if (u.accessRoleId) return [u.accessRoleId];
+  return [];
+}
+
 const UserManagementPage: React.FC = () => {
   const { can } = useAccessControl();
   const [users, setUsers] = useState<IUser[]>([]);
@@ -42,16 +54,17 @@ const UserManagementPage: React.FC = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [accessRoleForCreate, setAccessRoleForCreate] = useState('');
+  const [accessRolesForCreate, setAccessRolesForCreate] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const reloadRoles = useCallback(() => {
     const list = readAccessRoles();
     setAccessRoles(list);
-    setAccessRoleForCreate((prev) => {
-      if (prev && list.some((r) => r.id === prev)) return prev;
+    setAccessRolesForCreate((prev) => {
+      const kept = prev.filter((id) => list.some((r) => r.id === id));
+      if (kept.length > 0) return kept;
       const def = list.find((r) => r.id === 'role_stakeholder') ?? list[0];
-      return def?.id ?? '';
+      return def ? [def.id] : [];
     });
   }, []);
 
@@ -91,11 +104,23 @@ const UserManagementPage: React.FC = () => {
     reloadRoles();
   };
 
-  const handleAssignRole = async (userId: string, accessRoleId: string | null) => {
+  const handleAssignRoles = async (userId: string, accessRoleIds: string[]) => {
     try {
-      await authApi.updateUserAccessRole(userId, accessRoleId);
+      const updated = await authApi.updateUserAccessRoles(userId, accessRoleIds);
       if (getCurrentUser()?.id === userId) {
-        updateStoredCurrentUser({ accessRoleId });
+        updateStoredCurrentUser({
+          accessRoleIds: updated.accessRoleIds ?? accessRoleIds,
+          accessRoleId: updated.accessRoleId ?? null,
+        });
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem(
+            '__global_rd_userRoles',
+            JSON.stringify(updated.accessRoleIds ?? accessRoleIds),
+          );
+          if (updated.accessRoleId) {
+            sessionStorage.setItem('__global_rd_userRole', updated.accessRoleId);
+          }
+        }
       }
       toast.success('访问角色已更新');
       await loadUsers();
@@ -115,7 +140,7 @@ const UserManagementPage: React.FC = () => {
         name: name.trim() || undefined,
         email: email.trim() || undefined,
         phone: phone.trim() || undefined,
-        accessRoleId: accessRoleForCreate.trim() ? accessRoleForCreate.trim() : null,
+        accessRoleIds: accessRolesForCreate,
       });
       toast.success('用户创建成功');
       resetCreateForm();
@@ -232,20 +257,43 @@ const UserManagementPage: React.FC = () => {
               />
             </div>
             <div className="grid gap-2">
-              <Label>访问角色</Label>
-              <Select value={accessRoleForCreate} onValueChange={setAccessRoleForCreate}>
-                <SelectTrigger className="rd-input-glass w-full">
-                  <SelectValue placeholder="选择角色" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">未分配（仅仪表板）</SelectItem>
-                  {accessRoles.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>访问角色（可多选）</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rd-input-glass h-auto min-h-9 w-full justify-between py-2 font-normal"
+                  >
+                    <span className="line-clamp-2 text-left text-sm">
+                      {roleIdsLabel(accessRolesForCreate, accessRoles)}
+                    </span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-3" align="start">
+                  <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                    {accessRoles.map((r) => (
+                      <label
+                        key={r.id}
+                        className="flex cursor-pointer items-center gap-2 text-sm"
+                      >
+                        <Checkbox
+                          checked={accessRolesForCreate.includes(r.id)}
+                          onCheckedChange={() => {
+                            setAccessRolesForCreate((prev) => {
+                              const set = new Set(prev);
+                              if (set.has(r.id)) set.delete(r.id);
+                              else set.add(r.id);
+                              return [...set].sort();
+                            });
+                          }}
+                        />
+                        <span>{r.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
           <DialogFooter>
@@ -290,28 +338,47 @@ const UserManagementPage: React.FC = () => {
                       <span>创建：{new Date(u.createdAt).toLocaleString()}</span>
                     </div>
                   </div>
-                  <div className="flex w-full flex-col gap-2 sm:w-64">
-                    <Label className="text-xs text-muted-foreground">访问角色</Label>
+                  <div className="flex w-full flex-col gap-2 sm:w-72">
+                    <Label className="text-xs text-muted-foreground">访问角色（可多选）</Label>
                     {can('action.users.assign_role') ? (
-                      <Select
-                        value={u.accessRoleId ?? ''}
-                        onValueChange={(v) => handleAssignRole(u.id, v.trim() ? v : null)}
-                      >
-                        <SelectTrigger className="rd-input-glass h-9 w-full">
-                          <SelectValue placeholder="未分配" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">未分配（仅仪表板）</SelectItem>
-                          {accessRoles.map((r) => (
-                            <SelectItem key={r.id} value={r.id}>
-                              {r.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="rd-input-glass h-auto min-h-9 w-full justify-between py-2 font-normal"
+                          >
+                            <span className="line-clamp-2 text-left text-sm">
+                              {roleIdsLabel(userRoleIds(u), accessRoles)}
+                            </span>
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-80 p-3" align="start">
+                          <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                            {accessRoles.map((r) => (
+                              <label
+                                key={r.id}
+                                className="flex cursor-pointer items-center gap-2 text-sm"
+                              >
+                                <Checkbox
+                                  checked={userRoleIds(u).includes(r.id)}
+                                  onCheckedChange={() => {
+                                    const cur = userRoleIds(u);
+                                    const set = new Set(cur);
+                                    if (set.has(r.id)) set.delete(r.id);
+                                    else set.add(r.id);
+                                    void handleAssignRoles(u.id, [...set].sort());
+                                  }}
+                                />
+                                <span>{r.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                     ) : (
                       <p className="text-sm text-muted-foreground">
-                        {accessRoles.find((r) => r.id === u.accessRoleId)?.name ?? '未分配'}
+                        {roleIdsLabel(userRoleIds(u), accessRoles)}
                       </p>
                     )}
                   </div>

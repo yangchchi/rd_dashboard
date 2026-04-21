@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useCurrentUserProfile } from '@/hooks/useCurrentUserProfile';
 import { capabilityClient } from '@/lib/capability-client';
@@ -21,6 +21,11 @@ import { rdAuditUpdate } from '@/lib/rd-actor';
 import { useRequirement, useUpsertRequirement } from '@/lib/rd-hooks';
 import type { IRequirement, IUser } from '@/lib/rd-types';
 import { authApi } from '@/lib/auth-api';
+import {
+  ACCESS_ROLE_PM,
+  ACCESS_ROLE_TM,
+  userHasBuiltinAccessRole,
+} from '@/lib/requirement-claim';
 
 const PRIORITY_OPTIONS = [
   { value: 'P0', label: 'P0 - 最高优先级', color: 'bg-red-500' },
@@ -110,6 +115,45 @@ const RequirementEditPage: React.FC = () => {
       .then(setUsers)
       .catch(() => setUsers([]));
   }, []);
+
+  const pmUsers = useMemo(() => {
+    const seen = new Set<string>();
+    return users.filter((u) => {
+      if (!userHasBuiltinAccessRole(ACCESS_ROLE_PM, u.accessRoleIds, u.accessRoleId)) return false;
+      if (seen.has(u.id)) return false;
+      seen.add(u.id);
+      return true;
+    });
+  }, [users]);
+
+  const tmUsers = useMemo(() => {
+    const seen = new Set<string>();
+    return users.filter((u) => {
+      if (!userHasBuiltinAccessRole(ACCESS_ROLE_TM, u.accessRoleIds, u.accessRoleId)) return false;
+      if (seen.has(u.id)) return false;
+      seen.add(u.id);
+      return true;
+    });
+  }, [users]);
+
+  /** 已保存的指定人若不在当前角色列表中，仍显示一项避免 Select 值丢失 */
+  const pmSelectUsers = useMemo(() => {
+    const base = pmUsers;
+    if (pmCandidateUserId && !base.some((u) => u.id === pmCandidateUserId)) {
+      const u = users.find((x) => x.id === pmCandidateUserId);
+      return u ? [...base, u] : base;
+    }
+    return base;
+  }, [pmUsers, pmCandidateUserId, users]);
+
+  const tmSelectUsers = useMemo(() => {
+    const base = tmUsers;
+    if (tmCandidateUserId && !base.some((u) => u.id === tmCandidateUserId)) {
+      const u = users.find((x) => x.id === tmCandidateUserId);
+      return u ? [...base, u] : base;
+    }
+    return base;
+  }, [tmUsers, tmCandidateUserId, users]);
 
   const handleAiOptimize = async () => {
     const plain = description.trim();
@@ -336,7 +380,7 @@ const RequirementEditPage: React.FC = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">不指定（任意产品经理可领取）</SelectItem>
-                      {users.map((u) => (
+                      {pmSelectUsers.map((u) => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name?.trim() || u.username}
                         </SelectItem>
@@ -355,7 +399,7 @@ const RequirementEditPage: React.FC = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">不指定（任意技术经理可领取）</SelectItem>
-                      {users.map((u) => (
+                      {tmSelectUsers.map((u) => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name?.trim() || u.username}
                         </SelectItem>

@@ -73,6 +73,12 @@ function getNormalizedAccessRoleId(raw: string | null | undefined): string | nul
   return raw?.trim() || null;
 }
 
+function permissionSetForRoleId(roleId: string): Set<string> {
+  const role = getAccessRoleById(roleId);
+  if (role) return new Set(role.permissionIds);
+  return builtInPermissionSetByRoleId(roleId) ?? new Set(['page.dashboard']);
+}
+
 export function getEffectivePermissionSet(): Set<string> {
   const user = getCurrentUser();
   if (!user) return new Set();
@@ -80,20 +86,51 @@ export function getEffectivePermissionSet(): Set<string> {
     return superUserAllPermissions();
   }
   readAccessRoles();
-  let roleId = getNormalizedAccessRoleId(user.accessRoleId);
-  if (!roleId && typeof window !== 'undefined') {
+
+  const idsFromUser =
+    Array.isArray(user.accessRoleIds) && user.accessRoleIds.length > 0
+      ? user.accessRoleIds
+      : null;
+  let roleIds: string[] | null = idsFromUser;
+
+  if (!roleIds?.length && typeof window !== 'undefined') {
     try {
-      roleId = getNormalizedAccessRoleId(sessionStorage.getItem('__global_rd_userRole'));
+      const raw = sessionStorage.getItem('__global_rd_userRoles');
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown;
+        if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string')) {
+          roleIds = parsed as string[];
+        }
+      }
     } catch {
-      roleId = null;
+      // ignore
     }
   }
-  if (!roleId) {
+
+  if (!roleIds?.length) {
+    let fallback = getNormalizedAccessRoleId(user.accessRoleId);
+    if (!fallback && typeof window !== 'undefined') {
+      try {
+        fallback = getNormalizedAccessRoleId(sessionStorage.getItem('__global_rd_userRole'));
+      } catch {
+        fallback = null;
+      }
+    }
+    roleIds = fallback ? [fallback] : [];
+  }
+
+  if (!roleIds.length) {
     return new Set(['page.dashboard']);
   }
-  const role = getAccessRoleById(roleId);
-  if (role) return new Set(role.permissionIds);
-  return builtInPermissionSetByRoleId(roleId) ?? new Set(['page.dashboard']);
+
+  const merged = new Set<string>();
+  for (const rid of roleIds) {
+    const norm = getNormalizedAccessRoleId(rid) ?? rid;
+    for (const p of permissionSetForRoleId(norm)) {
+      merged.add(p);
+    }
+  }
+  return merged;
 }
 
 export function canAccessPath(pathname: string): boolean {

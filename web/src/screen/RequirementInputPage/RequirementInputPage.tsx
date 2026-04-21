@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useCurrentUserProfile } from '@/hooks/useCurrentUserProfile';
 import { capabilityClient } from '@/lib/capability-client';
@@ -43,6 +44,11 @@ import { authApi } from '@/lib/auth-api';
 import { useUpsertRequirement } from '@/lib/rd-hooks';
 import { rdAuditCreate } from '@/lib/rd-actor';
 import { rdApi } from '@/lib/rd-api';
+import {
+  ACCESS_ROLE_PM,
+  ACCESS_ROLE_TM,
+  userHasBuiltinAccessRole,
+} from '@/lib/requirement-claim';
 
 const PRIORITY_OPTIONS = [
   { value: 'P0', label: 'P0 - 最高优先级', color: 'bg-red-500' },
@@ -79,6 +85,7 @@ function difficultyFromCoins(coins: number): 'normal' | 'hard' | 'epic' {
 
 const RequirementInputPage: React.FC = () => {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const userInfo = useCurrentUserProfile();
   const upsertRequirement = useUpsertRequirement();
 
@@ -120,6 +127,26 @@ const RequirementInputPage: React.FC = () => {
     if (!q) return products;
     return products.filter((p) => p.name.toLowerCase().includes(q));
   }, [products, productSearch]);
+
+  const pmUsers = useMemo(() => {
+    const seen = new Set<string>();
+    return users.filter((u) => {
+      if (!userHasBuiltinAccessRole(ACCESS_ROLE_PM, u.accessRoleIds, u.accessRoleId)) return false;
+      if (seen.has(u.id)) return false;
+      seen.add(u.id);
+      return true;
+    });
+  }, [users]);
+
+  const tmUsers = useMemo(() => {
+    const seen = new Set<string>();
+    return users.filter((u) => {
+      if (!userHasBuiltinAccessRole(ACCESS_ROLE_TM, u.accessRoleIds, u.accessRoleId)) return false;
+      if (seen.has(u.id)) return false;
+      seen.add(u.id);
+      return true;
+    });
+  }, [users]);
 
   useEffect(() => {
     void authApi
@@ -299,9 +326,10 @@ const RequirementInputPage: React.FC = () => {
             difficultyTag: difficultyFromCoins(bounty),
             deadlineAt: new Date(Date.now() + 1000 * 60 * 60).toISOString(),
           });
+          void queryClient.invalidateQueries({ queryKey: ['rd', 'site-messages'] });
         } catch {
           toast.warning('需求已提交，但同步发布悬赏失败', {
-            description: '你可以稍后前往「狩猎场」手动发布悬赏任务',
+            description: '你可以稍后前往「赏金猎场」手动发布悬赏任务',
           });
         }
       }
@@ -600,7 +628,7 @@ const RequirementInputPage: React.FC = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">不指定（任意产品经理可领取）</SelectItem>
-                      {users.map((u) => (
+                      {pmUsers.map((u) => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name?.trim() || u.username}
                         </SelectItem>
@@ -619,7 +647,7 @@ const RequirementInputPage: React.FC = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">不指定（任意技术经理可领取）</SelectItem>
-                      {users.map((u) => (
+                      {tmUsers.map((u) => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name?.trim() || u.username}
                         </SelectItem>
@@ -700,7 +728,7 @@ const RequirementInputPage: React.FC = () => {
                     </label>
                     <p className="text-xs text-muted-foreground">
                       勾选同步发布悬赏令，你可以在
-                      <span className="mx-1 font-medium text-foreground">[狩猎场]</span>
+                      <span className="mx-1 font-medium text-foreground">[赏金猎场]</span>
                       进行查看
                     </p>
                   </div>

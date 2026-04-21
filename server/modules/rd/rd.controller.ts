@@ -11,6 +11,7 @@ import {
   type IPipelineTaskRow,
   type IProductRow,
   type IRequirementRow,
+  type ISiteMessageRow,
   type ISpecRow,
 } from './rd.service';
 
@@ -234,6 +235,19 @@ export class RdController {
   @Get('bounty-tasks/hunt')
   listHuntBountyTasks(): Promise<IBountyTaskRow[]> {
     return this.rd.listBountyTasks(true);
+  }
+
+  @Get('site-messages')
+  listSiteMessages(@Query('userId') userId: string): Promise<ISiteMessageRow[]> {
+    return this.rd.listSiteMessages(userId || '');
+  }
+
+  @Post('site-messages/:id/read')
+  markSiteMessageRead(
+    @Param('id') id: string,
+    @Body() body: { userId: string },
+  ): Promise<ISiteMessageRow> {
+    return this.rd.markSiteMessageRead(id, body?.userId || '');
   }
 
   @Post('bounty-tasks')

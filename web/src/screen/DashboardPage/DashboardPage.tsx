@@ -63,6 +63,22 @@ function normalizeActorKey(actor: LeaderboardActor): string {
   return id ? `id:${id}` : `name:${name || '未知用户'}`;
 }
 
+/** PM/TM 列：数据库 pm/tm 为 NULL 且无领受记录可识别用户时，不参与排行榜（避免聚合成「未知用户」） */
+function pickRoleActorForRanking(
+  r: IRequirement,
+  role: 'pm' | 'tm',
+): LeaderboardActor | null {
+  const rec = (r.taskAcceptances ?? []).find((x) => x.role === role);
+  const columnId = role === 'pm' ? r.pm : r.tm;
+  const resolvedId = columnId?.trim() || rec?.userId?.trim();
+  const resolvedName = rec?.userName?.trim();
+  if (!resolvedId && !resolvedName) return null;
+  return {
+    id: resolvedId || undefined,
+    name: rec?.userName,
+  };
+}
+
 function buildRankingAgg(
   reqs: IRequirement[],
   pickActor: (r: IRequirement) => LeaderboardActor | null,
@@ -162,7 +178,7 @@ const DashboardPage: React.FC = () => {
     const selectedOnceKey = `${ROLE_SELECTED_ONCE_PREFIX}${user.id}`;
     const selectedOnce = localStorage.getItem(selectedOnceKey) === '1';
     if (selectedOnce) return;
-    if (user.accessRoleId?.trim()) {
+    if ((user.accessRoleIds?.length ?? 0) > 0 || user.accessRoleId?.trim()) {
       localStorage.setItem(selectedOnceKey, '1');
       return;
     }
@@ -174,8 +190,13 @@ const DashboardPage: React.FC = () => {
     if (!user?.id || !selectedRole) return;
     setRoleSaving(true);
     try {
-      const updatedUser = await authApi.updateUserAccessRole(user.id, selectedRole);
-      updateStoredCurrentUser({ accessRoleId: updatedUser.accessRoleId ?? selectedRole });
+      const updatedUser = await authApi.updateUserAccessRoles(user.id, [selectedRole]);
+      const ids = updatedUser.accessRoleIds?.length ? updatedUser.accessRoleIds : [selectedRole];
+      updateStoredCurrentUser({
+        accessRoleIds: ids,
+        accessRoleId: updatedUser.accessRoleId ?? selectedRole,
+      });
+      sessionStorage.setItem('__global_rd_userRoles', JSON.stringify(ids));
       sessionStorage.setItem('__global_rd_userRole', updatedUser.accessRoleId ?? selectedRole);
       localStorage.setItem(`${ROLE_SELECTED_ONCE_PREFIX}${user.id}`, '1');
       setRoleDialogOpen(false);
@@ -205,7 +226,12 @@ const DashboardPage: React.FC = () => {
     () =>
       buildRankingAgg(
         filteredRequirements,
-        (r) => ({ id: r.submitter, name: r.submitterName }),
+        (r) => {
+          const sid = r.submitter?.trim();
+          const sname = r.submitterName?.trim();
+          if (!sid && !sname) return null;
+          return { id: r.submitter, name: r.submitterName };
+        },
         (r) => Number(r.bountyPoints ?? 0) || 0
       ),
     [filteredRequirements]
@@ -214,10 +240,7 @@ const DashboardPage: React.FC = () => {
     () =>
       buildRankingAgg(
         filteredRequirements,
-        (r) => {
-          const rec = (r.taskAcceptances ?? []).find((x) => x.role === 'pm');
-          return { id: r.pm, name: rec?.userName };
-        },
+        (r) => pickRoleActorForRanking(r, 'pm'),
         (r) => (r.status === 'released' ? Number(r.pmCoins ?? 0) || 0 : 0)
       ),
     [filteredRequirements]
@@ -226,10 +249,7 @@ const DashboardPage: React.FC = () => {
     () =>
       buildRankingAgg(
         filteredRequirements,
-        (r) => {
-          const rec = (r.taskAcceptances ?? []).find((x) => x.role === 'tm');
-          return { id: r.tm, name: rec?.userName };
-        },
+        (r) => pickRoleActorForRanking(r, 'tm'),
         (r) => (r.status === 'released' ? Number(r.tmCoins ?? 0) || 0 : 0)
       ),
     [filteredRequirements]

@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useCurrentUserProfile } from '@/hooks/useCurrentUserProfile';
 import { capabilityClient } from '@/lib/capability-client';
@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -228,18 +229,29 @@ function buildPrdDocument(prd: IPrd): string {
   ].join('\n\n');
 }
 
-function buildOrgSpecText(cfg: IOrganizationSpecConfig | null, lang: OrgSpecLanguage): string {
+function resolveOrgSpecLanguages(cfg: IOrganizationSpecConfig, selected: OrgSpecLanguage[]): OrgSpecLanguage[] {
+  const picked = [...new Set(selected)].filter((l) => cfg.languages[l]?.enabled);
+  if (picked.length) return picked;
+  if (cfg.languages[cfg.defaultLanguage]?.enabled) return [cfg.defaultLanguage];
+  const firstEnabled = (Object.values(cfg.languages) as IOrgLanguageSpec[]).find((x) => x.enabled);
+  return firstEnabled ? [firstEnabled.language] : ['typescript'];
+}
+
+function buildOrgSpecText(cfg: IOrganizationSpecConfig | null, langs: OrgSpecLanguage[]): string {
   if (!cfg) return '（未配置组织编码约束，请先在组织侧完成配置）';
-  const l = cfg.languages[lang];
-  return [
-    `组织: ${cfg.orgName}`,
-    `选用语言: ${l.displayName} (${lang})`,
-    `编码风格:\n${l.styleGuide.map((x) => `- ${x}`).join('\n')}`,
-    `必须遵循:\n${l.mustFollow.map((x) => `- ${x}`).join('\n')}`,
-    `禁止项:\n${l.forbidden.map((x) => `- ${x}`).join('\n')}`,
-    `工具链:\n${l.toolchain.map((x) => `- ${x}`).join('\n')}`,
-    `测试要求:\n${l.testing.map((x) => `- ${x}`).join('\n')}`,
-  ].join('\n\n');
+  const resolved = resolveOrgSpecLanguages(cfg, langs);
+  const blocks = resolved.map((lang) => {
+    const l = cfg.languages[lang];
+    return [
+      `### ${l.displayName} (${lang})`,
+      `编码风格:\n${l.styleGuide.map((x) => `- ${x}`).join('\n')}`,
+      `必须遵循:\n${l.mustFollow.map((x) => `- ${x}`).join('\n')}`,
+      `禁止项:\n${l.forbidden.map((x) => `- ${x}`).join('\n')}`,
+      `工具链:\n${l.toolchain.map((x) => `- ${x}`).join('\n')}`,
+      `测试要求:\n${l.testing.map((x) => `- ${x}`).join('\n')}`,
+    ].join('\n\n');
+  });
+  return [`组织: ${cfg.orgName}`, `选用语言: ${resolved.map((l) => `${cfg.languages[l].displayName} (${l})`).join('、')}`, ...blocks].join('\n\n');
 }
 
 const SpecEditPage: React.FC = () => {
@@ -271,7 +283,7 @@ const SpecEditPage: React.FC = () => {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const [orgSpecConfig, setOrgSpecConfig] = useState<IOrganizationSpecConfig | null>(null);
-  const [selectedLanguage, setSelectedLanguage] = useState<OrgSpecLanguage>('typescript');
+  const [selectedLanguages, setSelectedLanguages] = useState<OrgSpecLanguage[]>(['typescript']);
   const [generatingFs, setGeneratingFs] = useState(false);
   const [generatingTs, setGeneratingTs] = useState(false);
   const [fsStreamText, setFsStreamText] = useState('');
@@ -318,14 +330,31 @@ const SpecEditPage: React.FC = () => {
 
   useEffect(() => {
     if (loadedOrg) {
-      setOrgSpecConfig(loadedOrg as IOrganizationSpecConfig);
-      setSelectedLanguage((loadedOrg as IOrganizationSpecConfig).defaultLanguage);
+      const cfg = loadedOrg as IOrganizationSpecConfig;
+      setOrgSpecConfig(cfg);
+      setSelectedLanguages([cfg.defaultLanguage]);
     } else {
       const def = createDefaultOrgSpecConfig();
       setOrgSpecConfig(def);
-      setSelectedLanguage(def.defaultLanguage);
+      setSelectedLanguages([def.defaultLanguage]);
     }
   }, [loadedOrg]);
+
+  const resolvedOrgLanguages = useMemo(
+    () => (orgSpecConfig ? resolveOrgSpecLanguages(orgSpecConfig, selectedLanguages) : []),
+    [orgSpecConfig, selectedLanguages],
+  );
+
+  const organizationCodingSpecPayload = useMemo(() => {
+    if (!orgSpecConfig) return null;
+    return {
+      orgName: orgSpecConfig.orgName,
+      languages: resolvedOrgLanguages.map((language) => ({
+        language,
+        constraints: orgSpecConfig.languages[language],
+      })),
+    };
+  }, [orgSpecConfig, resolvedOrgLanguages]);
 
   useEffect(() => {
     if (linkedPrdApi) {
@@ -361,6 +390,25 @@ const SpecEditPage: React.FC = () => {
     setHasUnsavedChanges(true);
   }, []);
 
+  const toggleOrgLanguage = useCallback(
+    (lang: OrgSpecLanguage, checked: boolean) => {
+      if (!orgSpecConfig?.languages[lang]?.enabled) return;
+      setSelectedLanguages((prev) => {
+        if (checked) {
+          return [...new Set([...prev, lang])];
+        }
+        const next = prev.filter((l) => l !== lang);
+        const stillEnabled = next.filter((l) => orgSpecConfig.languages[l]?.enabled);
+        if (stillEnabled.length === 0) {
+          toast.message('至少保留一种已启用的语言');
+          return prev;
+        }
+        return stillEnabled;
+      });
+    },
+    [orgSpecConfig],
+  );
+
   const validateJson = useCallback(() => {
     setIsValidating(true);
     setJsonError(null);
@@ -371,13 +419,7 @@ const SpecEditPage: React.FC = () => {
         tsMarkdown: spec.tsMarkdown ?? '',
         functionalSpec: spec.functionalSpec,
         technicalSpec: spec.technicalSpec,
-        organizationCodingSpec: orgSpecConfig
-          ? {
-              orgName: orgSpecConfig.orgName,
-              language: selectedLanguage,
-              constraints: orgSpecConfig.languages[selectedLanguage],
-            }
-          : null,
+        organizationCodingSpec: organizationCodingSpecPayload,
       }, null, 2);
       
       // 尝试解析验证JSON格式
@@ -393,7 +435,7 @@ const SpecEditPage: React.FC = () => {
       setJsonError(error instanceof Error ? error.message : 'JSON格式错误');
       setIsValidating(false);
     }
-  }, [spec.fsMarkdown, spec.tsMarkdown, spec.functionalSpec, spec.technicalSpec, orgSpecConfig, selectedLanguage, updateSpec]);
+  }, [spec.fsMarkdown, spec.tsMarkdown, spec.functionalSpec, spec.technicalSpec, organizationCodingSpecPayload, updateSpec]);
 
   const detectConflict = useCallback(async () => {
     setIsDetectingConflict(true);
@@ -467,7 +509,7 @@ const SpecEditPage: React.FC = () => {
     setTsStreamText('');
     try {
       const skill = await getAiSkill('ts_auto_generation');
-      const orgText = buildOrgSpecText(orgSpecConfig, selectedLanguage);
+      const orgText = buildOrgSpecText(orgSpecConfig, selectedLanguages);
       const full = await runAiSkillStream(skill, {
         variables: {
           functional_spec: fsBody,
@@ -486,7 +528,7 @@ const SpecEditPage: React.FC = () => {
     } finally {
       setGeneratingTs(false);
     }
-  }, [orgSpecConfig, selectedLanguage, spec.fsMarkdown, updateSpec]);
+  }, [orgSpecConfig, selectedLanguages, spec.fsMarkdown, updateSpec]);
 
   const handleSave = useCallback(() => {
     validateJson();
@@ -516,13 +558,7 @@ const SpecEditPage: React.FC = () => {
       exportTime: new Date().toISOString(),
       specification: spec,
       requirement: requirement,
-      organizationCodingSpec: orgSpecConfig
-        ? {
-            orgName: orgSpecConfig.orgName,
-            language: selectedLanguage,
-            constraints: orgSpecConfig.languages[selectedLanguage],
-          }
-        : null,
+      organizationCodingSpec: organizationCodingSpecPayload,
     };
     
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
@@ -535,7 +571,7 @@ const SpecEditPage: React.FC = () => {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     setShowExportDialog(false);
-  }, [orgSpecConfig, requirement, selectedLanguage, spec]);
+  }, [orgSpecConfig, requirement, organizationCodingSpecPayload, spec]);
 
   const getStatusBadge = (status: string) => {
     const statusMap: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive'; className?: string }> = {
@@ -748,7 +784,7 @@ const SpecEditPage: React.FC = () => {
                 <CardHeader>
                   <CardTitle>组织级编码规范</CardTitle>
                   <CardDescription>
-                    请先确认语言与约束；生成 TS 时会将本节作为 org_spec 一并交给模型。规范来源于组织配置。
+                    可勾选多种已启用语言；生成 TS 时会将所选语言的组织约束合并为 org_spec 交给模型。规范来源于组织配置。
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -758,45 +794,64 @@ const SpecEditPage: React.FC = () => {
                       <Input value={orgSpecConfig?.orgName ?? '默认组织'} disabled />
                     </div>
                     <div className="space-y-2">
-                      <Label>语言</Label>
-                      <select
-                        className="w-full p-2 border rounded-md bg-card"
-                        value={selectedLanguage}
-                        onChange={(e) => setSelectedLanguage(e.target.value as OrgSpecLanguage)}
-                      >
+                      <Label>语言（可多选）</Label>
+                      <div className="flex flex-wrap gap-x-4 gap-y-2 rounded-md border border-input bg-card p-3">
                         {(orgSpecConfig ? Object.values(orgSpecConfig.languages) : []).map((languageSpec) => (
-                          <option
-                            key={languageSpec.language}
-                            value={languageSpec.language}
-                            disabled={!languageSpec.enabled}
-                          >
-                            {languageSpec.displayName} {!languageSpec.enabled ? '(停用)' : ''}
-                          </option>
+                          <div key={languageSpec.language} className="flex items-center gap-2">
+                            <Checkbox
+                              id={`org-lang-${languageSpec.language}`}
+                              checked={selectedLanguages.includes(languageSpec.language)}
+                              disabled={!languageSpec.enabled}
+                              onCheckedChange={(c) =>
+                                toggleOrgLanguage(languageSpec.language, c === true)
+                              }
+                            />
+                            <label
+                              htmlFor={`org-lang-${languageSpec.language}`}
+                              className={`text-sm leading-none ${
+                                languageSpec.enabled ? 'cursor-pointer' : 'cursor-not-allowed text-muted-foreground'
+                              }`}
+                            >
+                              {languageSpec.displayName}
+                              {!languageSpec.enabled ? '（停用）' : ''}
+                            </label>
+                          </div>
                         ))}
-                      </select>
+                      </div>
                     </div>
                   </div>
 
-                  {orgSpecConfig && (
-                    <div className="space-y-4">
-                      <div>
-                        <Label>编码风格</Label>
-                        <pre className="mt-2 p-3 border rounded-md text-xs font-mono whitespace-pre-wrap">
-                          {orgSpecConfig.languages[selectedLanguage].styleGuide.map((item) => `- ${item}`).join('\n')}
-                        </pre>
-                      </div>
-                      <div>
-                        <Label>必须遵循</Label>
-                        <pre className="mt-2 p-3 border rounded-md text-xs font-mono whitespace-pre-wrap">
-                          {orgSpecConfig.languages[selectedLanguage].mustFollow.map((item) => `- ${item}`).join('\n')}
-                        </pre>
-                      </div>
-                      <div>
-                        <Label>禁止项</Label>
-                        <pre className="mt-2 p-3 border rounded-md text-xs font-mono whitespace-pre-wrap">
-                          {orgSpecConfig.languages[selectedLanguage].forbidden.map((item) => `- ${item}`).join('\n')}
-                        </pre>
-                      </div>
+                  {orgSpecConfig && resolvedOrgLanguages.length > 0 && (
+                    <div className="space-y-6">
+                      {resolvedOrgLanguages.map((lang) => {
+                        const l = orgSpecConfig.languages[lang];
+                        return (
+                          <div key={lang} className="space-y-4 rounded-lg border border-border p-4">
+                            <p className="text-sm font-medium text-foreground">
+                              {l.displayName}
+                              <span className="ml-2 font-mono text-xs text-muted-foreground">({lang})</span>
+                            </p>
+                            <div>
+                              <Label>编码风格</Label>
+                              <pre className="mt-2 p-3 border rounded-md text-xs font-mono whitespace-pre-wrap">
+                                {l.styleGuide.map((item) => `- ${item}`).join('\n')}
+                              </pre>
+                            </div>
+                            <div>
+                              <Label>必须遵循</Label>
+                              <pre className="mt-2 p-3 border rounded-md text-xs font-mono whitespace-pre-wrap">
+                                {l.mustFollow.map((item) => `- ${item}`).join('\n')}
+                              </pre>
+                            </div>
+                            <div>
+                              <Label>禁止项</Label>
+                              <pre className="mt-2 p-3 border rounded-md text-xs font-mono whitespace-pre-wrap">
+                                {l.forbidden.map((item) => `- ${item}`).join('\n')}
+                              </pre>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
@@ -1034,13 +1089,7 @@ const SpecEditPage: React.FC = () => {
                         tsMarkdown: spec.tsMarkdown ?? '',
                         functionalSpec: spec.functionalSpec,
                         technicalSpec: spec.technicalSpec,
-                        organizationCodingSpec: orgSpecConfig
-                          ? {
-                              orgName: orgSpecConfig.orgName,
-                              language: selectedLanguage,
-                              constraints: orgSpecConfig.languages[selectedLanguage],
-                            }
-                          : null,
+                        organizationCodingSpec: organizationCodingSpecPayload,
                       }, null, 2)}
                     </pre>
                   </ScrollArea>
