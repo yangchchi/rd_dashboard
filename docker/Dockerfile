@@ -17,11 +17,15 @@ ENV PATH="/usr/local/bin:${PATH}" \
     FEISHU_APP_ID="${FEISHU_APP_ID}" \
     FEISHU_APP_SECRET="${FEISHU_APP_SECRET}"
 
-# 合并所有文件复制指令，仅用1个COPY层替代原9个COPY层
-COPY package*.json web/package*.json ./
-COPY node_modules web/node_modules ./
-COPY dist/server dist/shared ./dist/
-COPY web/.next web/public web/next.config.ts ./web/
+# 复制后端/前端运行所需文件（保留目录结构，避免同名文件覆盖）
+COPY package*.json ./
+COPY web/package*.json ./web/
+COPY node_modules ./node_modules
+COPY web/node_modules ./web/node_modules
+COPY dist ./dist
+COPY web/.next ./web/.next
+COPY web/public ./web/public
+COPY web/next.config.ts ./web/next.config.ts
 
 # 创建nginx目录 + 复制配置文件（合并为一层，替代原2层）
 RUN mkdir -p /etc/nginx/conf.d /etc/nginx/http.d
@@ -31,5 +35,5 @@ RUN [ -d /etc/nginx/http.d ] && cp /etc/nginx/conf.d/default.conf /etc/nginx/htt
 # 暴露端口
 EXPOSE 80
 
-# 启动命令（完全保留原逻辑，无任何修改）
-CMD ["sh", "-c", "if [ -f /app/.env ]; then set -a; sed 's/\\r$//' /app/.env > /tmp/runtime.env; . /tmp/runtime.env; set +a; fi; export NODE_ENV=production SERVER_HOST=0.0.0.0 SERVER_PORT=${SERVER_PORT:-3000} HOSTNAME=0.0.0.0 PORT=3001 API_ORIGIN=${API_ORIGIN:-http://127.0.0.1:3000}; node /app/dist/server/main.js & npm --prefix /app/web run start -- -p 3001 -H 0.0.0.0 & exec nginx -g 'daemon off;'"]
+# 启动命令：兼容不同构建输出目录（dist/server/main.js 或 dist/main.js）
+CMD ["sh", "-c", "if [ -f /app/.env ]; then set -a; sed 's/\\r$//' /app/.env > /tmp/runtime.env; . /tmp/runtime.env; set +a; fi; export NODE_ENV=production SERVER_HOST=0.0.0.0 SERVER_PORT=${SERVER_PORT:-3000} HOSTNAME=0.0.0.0 PORT=3001 API_ORIGIN=${API_ORIGIN:-http://127.0.0.1:3000}; if [ -f /app/dist/server/main.js ]; then node /app/dist/server/main.js; else node /app/dist/main.js; fi & npm --prefix /app/web run start -- -p 3001 -H 0.0.0.0 & exec nginx -g 'daemon off;'"]
