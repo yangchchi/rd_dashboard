@@ -156,6 +156,7 @@ function mapSpec(s: Record<string, unknown>): ISpecification {
     prdId: (s.prdId as string) || (s.prd_id as string),
     fsMarkdown: (s.fsMarkdown as string) || (s.fs_markdown as string) || undefined,
     tsMarkdown: (s.tsMarkdown as string) || (s.ts_markdown as string) || undefined,
+    cpMarkdown: (s.cpMarkdown as string) || (s.cp_markdown as string) || undefined,
     functionalSpec: fs || { apis: [], uiComponents: [], interactions: [] },
     technicalSpec: ts || {
       databaseSchema: {},

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Query } from '@nestjs/common';
 import {
   PipelineGitService,
   type IFetchPipelineCommitsPayload,
@@ -22,13 +22,35 @@ export class PipelineGitController {
       branch: branch || '',
       limit: limit ? Number(limit) : undefined,
     };
-    return this.pipelineGitService.fetchPipelineCommits(payload);
+    try {
+      return await this.pipelineGitService.fetchPipelineCommits(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '获取 commit 记录失败';
+      throw new BadRequestException(message);
+    }
+  }
+
+  @Post('commits')
+  async commitsPost(
+    @Body() payload: IFetchPipelineCommitsPayload
+  ): Promise<IPipelineCommitRecord[]> {
+    try {
+      return await this.pipelineGitService.fetchPipelineCommits(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '获取 commit 记录失败';
+      throw new BadRequestException(message);
+    }
   }
 
   @Post('publish')
   async publish(
     @Body() payload: IPublishPipelineDocsPayload
   ): Promise<IPublishPipelineDocsResult> {
-    return this.pipelineGitService.publishPipelineDocs(payload);
+    try {
+      return await this.pipelineGitService.publishPipelineDocs(payload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '提交流水线文档失败';
+      throw new BadRequestException(message);
+    }
   }
 }

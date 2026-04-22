@@ -17,6 +17,7 @@ export const PLUGIN_SKILL_ORDER: string[] = [
   'prd_to_tech_spec',
   'fs_auto_generation',
   'ts_auto_generation',
+  'cp_auto_generation',
   'requirement_classifier',
   'requirement_optimizer',
   'conflict_detector_tech_spec',
@@ -175,6 +176,39 @@ PRD 文档如下：
 ---
 组织编码约束（org_spec）：
 {{org_spec}}`,
+  },
+  cp_auto_generation: {
+    id: 'cp_auto_generation',
+    name: '编程计划（CP）自动生成',
+    description:
+      '基于功能规格（FS）与技术规格（TS）生成可交给 Cursor、Claude Code 等智能体按任务拆解执行的编程计划（Markdown，含勾选步骤与验收标准）。',
+    provider: 'ark',
+    model: 'deepseek-v3-2-251201',
+    stream: true,
+    promptTemplate: `你是一名资深技术负责人 + AI 编程编排专家。请仅根据下列【功能规格 FS】与【技术规格 TS】，输出一份【编程计划（CP）】Markdown 文档，供智能体（如 Cursor Agent、Claude Code）按任务顺序执行实现与验证。
+
+【硬性要求】
+1. 使用中文；禁止输出思考过程、XML/HTML 标签、前言或后记；只输出最终 Markdown 正文。
+2. 结构必须严格贴近下列模板（可增删 Task 数量，但层级与符号风格须一致）：
+   - 一级标题：\`# <项目或主题名> Implementation Plan\`（主题名从 FS/TS 概括，勿用占位符「项目名」）
+   - 引用块首行：\`> **For agentic workers:** REQUIRED SUB-SKILL: ...\`（沿用示例句式，说明须按 Task 勾选推进）
+   - \`**Goal:**\`、\`**Architecture:**\`、\`**Tech Stack:**\` 各一段（从 TS 抽取栈与架构，从 FS 抽取目标）
+   - \`---\` 分隔线
+   - \`## 0. 执行约定（必须先完成）\` 下含 **Files:** 与若干 \`- [ ] **Step N: ...**\`，每步含 \`Run:\` 与 \`Expected:\`（与仓库探测、分支策略相关，勿虚构本仓库不存在的路径时可写「按实际仓库调整」）
+   - 多个 \`### Task k: <标题>\`，每 Task 含 **Files:**（Create/Modify/Test）、多个 \`- [ ] **Step ...**\`（TDD 风格：先测后实现再验证），步骤中 \`Run:\` / \`Expected:\` 成对出现
+   - 末尾 \`## 全局验收标准（完成本计划前必须全部满足）\` 下若干 \`- [ ]\` 条目，覆盖业务、规则、接口、测试、性能/运维等你从 FS/TS 能合理推断的项
+3. 任务拆分须可执行、可验证；文件路径用反引号；命令用 Markdown 代码围栏或 \`Run:\` 行内写清。
+4. 不要照抄 FS/TS 全文；应提炼为实施任务与验收点，必要时在 Task 内用短列表概括接口或模型要点。
+
+---
+【功能规格（FS）】
+
+{{fs_document}}
+
+---
+【技术规格（TS）】
+
+{{ts_document}}`,
   },
   requirement_classifier: {
     id: 'requirement_classifier',

@@ -71,9 +71,36 @@ interface IRelationOption {
   label: string;
 }
 
+function extractErrorMessage(input: unknown, fallback: string): string {
+  if (!input) return fallback;
+  if (typeof input === 'string') return input;
+  if (input instanceof Error) return input.message || fallback;
+  if (Array.isArray(input)) {
+    const text = input
+      .map((item) => extractErrorMessage(item, ''))
+      .filter((item) => item.trim().length > 0)
+      .join('；');
+    return text || fallback;
+  }
+  if (typeof input === 'object') {
+    const data = input as Record<string, unknown>;
+    const preferred = data.message ?? data.error ?? data.details ?? data.reason;
+    if (preferred !== undefined) {
+      const text = extractErrorMessage(preferred, '');
+      if (text) return text;
+    }
+    const json = JSON.stringify(data);
+    return json === '{}' ? fallback : json;
+  }
+  return String(input);
+}
+
 interface ICreatePipelineForm {
   name: string;
   gitUrl: string;
+  gitAuthMode: 'ssh' | 'pat';
+  gitUsername: string;
+  gitPat: string;
   sandboxUrl: string;
   branch: string;
   triggerMode: 'manual' | 'push' | 'schedule';
@@ -138,6 +165,9 @@ const AIPipelinePage: React.FC = () => {
   const [createForm, setCreateForm] = useState<ICreatePipelineForm>({
     name: '',
     gitUrl: '',
+    gitAuthMode: 'ssh',
+    gitUsername: '',
+    gitPat: '',
     sandboxUrl: '',
     branch: 'main',
     triggerMode: 'manual',
@@ -184,6 +214,9 @@ const AIPipelinePage: React.FC = () => {
     setCreateForm({
       name: '',
       gitUrl: '',
+      gitAuthMode: 'ssh',
+      gitUsername: '',
+      gitPat: '',
       sandboxUrl: '',
       branch: 'main',
       triggerMode: 'manual',
@@ -193,30 +226,46 @@ const AIPipelinePage: React.FC = () => {
     });
   };
 
-  const fetchGitCommits = async (gitUrl: string, branch: string, limit = 20): Promise<IGitCommitRecord[]> => {
-    const query = new URLSearchParams({
+  const fetchGitCommits = async (
+    gitUrl: string,
+    branch: string,
+    limit = 20,
+    gitUsername?: string,
+    gitPat?: string
+  ): Promise<IGitCommitRecord[]> => {
+    const payload = {
       gitUrl: gitUrl.trim(),
       branch: branch.trim(),
-      limit: String(limit),
-    }).toString();
+      limit,
+      gitUsername: (gitUsername || '').trim() || undefined,
+      gitPat: (gitPat || '').trim() || undefined,
+    };
     const fallbackUrls = [
-      `/api/pipeline-git/commits?${query}`,
-      `/pipeline-git/commits?${query}`,
-      `http://localhost:3000/pipeline-git/commits?${query}`,
+      '/api/pipeline-git/commits',
+      '/pipeline-git/commits',
+      'http://localhost:3000/pipeline-git/commits',
     ];
     let lastError = '';
     for (const url of fallbackUrls) {
-      // eslint-disable-next-line no-restricted-syntax
-      const response = await globalThis.fetch(url);
-      if (response.status === 404 || response.status === 403) {
-        continue;
+      try {
+        // eslint-disable-next-line no-restricted-syntax
+        const response = await globalThis.fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (response.status === 404 || response.status === 403) {
+          continue;
+        }
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          lastError = extractErrorMessage(result, '获取 commit 记录失败');
+          continue;
+        }
+        return Array.isArray(result) ? result : [];
+      } catch (error) {
+        lastError = extractErrorMessage(error, '获取 commit 记录失败');
       }
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        lastError = String((result && (result.message || result.error)) || '获取 commit 记录失败');
-        continue;
-      }
-      return Array.isArray(result) ? result : [];
     }
     throw new Error(lastError || '获取 commit 记录失败');
   };
@@ -409,6 +458,20 @@ const AIPipelinePage: React.FC = () => {
       toast.error('请输入有效的Git地址（https/ssh且以.git结尾）');
       return;
     }
+    if (createForm.gitAuthMode === 'pat') {
+      if (!createForm.gitPat.trim()) {
+        toast.error('请选择 PAT 认证时请填写 Git PAT');
+        return;
+      }
+      if (!/^https?:\/\//i.test(createForm.gitUrl.trim())) {
+        toast.error('使用 PAT 时请填写 HTTPS Git 地址');
+        return;
+      }
+    }
+    if (createForm.gitAuthMode === 'ssh' && !/^git@[\w.-]+:[\w./-]+\.git$/i.test(createForm.gitUrl.trim())) {
+      toast.error('使用 SSH 时请填写 SSH 格式 Git 地址');
+      return;
+    }
     if (!createForm.branch.trim()) {
       toast.error('请输入目标分支');
       return;
@@ -433,6 +496,8 @@ const AIPipelinePage: React.FC = () => {
         pipelineName: createForm.name.trim(),
         requirementTitle: selectedRequirement?.title || createForm.name.trim(),
         gitUrl: createForm.gitUrl.trim(),
+        gitUsername: createForm.gitAuthMode === 'pat' ? createForm.gitUsername.trim() || undefined : undefined,
+        gitPat: createForm.gitAuthMode === 'pat' ? createForm.gitPat.trim() || undefined : undefined,
         branch: createForm.branch.trim(),
         remarks: createForm.remarks.trim(),
         operator: currentProfile?.name || currentProfile?.email || 'unknown',
@@ -440,34 +505,43 @@ const AIPipelinePage: React.FC = () => {
         specs: selectedSpecs,
       };
 
-      // eslint-disable-next-line no-restricted-syntax
-      let response = await fetch('/api/pipeline-git/publish', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (response.status === 404 || response.status === 403) {
-        // eslint-disable-next-line no-restricted-syntax
-        response = await fetch('/pipeline-git/publish', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      }
-      if (response.status === 404 || response.status === 403) {
-        // eslint-disable-next-line no-restricted-syntax
-        response = await fetch('http://localhost:3000/pipeline-git/publish', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
+      const publishUrls = [
+        '/api/pipeline-git/publish',
+        '/pipeline-git/publish',
+        'http://localhost:3000/pipeline-git/publish',
+      ];
+      let result: unknown = {};
+      let publishSuccess = false;
+      let publishError = '提交PRD/规格到Git失败';
+
+      for (const url of publishUrls) {
+        try {
+          // eslint-disable-next-line no-restricted-syntax
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          result = await response.json().catch(() => ({}));
+          if (response.status === 404 || response.status === 403) {
+            publishError = extractErrorMessage(result, publishError);
+            continue;
+          }
+          if (!response.ok) {
+            publishError = extractErrorMessage(result, publishError);
+            continue;
+          }
+          publishSuccess = true;
+          break;
+        } catch (error) {
+          publishError = extractErrorMessage(error, publishError);
+        }
       }
 
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message = (result && (result.message || result.error)) || '提交PRD/规格到Git失败';
-        throw new Error(Array.isArray(message) ? message.join('；') : String(message));
+      if (!publishSuccess) {
+        throw new Error(publishError);
       }
+      const publishResult = result as { commitHash?: string; documents?: IPipelinePublishedDocument[] };
 
       const now = new Date();
       const taskId = `task-${Date.now()}`;
@@ -477,7 +551,13 @@ const AIPipelinePage: React.FC = () => {
         .join('、');
       let commitStorePayload: IPipelineTask['commitStore'];
       try {
-        const commitRecords = await fetchGitCommits(createForm.gitUrl.trim(), createForm.branch.trim(), 20);
+        const commitRecords = await fetchGitCommits(
+          createForm.gitUrl.trim(),
+          createForm.branch.trim(),
+          20,
+          createForm.gitAuthMode === 'pat' ? createForm.gitUsername.trim() : undefined,
+          createForm.gitAuthMode === 'pat' ? createForm.gitPat.trim() : undefined
+        );
         commitStorePayload = {
           pipelineName: createForm.name.trim(),
           gitUrl: createForm.gitUrl.trim(),
@@ -502,13 +582,23 @@ const AIPipelinePage: React.FC = () => {
         logs: [
           { id: `log-${Date.now()}-1`, timestamp: now.toLocaleTimeString(), level: 'info', message: `已创建流水线：${createForm.name}` },
           { id: `log-${Date.now()}-2`, timestamp: now.toLocaleTimeString(), level: 'info', message: `Git仓库：${createForm.gitUrl} (${createForm.branch})` },
-          { id: `log-${Date.now()}-3`, timestamp: now.toLocaleTimeString(), level: 'success', message: `文档已提交到Git，commit: ${result.commitHash || 'unknown'}` },
+          { id: `log-${Date.now()}-3`, timestamp: now.toLocaleTimeString(), level: 'success', message: `文档已提交到Git，commit: ${publishResult.commitHash || 'unknown'}` },
           {
             id: `log-${Date.now()}-4`,
             timestamp: now.toLocaleTimeString(),
             level: 'info',
             message: `已按需求主线关联 PRD ${selectedPrds.length} 项，规格 ${selectedSpecs.length} 项`,
           },
+          ...(createForm.gitAuthMode === 'pat' && createForm.gitPat.trim()
+            ? [
+                {
+                  id: `log-${Date.now()}-5`,
+                  timestamp: now.toLocaleTimeString(),
+                  level: 'info' as const,
+                  message: '当前流水线已通过 HTTPS + PAT 认证连接 Git 仓库',
+                },
+              ]
+            : []),
         ],
         qualityMetrics: {
           specConsistency: 0,
@@ -526,7 +616,7 @@ const AIPipelinePage: React.FC = () => {
           remarks: createForm.remarks.trim(),
           prdIds: selectedPrds.map((p) => p.id),
           specIds: selectedSpecs.map((s) => s.id),
-          publishedDocuments: publishedDocsFromPublishResult(result),
+          publishedDocuments: publishedDocsFromPublishResult(publishResult),
         },
         commitStore: commitStorePayload,
         ...rdAuditCreate(),
@@ -536,9 +626,9 @@ const AIPipelinePage: React.FC = () => {
       setSelectedTaskId(taskId);
       setIsCreateDialogOpen(false);
       resetCreateForm();
-      toast.success(`流水线创建成功，文档已提交（${result.commitHash || '未知提交号'}）`);
+      toast.success(`流水线创建成功，文档已提交（${publishResult.commitHash || '未知提交号'}）`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '提交失败';
+      const message = extractErrorMessage(error, '提交失败');
       toast.error(message);
       logger.error('创建流水线并提交文档失败:', error);
     } finally {
@@ -660,20 +750,38 @@ const AIPipelinePage: React.FC = () => {
                           </div>
                           <Progress value={task.progress} className="h-1.5" />
                         </div>
-                        <div className="flex items-center justify-end mt-3 pt-3 border-t">
+                        <div className="flex items-center justify-between mt-3 pt-3 border-t">
+                          <div className="flex items-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-xs text-amber-600 hover:text-amber-700"
+                              disabled={task.status === 'completed' || task.status === 'failed'}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAction('pause', task.id);
+                              }}
+                            >
+                              暂停
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-xs"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownloadDocs(task);
+                              }}
+                            >
+                              下载
+                            </Button>
+                          </div>
                           <ListRowActionsMenu
                             stopPropagation
                             onView={() => handleViewTask(task.id)}
                             onEdit={() => handleEditTask(task.id)}
                             onDelete={() => handleDeleteTask(task.id)}
                             extraActions={[
-                              {
-                                key: 'pause',
-                                label: '暂停',
-                                icon: <Pause className="size-3" />,
-                                onClick: () => handleAction('pause', task.id),
-                                disabled: task.status === 'completed' || task.status === 'failed',
-                              },
                               {
                                 key: 'retry',
                                 label: '重试',
@@ -687,12 +795,6 @@ const AIPipelinePage: React.FC = () => {
                                 onClick: () => handleAction('rollback', task.id),
                                 disabled: task.status === 'completed',
                                 variant: 'destructive',
-                              },
-                              {
-                                key: 'download',
-                                label: '下载',
-                                icon: <Download className="size-3" />,
-                                onClick: () => handleDownloadDocs(task),
                               },
                               ...(task.status === 'completed' && task.pipelineMeta?.sandboxUrl?.trim()
                                 ? [
@@ -850,7 +952,7 @@ const AIPipelinePage: React.FC = () => {
                           {selectedTask.pipelineMeta.publishedDocuments &&
                             selectedTask.pipelineMeta.publishedDocuments.length > 0 && (
                               <div className="pt-2">
-                                <div className="text-xs text-muted-foreground mb-2">Git 文档（PRD / FS / TS 分文件）</div>
+                                <div className="text-xs text-muted-foreground mb-2">Git 文档（PRD / FS / TS / plan.md）</div>
                                 <ul className="space-y-1.5 text-sm">
                                   {selectedTask.pipelineMeta.publishedDocuments.map((doc) => {
                                     const href = gitBlobViewerUrl(
@@ -859,7 +961,13 @@ const AIPipelinePage: React.FC = () => {
                                       doc.path
                                     );
                                     const kindLabel =
-                                      doc.kind === 'prd' ? 'PRD' : doc.kind === 'fs' ? 'FS' : 'TS';
+                                      doc.kind === 'prd'
+                                        ? 'PRD'
+                                        : doc.kind === 'fs'
+                                          ? 'FS'
+                                          : doc.kind === 'cp'
+                                            ? 'CP'
+                                            : 'TS';
                                     return (
                                       <li key={doc.path} className="break-all">
                                         {href ? (
@@ -1128,7 +1236,27 @@ const AIPipelinePage: React.FC = () => {
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Git 认证方式</label>
+                <Select
+                  value={createForm.gitAuthMode}
+                  onValueChange={(value: ICreatePipelineForm['gitAuthMode']) =>
+                    setCreateForm((prev) => ({
+                      ...prev,
+                      gitAuthMode: value,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择认证方式" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ssh">SSH</SelectItem>
+                    <SelectItem value="pat">PAT</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">触发方式</label>
                 <Select
@@ -1171,7 +1299,11 @@ const AIPipelinePage: React.FC = () => {
             <div className="space-y-2">
               <label className="text-sm font-medium">Git 地址</label>
               <Input
-                placeholder="https://github.com/org/repo.git 或 git@github.com:org/repo.git"
+                placeholder={
+                  createForm.gitAuthMode === 'pat'
+                    ? 'https://github.com/org/repo.git'
+                    : 'git@github.com:org/repo.git'
+                }
                 value={createForm.gitUrl}
                 onChange={(e) => setCreateForm((prev) => ({ ...prev, gitUrl: e.target.value }))}
               />
@@ -1181,6 +1313,28 @@ const AIPipelinePage: React.FC = () => {
                 </p>
               )}
             </div>
+
+            {createForm.gitAuthMode === 'pat' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Git 用户名</label>
+                  <Input
+                    placeholder="未填写时默认 git"
+                    value={createForm.gitUsername}
+                    onChange={(e) => setCreateForm((prev) => ({ ...prev, gitUsername: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Git PAT （ Personal Access Token ）</label>
+                  <Input
+                    type="password"
+                    placeholder="仅 HTTPS 地址生效，不会保存到流水线元数据"
+                    value={createForm.gitPat}
+                    onChange={(e) => setCreateForm((prev) => ({ ...prev, gitPat: e.target.value }))}
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <label className="text-sm font-medium">沙箱环境地址</label>

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -35,6 +35,8 @@ export interface IPipelineSpecDocInput {
   fsMarkdown?: string;
   /** 技术规格 Markdown 正文（优先作为 TS 独立文档） */
   tsMarkdown?: string;
+  /** 编程计划 Markdown（与下载包中 plan.md 一致） */
+  cpMarkdown?: string;
   machineReadableJson?: string | boolean;
   functionalSpec?: {
     apis?: Array<{
@@ -67,6 +69,8 @@ export interface IPublishPipelineDocsPayload {
   pipelineName: string;
   requirementTitle?: string;
   gitUrl: string;
+  gitUsername?: string;
+  gitPat?: string;
   branch: string;
   remarks?: string;
   operator?: string;
@@ -76,7 +80,7 @@ export interface IPublishPipelineDocsPayload {
 
 export interface IPublishedDocumentRef {
   path: string;
-  kind: 'prd' | 'fs' | 'ts';
+  kind: 'prd' | 'fs' | 'ts' | 'cp';
   id: string;
   title: string;
 }
@@ -94,6 +98,8 @@ export interface IFetchPipelineCommitsPayload {
   gitUrl: string;
   branch: string;
   limit?: number;
+  gitUsername?: string;
+  gitPat?: string;
 }
 
 export interface IPipelineCommitRecord {
@@ -108,6 +114,8 @@ export class PipelineGitService {
   async fetchPipelineCommits(payload: IFetchPipelineCommitsPayload): Promise<IPipelineCommitRecord[]> {
     const gitUrl = (payload.gitUrl || '').trim();
     const branch = (payload.branch || '').trim();
+    const gitUsername = (payload.gitUsername || '').trim();
+    const gitPat = (payload.gitPat || '').trim();
     const limit = Number.isFinite(payload.limit) ? Number(payload.limit) : 20;
     const safeLimit = Math.min(Math.max(limit, 1), 50);
 
@@ -117,10 +125,16 @@ export class PipelineGitService {
     const tempRoot = await mkdtemp(join(tmpdir(), 'rd-pipeline-commits-'));
     const repoDir = join(tempRoot, 'repo');
     try {
-      await this.runGit(['clone', '--depth', String(safeLimit), '--branch', branch, gitUrl, repoDir], tempRoot);
+      const gitEnv = await this.buildGitCredentialEnv(tempRoot, gitUrl, gitUsername, gitPat);
+      await this.runGitWithRetry(
+        ['clone', '--depth', String(safeLimit), '--branch', branch, gitUrl, repoDir],
+        tempRoot,
+        gitEnv
+      );
       const { stdout } = await this.runGit(
         ['log', `-${safeLimit}`, '--pretty=format:%h%x1f%an%x1f%ad%x1f%s', '--date=iso-strict'],
-        repoDir
+        repoDir,
+        gitEnv
       );
       return stdout
         .split('\n')
@@ -139,6 +153,8 @@ export class PipelineGitService {
     const gitUrl = (payload.gitUrl || '').trim();
     const branch = (payload.branch || '').trim();
     const pipelineName = (payload.pipelineName || '').trim();
+    const gitUsername = (payload.gitUsername || '').trim();
+    const gitPat = (payload.gitPat || '').trim();
     if (!gitUrl) throw new Error('gitUrl 不能为空');
     if (!branch) throw new Error('branch 不能为空');
     if (!pipelineName) throw new Error('pipelineName 不能为空');
@@ -148,12 +164,19 @@ export class PipelineGitService {
     const tempRoot = await mkdtemp(join(tmpdir(), 'rd-pipeline-'));
     const repoDir = join(tempRoot, 'repo');
     try {
-      await this.runGit(['clone', '--depth', '1', gitUrl, repoDir], tempRoot);
-      await this.runGit(['checkout', '-B', branch], repoDir);
+      const gitEnv = await this.buildGitCredentialEnv(tempRoot, gitUrl, gitUsername, gitPat);
+      await this.runGitWithRetry(['clone', '--depth', '1', gitUrl, repoDir], tempRoot, gitEnv);
+      await this.runGit(['checkout', '-B', branch], repoDir, gitEnv);
 
       const docsDirName = `${this.slugify(payload.requirementTitle || pipelineName)}-${this.timestamp()}`;
       const docsBaseDir = join(repoDir, 'docs', 'ai-pipeline', docsDirName);
       await mkdir(docsBaseDir, { recursive: true });
+      await this.runGit(['config', 'user.name', payload.operator || 'rd-pipeline-bot'], repoDir, gitEnv);
+      await this.runGit(
+        ['config', 'user.email', 'rd-pipeline-bot@users.noreply.local'],
+        repoDir,
+        gitEnv
+      );
 
       const files: string[] = [];
       const documents: IPublishedDocumentRef[] = [];
@@ -163,25 +186,29 @@ export class PipelineGitService {
       const prdFileName = 'prd.md';
       const fsFileName = 'fs-spec.md';
       const tsFileName = 'ts-spec.md';
+      const cpFileName = 'plan.md';
       const prdRel = join('docs', 'ai-pipeline', docsDirName, prdFileName).replace(/\\/g, '/');
       const fsRel = join('docs', 'ai-pipeline', docsDirName, fsFileName).replace(/\\/g, '/');
       const tsRel = join('docs', 'ai-pipeline', docsDirName, tsFileName).replace(/\\/g, '/');
+      const cpRel = join('docs', 'ai-pipeline', docsDirName, cpFileName).replace(/\\/g, '/');
       await writeFile(join(docsBaseDir, prdFileName), this.renderPrdMarkdown(latestPrd, payload), 'utf8');
       await writeFile(join(docsBaseDir, fsFileName), this.renderFsMarkdown(latestSpec, payload), 'utf8');
       await writeFile(join(docsBaseDir, tsFileName), this.renderTsMarkdown(latestSpec, payload), 'utf8');
-      files.push(prdRel, fsRel, tsRel);
+      await writeFile(join(docsBaseDir, cpFileName), this.renderCpMarkdown(latestSpec, payload), 'utf8');
+      files.push(prdRel, fsRel, tsRel, cpRel);
       documents.push(
         { path: prdRel, kind: 'prd', id: latestPrd.id, title: 'PRD' },
         { path: fsRel, kind: 'fs', id: latestSpec.id, title: 'FS' },
         { path: tsRel, kind: 'ts', id: latestSpec.id, title: 'TS' },
+        { path: cpRel, kind: 'cp', id: latestSpec.id, title: 'CP' },
       );
 
-      await this.runGit(['add', '.'], repoDir);
+      await this.runGit(['add', '.'], repoDir, gitEnv);
 
-      const commitMessage = `docs: 同步流水线 ${pipelineName} 的 PRD / FS / TS`;
-      await this.runGit(['commit', '-m', commitMessage], repoDir);
-      await this.runGit(['push', 'origin', `HEAD:${branch}`], repoDir);
-      const { stdout } = await this.runGit(['rev-parse', '--short', 'HEAD'], repoDir);
+      const commitMessage = `docs: 同步流水线 ${pipelineName} 的 PRD / FS / TS / CP`;
+      await this.runGit(['commit', '-m', commitMessage], repoDir, gitEnv);
+      await this.runGitWithRetry(['push', 'origin', `HEAD:${branch}`], repoDir, gitEnv);
+      const { stdout } = await this.runGit(['rev-parse', '--short', 'HEAD'], repoDir, gitEnv);
       return {
         branch,
         commitHash: stdout.trim(),
@@ -194,8 +221,84 @@ export class PipelineGitService {
     }
   }
 
-  private async runGit(args: string[], cwd: string) {
-    return execFileAsync('git', args, { cwd, timeout: 120000 });
+  private async runGit(args: string[], cwd: string, env?: NodeJS.ProcessEnv) {
+    try {
+      return await execFileAsync('git', args, { cwd, timeout: 120000, env });
+    } catch (error) {
+      const e = error as {
+        stderr?: string;
+        stdout?: string;
+        message?: string;
+        code?: string | number;
+      };
+      const detail = [e?.stderr, e?.stdout, e?.message]
+        .map((item) => String(item || '').trim())
+        .find((item) => item.length > 0);
+      const cmd = `git ${args.join(' ')}`;
+      throw new Error(detail ? `${cmd} 执行失败：${detail}` : `${cmd} 执行失败`);
+    }
+  }
+
+  private async runGitWithRetry(
+    args: string[],
+    cwd: string,
+    env?: NodeJS.ProcessEnv,
+    maxAttempts = 3
+  ) {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.runGit(args, cwd, env);
+      } catch (error) {
+        lastError = error;
+        const message = error instanceof Error ? error.message : String(error);
+        const isTransientNetworkError =
+          /couldn['’]t connect to server|timed out|timeout|econnreset|connection reset|tls|ssl/i.test(
+            message
+          );
+        if (!isTransientNetworkError || attempt >= maxAttempts) {
+          throw error;
+        }
+        await this.sleep(800 * attempt);
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  }
+
+  private async sleep(ms: number) {
+    await new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  private async buildGitCredentialEnv(
+    tempRoot: string,
+    gitUrl: string,
+    gitUsername?: string,
+    gitPat?: string
+  ): Promise<NodeJS.ProcessEnv | undefined> {
+    const token = (gitPat || '').trim();
+    if (!token) return undefined;
+    if (!/^https?:\/\//i.test(gitUrl)) {
+      throw new Error('使用 PAT 认证时，gitUrl 必须为 HTTPS 地址');
+    }
+    const askPassFile = join(tempRoot, 'git-askpass.sh');
+    const script = `#!/bin/sh
+case "$1" in
+  *sername*) printf '%s\n' "$RD_GIT_USERNAME" ;;
+  *assword*) printf '%s\n' "$RD_GIT_PAT" ;;
+  *) printf '\n' ;;
+esac
+`;
+    await writeFile(askPassFile, script, 'utf8');
+    await chmod(askPassFile, 0o700);
+    return {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_ASKPASS: askPassFile,
+      RD_GIT_USERNAME: (gitUsername || '').trim() || 'git',
+      RD_GIT_PAT: token,
+    };
   }
 
   private slugify(value: string) {
@@ -357,6 +460,37 @@ ${this.renderTsStructuredSection(spec)}
 \`\`\`json
 ${typeof spec.machineReadableJson === 'string' ? spec.machineReadableJson : JSON.stringify({ machineReadableJson: spec.machineReadableJson ?? null }, null, 2)}
 \`\`\`
+`;
+  }
+
+  private renderCpMarkdown(spec: IPipelineSpecDocInput, payload: IPublishPipelineDocsPayload) {
+    const meta = `## 元信息
+
+- 流水线：${payload.pipelineName}
+- 规格 ID：${spec.id}
+- 关联 PRD：${spec.prdId}
+- 状态：${spec.status}
+- 更新时间：${spec.updatedAt || new Date().toISOString()}
+`;
+    const body = (spec.cpMarkdown || '').trim();
+    if (body) {
+      return body;
+    }
+    return `# 编程计划（CP）
+
+${meta}
+
+（尚未生成编程计划正文；请在规格编辑页使用「AI 生成 CP」或手工编写，内容与仓库根 \`plan.md\` 风格一致即可。）
+
+## FS / TS 参考（自动生成占位）
+
+### FS
+
+${(spec.fsMarkdown || '').trim() || this.renderFsStructuredSection(spec)}
+
+### TS
+
+${(spec.tsMarkdown || '').trim() || this.renderTsStructuredSection(spec)}
 `;
   }
 

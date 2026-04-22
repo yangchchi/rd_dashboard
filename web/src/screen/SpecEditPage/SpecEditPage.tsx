@@ -30,6 +30,7 @@ import {
   Loader2,
   PencilLine,
   BookOpen,
+  ClipboardList,
 } from 'lucide-react';
 import { Streamdown } from '@/components/ui/streamdown';
 import { logger } from '@/lib/logger';
@@ -102,6 +103,7 @@ interface ISpecification {
   prdId: string;
   fsMarkdown?: string;
   tsMarkdown?: string;
+  cpMarkdown?: string;
   functionalSpec: {
     apis: IApiDef[];
     uiComponents: IUIComponent[];
@@ -135,6 +137,7 @@ const defaultSpec: ISpecification = {
   prdId: '',
   fsMarkdown: '',
   tsMarkdown: '',
+  cpMarkdown: '',
   functionalSpec: {
     apis: [],
     uiComponents: [],
@@ -204,6 +207,50 @@ const TS_TEMPLATE = `# TS
 ## 6. 测试用例
 - 输入：
 - 输出：
+`;
+
+const CP_TEMPLATE = `# <主题> Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: 按 Task 顺序执行，每步完成后勾选 \`- [ ]\`。
+
+**Goal:** （从 FS 概括业务目标与成功标准）
+
+**Architecture:** （从 TS 概括模块与数据流）
+
+**Tech Stack:** （从 TS 技术栈一节摘录）
+
+---
+
+## 0. 执行约定（必须先完成）
+
+**Files:**
+- Create: \`plan.md\`（本文件）
+- Modify: \`README.md\`（若存在，补充启动与测试命令）
+
+- [ ] **Step 1: 明确仓库结构与启动命令**
+
+Run: \`ls\`
+Expected: 可识别前后端或单体目录。
+
+---
+
+### Task 1: （示例：领域模型）
+
+**Files:**
+- Create: \`src/domain/Example.ts\`
+- Test: \`tests/example.test.ts\`
+
+- [ ] **Step 1: 写失败测试**
+
+Run: \`npm test\`
+Expected: FAIL
+
+---
+
+## 全局验收标准（完成本计划前必须全部满足）
+
+- [ ] 主用户故事可演示
+- [ ] 单元测试与关键接口测试通过
 `;
 
 function stripHtml(html: string): string {
@@ -286,10 +333,13 @@ const SpecEditPage: React.FC = () => {
   const [selectedLanguages, setSelectedLanguages] = useState<OrgSpecLanguage[]>(['typescript']);
   const [generatingFs, setGeneratingFs] = useState(false);
   const [generatingTs, setGeneratingTs] = useState(false);
+  const [generatingCp, setGeneratingCp] = useState(false);
   const [fsStreamText, setFsStreamText] = useState('');
   const [tsStreamText, setTsStreamText] = useState('');
+  const [cpStreamText, setCpStreamText] = useState('');
   const [fsMdMode, setFsMdMode] = useState<'edit' | 'preview'>('preview');
   const [tsMdMode, setTsMdMode] = useState<'edit' | 'preview'>('preview');
+  const [cpMdMode, setCpMdMode] = useState<'edit' | 'preview'>('preview');
   const [selectedRequirementId, setSelectedRequirementId] = useState('');
   const [selectedPrdId, setSelectedPrdId] = useState('');
 
@@ -306,6 +356,7 @@ const SpecEditPage: React.FC = () => {
         technicalSpec: { ...defaultSpec.technicalSpec, ...s.technicalSpec },
         fsMarkdown: s.fsMarkdown ?? '',
         tsMarkdown: s.tsMarkdown ?? '',
+        cpMarkdown: s.cpMarkdown ?? '',
       });
     } else {
       toast.error('未找到规格');
@@ -417,6 +468,7 @@ const SpecEditPage: React.FC = () => {
       const machineJson = JSON.stringify({
         fsMarkdown: spec.fsMarkdown ?? '',
         tsMarkdown: spec.tsMarkdown ?? '',
+        cpMarkdown: spec.cpMarkdown ?? '',
         functionalSpec: spec.functionalSpec,
         technicalSpec: spec.technicalSpec,
         organizationCodingSpec: organizationCodingSpecPayload,
@@ -435,7 +487,7 @@ const SpecEditPage: React.FC = () => {
       setJsonError(error instanceof Error ? error.message : 'JSON格式错误');
       setIsValidating(false);
     }
-  }, [spec.fsMarkdown, spec.tsMarkdown, spec.functionalSpec, spec.technicalSpec, organizationCodingSpecPayload, updateSpec]);
+  }, [spec.fsMarkdown, spec.tsMarkdown, spec.cpMarkdown, spec.functionalSpec, spec.technicalSpec, organizationCodingSpecPayload, updateSpec]);
 
   const detectConflict = useCallback(async () => {
     setIsDetectingConflict(true);
@@ -530,6 +582,41 @@ const SpecEditPage: React.FC = () => {
     }
   }, [orgSpecConfig, selectedLanguages, spec.fsMarkdown, updateSpec]);
 
+  const handleGenerateCp = useCallback(async () => {
+    const fsBody = (spec.fsMarkdown ?? '').trim();
+    const tsBody = (spec.tsMarkdown ?? '').trim();
+    if (!fsBody) {
+      toast.error('请先生成或填写功能规格（FS）后再生成编程计划（CP）');
+      return;
+    }
+    if (!tsBody) {
+      toast.error('请先生成或填写技术规格（TS）后再生成编程计划（CP）');
+      return;
+    }
+    setGeneratingCp(true);
+    setCpStreamText('');
+    try {
+      const skill = await getAiSkill('cp_auto_generation');
+      const full = await runAiSkillStream(skill, {
+        variables: {
+          fs_document: fsBody,
+          ts_document: tsBody,
+        },
+        onChunk: (chunk) => {
+          setCpStreamText((prev) => prev + chunk);
+        },
+      });
+      updateSpec({ cpMarkdown: full });
+      setCpStreamText('');
+      toast.success('编程计划（CP）已生成');
+    } catch (e) {
+      logger.error('CP generation failed:', e);
+      toast.error(e instanceof Error ? e.message : 'CP 生成失败');
+    } finally {
+      setGeneratingCp(false);
+    }
+  }, [spec.fsMarkdown, spec.tsMarkdown, updateSpec]);
+
   const handleSave = useCallback(() => {
     validateJson();
     updateSpec({ status: 'draft' });
@@ -541,16 +628,26 @@ const SpecEditPage: React.FC = () => {
     } as Parameters<typeof upsertSpecMutation.mutateAsync>[0]);
   }, [spec, validateJson, updateSpec, upsertSpecMutation]);
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
+    if (!spec.id) {
+      toast.error('当前规格尚未创建完成，请先保存后再提交审核');
+      return;
+    }
     validateJson();
     updateSpec({ status: 'reviewing' });
     setHasUnsavedChanges(false);
-    void submitSpecReviewMutation.mutateAsync({
-      specId: spec.id,
-      reviewer: '技术经理',
-      actorUserId: getCurrentUser()?.id,
-    });
-  }, [spec, validateJson, updateSpec, submitSpecReviewMutation]);
+    try {
+      await submitSpecReviewMutation.mutateAsync({
+        specId: spec.id,
+        reviewer: '技术经理',
+        actorUserId: getCurrentUser()?.id,
+      });
+      toast.success('规格说明书已提交审核');
+    } catch (error) {
+      logger.error('Spec submit review failed:', error);
+      toast.error(error instanceof Error ? error.message : '提交审核失败，请稍后重试');
+    }
+  }, [spec.id, validateJson, updateSpec, submitSpecReviewMutation]);
 
   const handleExport = useCallback(() => {
     const exportData = {
@@ -717,7 +814,7 @@ const SpecEditPage: React.FC = () => {
                     ? `关联 PRD: ${linkedPrd.title || linkedPrd.id}`
                     : requirement
                       ? `关联需求: ${requirement.title}`
-                      : '建议流程：组织编码约束 → FS（参考 PRD）→ TS（参考 FS + 约束）'}
+                      : '建议流程：组织编码约束 → FS（参考 PRD）→ TS（参考 FS + 约束）→ CP（参考 FS + TS）'}
                 </p>
               </div>
             </div>
@@ -740,9 +837,13 @@ const SpecEditPage: React.FC = () => {
                 <Save className="mr-2 size-4" />
                 保存
               </Button>
-              <Button onClick={handleSubmit}>
-                <CheckCircle className="mr-2 size-4" />
-                提交审核
+              <Button onClick={() => void handleSubmit()} disabled={submitSpecReviewMutation.isPending}>
+                {submitSpecReviewMutation.isPending ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <CheckCircle className="mr-2 size-4" />
+                )}
+                {submitSpecReviewMutation.isPending ? '提交中…' : '提交审核'}
               </Button>
             </div>
           </div>
@@ -760,7 +861,7 @@ const SpecEditPage: React.FC = () => {
         {/* Main Content */}
         <section className="w-full">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-5">
               <TabsTrigger value="org-constraints" className="flex items-center gap-2">
                 <CheckCircle className="size-4" />
                 组织编码约束
@@ -772,6 +873,10 @@ const SpecEditPage: React.FC = () => {
               <TabsTrigger value="technical" className="flex items-center gap-2">
                 <Database className="size-4" />
                 技术规格(TS)
+              </TabsTrigger>
+              <TabsTrigger value="coding-plan" className="flex items-center gap-2">
+                <ClipboardList className="size-4" />
+                编程计划(CP)
               </TabsTrigger>
               <TabsTrigger value="preview" className="flex items-center gap-2">
                 <FileCode className="size-4" />
@@ -1053,6 +1158,96 @@ const SpecEditPage: React.FC = () => {
               </Card>
             </TabsContent>
 
+            <TabsContent value="coding-plan" className="mt-6 flex min-h-0 flex-col">
+              <Card className="flex min-h-0 flex-1 flex-col border-border shadow-sm">
+                <CardHeader className="shrink-0">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <CardTitle>编程计划（CP）</CardTitle>
+                      <CardDescription>
+                        基于 FS 与 TS 生成可交给 Cursor、Claude Code 等工具按任务执行的 Markdown 计划（风格同仓库根{' '}
+                        <span className="font-mono">plan.md</span>）；亦可插入模板后手工调整。
+                      </CardDescription>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => updateSpec({ cpMarkdown: CP_TEMPLATE })}
+                      >
+                        插入模板
+                      </Button>
+                      <Button type="button" size="sm" onClick={handleGenerateCp} disabled={generatingCp}>
+                        {generatingCp ? (
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="mr-2 size-4" />
+                        )}
+                        {generatingCp ? '生成中…' : 'AI 生成 CP'}
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="flex min-h-0 flex-1 flex-col space-y-3">
+                  <Tabs
+                    value={cpMdMode}
+                    onValueChange={(v) => setCpMdMode(v as 'edit' | 'preview')}
+                    className="flex min-h-0 flex-1 flex-col gap-0"
+                  >
+                    <TabsList className="grid w-full max-w-md shrink-0 grid-cols-2">
+                      <TabsTrigger value="edit" className="gap-2">
+                        <PencilLine className="size-4 shrink-0" />
+                        编辑
+                      </TabsTrigger>
+                      <TabsTrigger value="preview" className="gap-2">
+                        <BookOpen className="size-4 shrink-0" />
+                        预览
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent
+                      value="edit"
+                      className="mt-3 flex min-h-0 flex-1 flex-col space-y-2 data-[state=inactive]:hidden"
+                    >
+                      <p className="shrink-0 text-xs text-muted-foreground">
+                        与流水线的「生成下载包」「上传到 Git」中的 <span className="font-mono">plan.md</span> 对应；需已具备 FS、TS 正文。
+                      </p>
+                      <Textarea
+                        value={generatingCp ? cpStreamText : (spec.cpMarkdown ?? '')}
+                        onChange={(e) => updateSpec({ cpMarkdown: e.target.value })}
+                        readOnly={generatingCp}
+                        placeholder="在此编辑编程计划（Markdown），或点击「AI 生成 CP」…"
+                        className="min-h-0 flex-1 resize-none font-mono text-sm leading-relaxed md:min-h-[calc(100svh-22rem)]"
+                        spellCheck={false}
+                      />
+                      {generatingCp && cpStreamText === '' && (
+                        <p className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                          <Loader2 className="size-3 animate-spin" /> 正在流式输出…
+                        </p>
+                      )}
+                    </TabsContent>
+                    <TabsContent
+                      value="preview"
+                      className="mt-3 flex min-h-0 flex-1 flex-col space-y-2 data-[state=inactive]:hidden"
+                    >
+                      <p className="shrink-0 text-xs text-muted-foreground">渲染预览（只读）；修订请切回「编辑」</p>
+                      <ScrollArea className="min-h-[280px] w-full flex-1 rounded-md border border-border bg-card md:min-h-[calc(100svh-22rem)]">
+                        <div className="p-4 pr-5 text-sm text-foreground [&_.streamdown]:max-w-none">
+                          {(generatingCp ? cpStreamText : (spec.cpMarkdown ?? ''))?.trim() ? (
+                            <Streamdown className="prose prose-sm dark:prose-invert max-w-none text-foreground prose-headings:scroll-mt-4 prose-p:leading-relaxed prose-li:my-0.5 prose-table:text-sm">
+                              {generatingCp ? cpStreamText : (spec.cpMarkdown ?? '')}
+                            </Streamdown>
+                          ) : (
+                            <p className="py-8 text-center text-sm text-muted-foreground">暂无内容</p>
+                          )}
+                        </div>
+                      </ScrollArea>
+                    </TabsContent>
+                  </Tabs>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
             {/* Machine-Readable Preview */}
             <TabsContent value="preview" className="space-y-4 mt-6">
               <Card>
@@ -1087,6 +1282,7 @@ const SpecEditPage: React.FC = () => {
                       {spec.machineReadableJson || JSON.stringify({
                         fsMarkdown: spec.fsMarkdown ?? '',
                         tsMarkdown: spec.tsMarkdown ?? '',
+                        cpMarkdown: spec.cpMarkdown ?? '',
                         functionalSpec: spec.functionalSpec,
                         technicalSpec: spec.technicalSpec,
                         organizationCodingSpec: organizationCodingSpecPayload,

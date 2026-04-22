@@ -133,6 +133,8 @@ export interface ISpecRow {
   prdId: string;
   fsMarkdown?: string | null;
   tsMarkdown?: string | null;
+  /** 编程计划（CP），Markdown，供 Cursor / Claude Code 等执行 */
+  cpMarkdown?: string | null;
   functionalSpec: {
     apis: IApiDef[];
     uiComponents: IUIComponent[];
@@ -674,6 +676,9 @@ export class RdService implements OnModuleInit {
       ALTER TABLE rd_specs ADD COLUMN IF NOT EXISTS updated_by TEXT;
     `);
     await this.db.execute(sql`
+      ALTER TABLE rd_specs ADD COLUMN IF NOT EXISTS cp_markdown TEXT;
+    `);
+    await this.db.execute(sql`
       ALTER TABLE rd_pipeline_tasks ADD COLUMN IF NOT EXISTS created_by TEXT;
     `);
     await this.db.execute(sql`
@@ -1004,6 +1009,7 @@ export class RdService implements OnModuleInit {
       prdId: r.prd_id as string,
       fsMarkdown: (r.fs_markdown as string) || undefined,
       tsMarkdown: (r.ts_markdown as string) || undefined,
+      cpMarkdown: (r.cp_markdown as string) || undefined,
       functionalSpec: fs,
       technicalSpec: tsSpec,
       machineReadableJson: (r.machine_readable_json as string) || '',
@@ -1487,6 +1493,9 @@ export class RdService implements OnModuleInit {
       latestSpec.fsMarkdown?.trim() || JSON.stringify(latestSpec.functionalSpec || {}, null, 2);
     const tsContent =
       latestSpec.tsMarkdown?.trim() || JSON.stringify(latestSpec.technicalSpec || {}, null, 2);
+    const cpContent =
+      latestSpec.cpMarkdown?.trim() ||
+      `# Implementation Plan\n\n> 请在规格编辑页的「编程计划（CP）」中生成或由 FS/TS 导出后粘贴内容。\n\n## 0. 执行约定\n\n- [ ] 基于仓库实际结构补充本计划。\n`;
     return [
       {
         fileName: 'prd.md',
@@ -1499,6 +1508,10 @@ export class RdService implements OnModuleInit {
       {
         fileName: 'ts-spec.md',
         content: tsContent,
+      },
+      {
+        fileName: 'plan.md',
+        content: cpContent,
       },
     ];
   }
@@ -1690,6 +1703,7 @@ export class RdService implements OnModuleInit {
           prdId,
           fsMarkdown: body.fsMarkdown,
           tsMarkdown: body.tsMarkdown,
+          cpMarkdown: body.cpMarkdown,
           functionalSpec: body.functionalSpec || { apis: [], uiComponents: [], interactions: [] },
           technicalSpec: body.technicalSpec || {
             databaseSchema: {},
@@ -1707,7 +1721,7 @@ export class RdService implements OnModuleInit {
     try {
       await this.db.execute(sql`
         INSERT INTO rd_specs (
-          id, prd_id, fs_markdown, ts_markdown, functional_spec, technical_spec,
+          id, prd_id, fs_markdown, ts_markdown, cp_markdown, functional_spec, technical_spec,
           machine_readable_json, status, reviews,
           created_by, updated_by, created_at, updated_at
         ) VALUES (
@@ -1715,6 +1729,7 @@ export class RdService implements OnModuleInit {
           ${merged.prdId},
           ${merged.fsMarkdown ?? null},
           ${merged.tsMarkdown ?? null},
+          ${merged.cpMarkdown ?? null},
           ${JSON.stringify(merged.functionalSpec)}::jsonb,
           ${JSON.stringify(merged.technicalSpec)}::jsonb,
           ${merged.machineReadableJson},
@@ -1729,6 +1744,7 @@ export class RdService implements OnModuleInit {
           prd_id = EXCLUDED.prd_id,
           fs_markdown = EXCLUDED.fs_markdown,
           ts_markdown = EXCLUDED.ts_markdown,
+          cp_markdown = EXCLUDED.cp_markdown,
           functional_spec = EXCLUDED.functional_spec,
           technical_spec = EXCLUDED.technical_spec,
           machine_readable_json = EXCLUDED.machine_readable_json,

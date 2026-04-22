@@ -175,6 +175,8 @@ export interface ISpecification {
   prdId: string;
   fsMarkdown?: string;
   tsMarkdown?: string;
+  /** 编程计划（CP），Markdown，对应流水线下载包中的 plan.md */
+  cpMarkdown?: string;
   functionalSpec: {
     apis: IApiDef[];
     uiComponents: IUIComponent[];
@@ -295,7 +297,7 @@ export interface IPipelineQualityMetrics {
 /** 提交到 Git 的单个文档（用于在流水线页拼 Web 链接） */
 export interface IPipelinePublishedDocument {
   path: string;
-  kind: 'prd' | 'fs' | 'ts';
+  kind: 'prd' | 'fs' | 'ts' | 'cp';
   id: string;
   title: string;
 }
