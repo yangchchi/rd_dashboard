@@ -73,6 +73,8 @@ export interface IProduct {
   id: string;
   /** 产品编码（主数据唯一业务键，可与名称并列展示） */
   code?: string;
+  /** 产品标识（必填主数据，用于系统内识别与展示，建议使用英文/数字/短横线） */
+  identifier?: string;
   name: string;
   description: string;
   /** 产品负责人 */
@@ -327,6 +329,10 @@ export interface IPipelineMeta {
   specIds?: string[];
   /** 本次提交写入仓库的文档清单（由 pipeline-git publish 返回） */
   publishedDocuments?: IPipelinePublishedDocument[];
+  /** Agent worktree 第一层目录（产品标识），如 ai-generation */
+  workspaceProductSlug?: string;
+  /** 与 docs 下会话目录名一致，本会话唯一标识 */
+  workspaceSessionFolder?: string;
 }
 
 export interface IGitCommitRecord {

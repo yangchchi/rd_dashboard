@@ -70,6 +70,10 @@ export function findProductForRequirement(
   const byId = products.find((p) => p.id === key);
   if (byId) return byId;
   const lower = key.toLowerCase();
+  const byIdentifier = products.find(
+    (p) => p.identifier?.trim() && p.identifier.trim().toLowerCase() === lower
+  );
+  if (byIdentifier) return byIdentifier;
   return products.find((p) => p.name.trim().toLowerCase() === lower);
 }
 

@@ -12,12 +12,16 @@ export interface IDefaultAiSkillConfig {
 
 export const PRD_GENERATION_SKILL_ID = 'prd_auto_generation';
 
+/** 流水线 Agent 工作台「启动规划」时组装的 planMarkdown 模板（非模型调用，仅结构化提示词）。 */
+export const AGENT_WORKBENCH_PLAN_SKILL_ID = 'agent_workbench_plan';
+
 export const PLUGIN_SKILL_ORDER: string[] = [
   PRD_GENERATION_SKILL_ID,
   'prd_to_tech_spec',
   'fs_auto_generation',
   'ts_auto_generation',
   'cp_auto_generation',
+  AGENT_WORKBENCH_PLAN_SKILL_ID,
   'requirement_classifier',
   'requirement_optimizer',
   'conflict_detector_tech_spec',
@@ -209,6 +213,30 @@ PRD 文档如下：
 【技术规格（TS）】
 
 {{ts_document}}`,
+  },
+  [AGENT_WORKBENCH_PLAN_SKILL_ID]: {
+    id: AGENT_WORKBENCH_PLAN_SKILL_ID,
+    name: 'Agent 工作台计划模板',
+    description:
+      '流水线 Agent 工作台创建会话时写入的 planMarkdown 骨架；变量 requirement_title、instruction（界面未填目标时的默认句在业务侧填入 instruction）。',
+    provider: 'ark',
+    model: 'deepseek-v3-2-251201',
+    stream: false,
+    tools: [],
+    promptTemplate: `# Agent Plan - {{requirement_title}}
+
+## 目标
+{{instruction}}
+
+## 推荐执行步骤
+- [ ] 在 worktree 内定位 ContextPack 文档（通常在 \`docs/<会话目录>/\` 下的 prd、fs-spec、ts-spec、plan 等 Markdown；**不要**假设已删除的 \`context/\` 路径）
+- [ ] 基于文档列出影响范围、风险与最小可运行 MVP 切分；**然后立即开始改代码**，不得以「等人批准」为终点
+- [ ] 本工作台在「准备 Workspace」后即视为**已授权进入实现**：创建/切换工作分支、增改文件、安装依赖（若网络受限则写明假设并采用可编译的最小替代）
+- [ ] 运行与变更相关的最小测试或可执行的类型检查
+
+## 必须验证
+- [ ] 运行与变更相关的最小测试
+- [ ] 汇总 diff、测试结果、风险与回滚建议`,
   },
   requirement_classifier: {
     id: 'requirement_classifier',

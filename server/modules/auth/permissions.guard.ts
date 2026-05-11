@@ -5,7 +5,7 @@ import type { Request } from 'express';
 import type { IAuthenticatedUser } from './auth-context';
 import { AuthService } from './auth.service';
 import { IS_PUBLIC_ROUTE } from './public.decorator';
-import { REQUIRED_PERMISSIONS } from './permissions.decorator';
+import { REQUIRED_PERMISSIONS, REQUIRED_PERMISSIONS_ANY } from './permissions.decorator';
 
 type RequestWithAuthUser = Request & { user?: IAuthenticatedUser };
 
@@ -23,14 +23,27 @@ export class PermissionsGuard implements CanActivate {
     ]);
     if (isPublic) return true;
 
+    const request = context.switchToHttp().getRequest<RequestWithAuthUser>();
+    const allowed = new Set(request.user?.permissionIds ?? []);
+
+    const requiredAny = this.reflector.getAllAndOverride<string[]>(REQUIRED_PERMISSIONS_ANY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (requiredAny?.length) {
+      const hasOne = requiredAny.some((id) => allowed.has(id));
+      if (!hasOne) {
+        throw new ForbiddenException(`缺少权限之一：${requiredAny.join(', ')}`);
+      }
+      return true;
+    }
+
     const required = this.reflector.getAllAndOverride<string[]>(REQUIRED_PERMISSIONS, [
       context.getHandler(),
       context.getClass(),
     ]);
     if (!required?.length) return true;
 
-    const request = context.switchToHttp().getRequest<RequestWithAuthUser>();
-    const allowed = new Set(request.user?.permissionIds ?? []);
     const missing = required.filter((id) => !allowed.has(id));
     if (missing.length > 0) {
       if (await this.isRoleBootstrapAllowed(request, required)) return true;

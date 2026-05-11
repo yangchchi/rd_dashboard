@@ -54,6 +54,7 @@ function hrefWithProtocol(u: string): string {
 
 const emptyForm = () => ({
   code: '',
+  identifier: '',
   name: '',
   description: '',
   owner: '',
@@ -100,6 +101,7 @@ const ProductManagementPage: React.FC = () => {
     setEditingId(p.id);
     setForm({
       code: p.code || '',
+      identifier: p.identifier || '',
       name: p.name,
       description: p.description,
       owner: p.owner || '',
@@ -113,6 +115,11 @@ const ProductManagementPage: React.FC = () => {
   };
 
   const handleSubmit = async () => {
+    const identifier = form.identifier.trim();
+    if (!identifier) {
+      toast.error('请填写产品标识');
+      return;
+    }
     const name = form.name.trim();
     if (!name) {
       toast.error('请填写产品名称');
@@ -126,6 +133,7 @@ const ProductManagementPage: React.FC = () => {
       await rdApi.upsertProduct({
         id,
         code: form.code.trim() || undefined,
+        identifier,
         name,
         description: form.description.trim(),
         owner: form.owner.trim() || undefined,
@@ -211,6 +219,9 @@ const ProductManagementPage: React.FC = () => {
                     产品编码
                   </TableHead>
                   <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    产品标识
+                  </TableHead>
+                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                     产品名称
                   </TableHead>
                   <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -245,6 +256,13 @@ const ProductManagementPage: React.FC = () => {
                     <TableCell className="max-w-[120px] font-mono text-sm">
                       {p.code?.trim() ? (
                         <span title={p.code}>{p.code}</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="max-w-[140px] font-mono text-sm">
+                      {p.identifier?.trim() ? (
+                        <span title={p.identifier}>{p.identifier}</span>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
@@ -312,7 +330,9 @@ const ProductManagementPage: React.FC = () => {
         <DialogContent className="max-h-[min(90vh,640px)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingId ? '编辑产品' : '新增产品'}</DialogTitle>
-            <DialogDescription>填写产品编码、名称、负责人、技术经理、类型及环境与仓库地址。</DialogDescription>
+            <DialogDescription>
+              填写产品编码、产品标识（必填）、名称、负责人、技术经理、类型及环境与仓库地址。
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-1">
             <div className="grid gap-2">
@@ -324,6 +344,21 @@ const ProductManagementPage: React.FC = () => {
                 placeholder="例如：PRD-CORE-001"
                 className="rd-input-glass font-mono text-sm"
               />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="pm-identifier">
+                产品标识 <RequiredMark />
+              </Label>
+              <Input
+                id="pm-identifier"
+                value={form.identifier}
+                onChange={(e) => setForm((f) => ({ ...f, identifier: e.target.value }))}
+                placeholder="例如：core-trading、数据中台-dw"
+                className="rd-input-glass font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                系统内稳定引用，建议使用小写英文、数字与短横线；与「产品编码」可同时维护。
+              </p>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="pm-name">

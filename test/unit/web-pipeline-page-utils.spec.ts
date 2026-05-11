@@ -26,6 +26,7 @@ const requirement = {
 const products: IProduct[] = [
   {
     id: 'prod-1',
+    identifier: 'rd-platform',
     name: '研发平台',
     description: '',
     gitUrl: 'git@example.com:rd/platform.git',
@@ -45,6 +46,9 @@ describe('pipeline page utils', () => {
     expect(findProductForRequirement(requirement, products)?.id).toBe('prod-1');
     expect(
       findProductForRequirement({ ...requirement, product: 'prod-1' }, products)?.name
+    ).toBe('研发平台');
+    expect(
+      findProductForRequirement({ ...requirement, product: 'rd-platform' }, products)?.name
     ).toBe('研发平台');
   });
 

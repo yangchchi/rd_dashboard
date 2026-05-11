@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Post, Put, Query, Res } from '@ne
 import type { Response } from 'express';
 import JSZip from 'jszip';
 import { buildZipContentDisposition } from './rd-download-header';
-import { RequirePermissions } from '../auth/permissions.decorator';
+import { RequireAnyPermission, RequirePermissions } from '../auth/permissions.decorator';
 
 import {
   RdService,
@@ -213,13 +213,13 @@ export class RdController {
   }
 
   @Get('ai-skills')
-  @RequirePermissions('page.plugins')
+  @RequireAnyPermission('page.plugins', 'page.pipeline')
   listAiSkills() {
     return this.rd.listAiSkills();
   }
 
   @Get('ai-skills/:id')
-  @RequirePermissions('page.plugins')
+  @RequireAnyPermission('page.plugins', 'page.pipeline')
   getAiSkill(@Param('id') id: string) {
     return this.rd.getAiSkill(id);
   }
@@ -464,6 +464,8 @@ export class RdController {
       workspaceRoot?: string | null;
       kind?: IAgentWorkspaceRow['kind'];
       createdBy?: string | null;
+      productSlug?: string | null;
+      sessionFolderName?: string | null;
     },
   ): Promise<IAgentWorkspaceProvisionResult> {
     return this.rd.provisionAgentWorkspace(body);

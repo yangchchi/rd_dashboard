@@ -75,6 +75,17 @@ function newProductId(): string {
   return `prod_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
+/** 从需求侧新建产品时生成必填「产品标识」（纯中文等无法 slug 时退回随机段） */
+function deriveProductIdentifierFromName(name: string): string {
+  const t = name.trim();
+  const slug = t
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (slug.length > 0) return slug.slice(0, 64);
+  return `auto_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 type RequirementOptimizeStreamChunk = { content?: string };
 
 function difficultyFromCoins(coins: number): 'normal' | 'hard' | 'epic' {
@@ -256,6 +267,7 @@ const RequirementInputPage: React.FC = () => {
     await rdApi.upsertProduct({
       id: newProductId(),
       name: raw,
+      identifier: deriveProductIdentifierFromName(raw),
       description: '',
       status: 'active',
       ...rdAuditCreate(),
@@ -272,6 +284,10 @@ const RequirementInputPage: React.FC = () => {
   const handleSubmit = async () => {
     if (!title.trim()) {
       toast.error('请填写需求标题');
+      return;
+    }
+    if (!product.trim()) {
+      toast.error('请选择或填写所属产品');
       return;
     }
     if (!description.trim()) {
@@ -459,7 +475,9 @@ const RequirementInputPage: React.FC = () => {
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
-                <Label>所属产品</Label>
+                <Label>
+                  所属产品 <RequiredMark />
+                </Label>
                 <Popover
                   open={productComboOpen}
                   onOpenChange={(open) => {
@@ -537,7 +555,7 @@ const RequirementInputPage: React.FC = () => {
                   </PopoverContent>
                 </Popover>
                 <p className="text-xs text-muted-foreground">
-                  从列表选择或检索；若无匹配项可选用输入的名称，提交需求时将自动创建对应产品。
+                  必填：从列表选择或检索；若无匹配项可选用输入的名称，提交时将自动创建对应产品。
                 </p>
               </div>
 

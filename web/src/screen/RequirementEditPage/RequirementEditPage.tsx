@@ -188,6 +188,10 @@ const RequirementEditPage: React.FC = () => {
       toast.error('请填写需求标题');
       return;
     }
+    if (!product.trim()) {
+      toast.error('请填写所属产品');
+      return;
+    }
     if (!description.trim()) {
       toast.error('请填写需求描述');
       return;
@@ -209,7 +213,7 @@ const RequirementEditPage: React.FC = () => {
         ...requirement!,
         title: title.trim(),
         description: description.trim(),
-        product: product.trim() || undefined,
+        product: product.trim(),
         bountyPoints: bounty,
         pmCandidateUserId: pmCandidateUserId.trim() || undefined,
         tmCandidateUserId: tmCandidateUserId.trim() || undefined,
@@ -293,7 +297,9 @@ const RequirementEditPage: React.FC = () => {
             </CardHeader>
             <CardContent className="space-y-6">
             <div className="space-y-2">
-                <Label htmlFor="edit-product">所属产品</Label>
+                <Label htmlFor="edit-product">
+                  所属产品 <RequiredMark />
+                </Label>
                 <Input
                   id="edit-product"
                   placeholder="如：核心平台、数据中台"

@@ -5,7 +5,21 @@ jest.mock('node:child_process', () => ({
 }));
 jest.mock('node:fs/promises', () => ({
   stat: jest.fn(),
+  mkdir: jest.fn().mockResolvedValue(undefined),
 }));
+jest.mock('node:fs', () => {
+  const { Writable } = require('node:stream') as typeof import('node:stream');
+  return {
+    createWriteStream: jest.fn(
+      () =>
+        new Writable({
+          write(_chunk: unknown, _encoding: unknown, callback: (error?: Error | null) => void) {
+            callback();
+          },
+        }),
+    ),
+  };
+});
 
 import { spawn } from 'node:child_process';
 import { stat } from 'node:fs/promises';
@@ -192,12 +206,13 @@ describe('RdService agent executor', () => {
         '/tmp/rd-agent-workspaces/session-1/workspace-1',
         '--sandbox',
         'workspace-write',
-        '--ask-for-approval',
-        'never',
-        '请修改代码并运行测试',
       ]),
       expect.objectContaining({ cwd: '/tmp/rd-agent-workspaces/session-1/workspace-1' }),
     );
+    const codexArgs = (spawn as jest.Mock).mock.calls[0][1] as string[];
+    const promptArg = codexArgs[codexArgs.length - 1];
+    expect(promptArg).toContain('请修改代码并运行测试');
+    expect(promptArg).toContain('系统执行授权');
     expect(events.map((event) => event.type)).toEqual([
       'started',
       'spawned',

@@ -1,13 +1,28 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { Bot, CheckCircle2, FileDiff, Loader2, MessageSquareText, ShieldCheck, Square, Terminal, Workflow } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Bot,
+  CheckCircle2,
+  ChevronRight,
+  FileText,
+  Loader2,
+  Square,
+  Terminal,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import {
   useAgentSessionsList,
@@ -26,10 +41,13 @@ import {
   useRunAgentToolCallWithCodex,
   useUpsertAgentTask,
 } from '@/lib/rd-hooks';
-import type { IAgentExecutionEvent, IAgentSession, IAgentToolCall, IPipelineTask } from '@/lib/rd-types';
+import type { IAgentExecutionEvent, IAgentSession, IAgentToolCall, IAgentWorkspace, IPipelineTask } from '@/lib/rd-types';
 import { logger } from '@/lib/logger';
 import { buildAgentDiffReviewSummary } from '@/lib/agent-review-utils';
+import { fillAiSkillPromptTemplate } from '@/lib/ai-skill-engine';
+import { AGENT_WORKBENCH_PLAN_SKILL_ID, getAiSkill } from '@/lib/ai-skills';
 import { canStartAgentToolCall, shouldCreateAgentToolCallRetry } from '@/lib/pipeline-page-utils';
+import { cn } from '@/lib/utils';
 
 interface IAgentWorkbenchPanelProps {
   task: IPipelineTask;
@@ -60,34 +78,32 @@ const initialCodexRuntimeState: ICodexRuntimeState = {
   changedFilesCount: 0,
 };
 
-function formatPlanPrompt(task: IPipelineTask, instruction: string): string {
-  return [
-    `# Agent Plan - ${task.requirementTitle}`,
-    '',
-    '## 目标',
-    instruction.trim() || '请基于 ContextPack 完成本需求的代码实现与验证。',
-    '',
-    '## 推荐执行步骤',
-    '- [ ] 读取 context/requirement.md、context/prd.md、context/fs.json、context/ts.json、context/cp.md',
-    '- [ ] 输出影响文件清单、风险点与测试计划',
-    '- [ ] 等待技术经理批准计划',
-    '- [ ] 创建隔离 workspace 与 agent branch',
-    '- [ ] 通过 Tool Gateway 执行受控 git/file/test 工具调用',
-    '',
-    '## 必须验证',
-    '- [ ] 运行与变更相关的最小测试',
-    '- [ ] 汇总 diff、测试结果、风险与回滚建议',
-  ].join('\n');
-}
+type ICodingToolChoice = 'codex_cli' | 'cursor_cli' | 'claude_code';
+
+const CODING_TOOL_OPTIONS: Array<{ id: ICodingToolChoice; label: string; description: string; enabled: boolean }> = [
+  { id: 'codex_cli', label: 'Codex CLI', description: '本机/服务端已安装 codex', enabled: true },
+  { id: 'cursor_cli', label: 'Cursor', description: '即将支持', enabled: false },
+  { id: 'claude_code', label: 'Claude Code', description: '即将支持', enabled: false },
+];
 
 function latestByTime<T extends { createdAt: string }>(items: T[]): T | undefined {
   return [...items].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
 }
 
+function pickWorkspaceForSession(workspaces: IAgentWorkspace[]): IAgentWorkspace | undefined {
+  const open = workspaces.filter((w) => w.status !== 'archived');
+  if (!open.length) return undefined;
+  return [...open].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+}
+
 export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanelProps) {
-  const [instruction, setInstruction] = useState('请根据 CP 编程计划执行实现，并在每个步骤后运行对应验证命令。');
+  const [instruction, setInstruction] = useState(
+    '请根据 PRD、功能规格(FS)、技术规格(TS) 与实现计划完成编码与验证。',
+  );
+  const [codingTool, setCodingTool] = useState<ICodingToolChoice>('codex_cli');
   const [runtimeOutput, setRuntimeOutput] = useState('');
   const [runtimeState, setRuntimeState] = useState<ICodexRuntimeState>(initialCodexRuntimeState);
+
   const { data: runs = [] } = usePipelineRunsList(task.requirementId);
   const latestRun = latestByTime(runs);
   const { data: sessions = [] } = useAgentSessionsList({ requirementId: task.requirementId });
@@ -96,9 +112,12 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     [latestRun?.id, sessions],
   );
   const { data: tasks = [] } = useAgentTasks(activeSession?.id);
-  const { data: toolCalls = [] } = useAgentToolCalls(activeSession?.id);
+  const { data: toolCalls = [] } = useAgentToolCalls(activeSession?.id, undefined, {
+    pollWhileCodexRunningMs: 2500,
+  });
   const { data: workspaces = [] } = useAgentWorkspaces(activeSession?.id);
   const reviewSummary = useMemo(() => buildAgentDiffReviewSummary(toolCalls), [toolCalls]);
+
   const createPipelineRun = useCreatePipelineRun();
   const createContextPack = useCreateContextPack();
   const createAgentSession = useCreateAgentSession();
@@ -109,6 +128,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   const approveToolCall = useApproveAgentToolCall();
   const runCodexToolCall = useRunAgentToolCallWithCodex();
   const cancelCodexExecution = useCancelAgentToolCallExecution();
+
   const isBusy =
     createPipelineRun.isPending ||
     createContextPack.isPending ||
@@ -118,6 +138,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     executeWorkspaceLifecycle.isPending ||
     prepareToolCall.isPending ||
     approveToolCall.isPending;
+
   const codexToolCall = useMemo<IAgentToolCall | undefined>(
     () => [...toolCalls].reverse().find((toolCall) => toolCall.toolName === 'codex.exec'),
     [toolCalls],
@@ -129,21 +150,46 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     () => workspaces.find((workspace) => workspace.id === codexToolCall?.workspaceId),
     [codexToolCall?.workspaceId, workspaces],
   );
+  const primaryWorkspace = useMemo(() => pickWorkspaceForSession(workspaces), [workspaces]);
   const isCodexWorkspaceReady = codexWorkspace?.status === 'ready' && Boolean(codexWorkspace.worktreePath);
-  const workspaceLifecycleCalls = useMemo(
-    () =>
-      codexWorkspace
-        ? toolCalls
-            .filter((toolCall) => toolCall.workspaceId === codexWorkspace.id && toolCall.toolName.startsWith('git.'))
-            .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
-        : [],
-    [codexWorkspace, toolCalls],
-  );
-  const runtimePlaceholder = codexWorkspace && !isCodexWorkspaceReady
-    ? '等待 Workspace 准备：请点击“执行 Workspace 准备”，完成 git.clone_cache / git.fetch / git.worktree_add 后再运行 Codex CLI。'
-    : '等待 Codex CLI 输出...';
 
-  const handleStartPlanning = async () => {
+  const step1Done = Boolean(activeSession);
+  const step2Done = isCodexWorkspaceReady;
+  const pendingApprovals = useMemo(
+    () => toolCalls.filter((tc) => tc.approvalStatus === 'pending'),
+    [toolCalls],
+  );
+
+  const appendLog = (line: string) => {
+    setRuntimeOutput((prev) => `${prev}${prev && !prev.endsWith('\n') ? '\n' : ''}${line}\n`);
+  };
+
+  const codexServerSyncKey = codexToolCall
+    ? `${codexToolCall.id}:${codexToolCall.status}:${String(codexToolCall.metadata?.lastOutputAt ?? '')}:${String(codexToolCall.metadata?.executorLogPath ?? '')}:${String(codexToolCall.updatedAt ?? '')}`
+    : '';
+
+  useEffect(() => {
+    if (runCodexToolCall.isPending) return;
+    if (!codexToolCall || codexToolCall.toolName !== 'codex.exec') return;
+    const m = codexToolCall.metadata;
+    const logPath = typeof m.executorLogPath === 'string' ? m.executorLogPath : '';
+    const stdout = typeof m.stdout === 'string' ? m.stdout : '';
+    const stderr = typeof m.stderr === 'string' ? m.stderr : '';
+    if (!logPath && !stdout && !stderr) return;
+    const header = [
+      logPath
+        ? `【服务端完整日志文件】${logPath}\n（全文落盘；数据库仅保留末尾约 20KB 摘要。离开页面后请用该文件或下方摘要排查。）\n`
+        : '',
+      codexToolCall.status === 'running'
+        ? '【执行状态】running：Codex 可能仍在服务端执行；本页每 2.5s 拉取一次数据库中的输出摘要。\n'
+        : `【执行状态】${codexToolCall.status} exit=${codexToolCall.exitCode ?? '—'}\n`,
+      '---\n',
+    ].join('');
+    const body = [stdout, stderr ? `\n--- stderr（尾部） ---\n${stderr}` : ''].join('');
+    setRuntimeOutput(`${header}${body}`);
+  }, [codexServerSyncKey, runCodexToolCall.isPending]);
+
+  const handleCreateThread = async () => {
     try {
       const run =
         latestRun ||
@@ -157,6 +203,8 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
             branch: task.pipelineMeta.branch,
             sandboxUrl: task.pipelineMeta.sandboxUrl,
             pipelineTaskId: task.id,
+            workspaceProductSlug: task.pipelineMeta.workspaceProductSlug,
+            workspaceSessionFolder: task.pipelineMeta.workspaceSessionFolder,
           },
           createdBy: operatorName,
         }));
@@ -167,14 +215,21 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         specId: task.pipelineMeta.specIds?.[0],
         createdBy: operatorName,
       });
-      const planMarkdown = formatPlanPrompt(task, instruction);
+      const planSkill = await getAiSkill(AGENT_WORKBENCH_PLAN_SKILL_ID);
+      const goalText = instruction.trim() || '请基于 ContextPack 完成本需求的代码实现与验证。';
+      const planMarkdown = fillAiSkillPromptTemplate(planSkill.promptTemplate, {
+        requirement_title: task.requirementTitle,
+        instruction: goalText,
+      });
+      const runtimeAdapter =
+        codingTool === 'codex_cli' ? 'codex_cli' : codingTool === 'claude_code' ? 'claude_code' : 'custom';
       const session = await createAgentSession.mutateAsync({
         requirementId: task.requirementId,
         pipelineRunId: run.id,
         contextPackId: contextPack.id,
-        title: `${task.requirementTitle} Agent Thread`,
+        title: `${task.requirementTitle} · Agent`,
         status: 'awaiting_approval',
-        runtimeAdapter: 'codex_cli',
+        runtimeAdapter,
         baseBranch: task.pipelineMeta.branch || 'main',
         planMarkdown,
         riskLevel: 'medium',
@@ -184,7 +239,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       await upsertAgentTask.mutateAsync({
         sessionId: session.id,
         role: 'planner',
-        title: '生成实现计划',
+        title: '生成编码提示词',
         instructions: instruction,
         status: 'awaiting_approval',
         orderIndex: 1,
@@ -192,54 +247,137 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         requiresApproval: true,
         metadata: { contextPackId: contextPack.id },
       });
-      toast.success('Agent Thread 已创建，计划等待审核');
+      appendLog(`[步骤1] Agent Thread 已创建，ContextPack 已写入 PRD/规格 等文档快照（checksum=${contextPack.checksum.slice(0, 8)}…）`);
+      toast.success('步骤 1 完成：已生成编码提示词与任务线程');
     } catch (error) {
       logger.error('创建 Agent Thread 失败', error);
       toast.error(error instanceof Error ? error.message : '创建 Agent Thread 失败');
     }
   };
 
-  const handleApprovePlan = async () => {
-    if (!activeSession) return;
+  const ensurePlannerApproved = async (session: IAgentSession) => {
+    await upsertAgentTask.mutateAsync({
+      sessionId: session.id,
+      role: 'planner',
+      title: '提示词已确认',
+      instructions: session.planMarkdown || instruction,
+      status: 'succeeded',
+      orderIndex: 1,
+      locked: true,
+      requiresApproval: false,
+      metadata: { approvedBy: operatorName, approvedAt: new Date().toISOString() },
+    });
+  };
+
+  const ensureCodexToolPrepared = async (session: IAgentSession, workspaceId: string) => {
+    await prepareToolCall.mutateAsync({
+      sessionId: session.id,
+      workspaceId,
+      toolName: 'codex.exec',
+      toolCategory: 'ai',
+      inputSummary: '在隔离 workspace 中执行编码任务（Codex CLI）',
+      command: 'codex exec --cd <workspace> --sandbox workspace-write <prompt>',
+      metadata: {
+        stage: 'workspace-ready',
+        prompt: session.planMarkdown || instruction,
+      },
+    });
+  };
+
+  /** 步骤 2：批准提示词、按需创建 Workspace、拉取仓库与文档目录、执行 git 生命周期直至 ready */
+  const handlePrepareWorkspace = async () => {
+    if (!activeSession) {
+      toast.error('请先完成步骤 1');
+      return;
+    }
     if (!task.pipelineMeta.gitUrl?.trim()) {
-      toast.error('当前流水线缺少 Git 地址，无法创建 workspace');
+      toast.error('流水线未配置 Git 地址，无法准备 Workspace');
       return;
     }
     try {
-      await upsertAgentTask.mutateAsync({
-        sessionId: activeSession.id,
-        role: 'planner',
-        title: '计划已批准',
-        instructions: activeSession.planMarkdown || instruction,
-        status: 'succeeded',
-        orderIndex: 1,
-        locked: true,
-        requiresApproval: false,
-        metadata: { approvedBy: operatorName, approvedAt: new Date().toISOString() },
-      });
-      const result = await provisionWorkspace.mutateAsync({
-        sessionId: activeSession.id,
-        repoUrl: task.pipelineMeta.gitUrl,
-        baseBranch: task.pipelineMeta.branch || activeSession.baseBranch || 'main',
-        createdBy: operatorName,
-        kind: 'worktree',
-      });
-      await prepareToolCall.mutateAsync({
-        sessionId: activeSession.id,
-        workspaceId: result.workspace.id,
-        toolName: 'codex.exec',
-        toolCategory: 'ai',
-        inputSummary: '调用 Codex CLI 在隔离 workspace 中执行编码任务',
-        command: 'codex exec --cd <workspace> --sandbox workspace-write --ask-for-approval never <prompt>',
-        metadata: {
-          stage: 'plan-approved',
-          prompt: activeSession.planMarkdown || instruction,
-        },
-      });
-      toast.success('计划已批准，workspace 生命周期工具调用已生成');
+      appendLog('[步骤2] 开始：确认提示词 → 准备仓库与 Workspace…');
+      await ensurePlannerApproved(activeSession);
+
+      let workspace = primaryWorkspace;
+      const needNewWorkspace =
+        !workspace || workspace.status === 'failed' || workspace.status === 'archived';
+
+      if (needNewWorkspace) {
+        appendLog('[步骤2] 创建 Workspace 计划并登记 git 生命周期…');
+        const result = await provisionWorkspace.mutateAsync({
+          sessionId: activeSession.id,
+          repoUrl: task.pipelineMeta.gitUrl,
+          baseBranch: task.pipelineMeta.branch || activeSession.baseBranch || 'main',
+          createdBy: operatorName,
+          kind: 'worktree',
+          productSlug: task.pipelineMeta.workspaceProductSlug,
+          sessionFolderName: task.pipelineMeta.workspaceSessionFolder,
+        });
+        workspace = result.workspace;
+        appendLog(`[步骤2] Workspace 已登记：${workspace.id}`);
+        await ensureCodexToolPrepared(activeSession, workspace.id);
+      } else {
+        const hasCodexForWs = toolCalls.some(
+          (tc) => tc.toolName === 'codex.exec' && tc.workspaceId === workspace!.id,
+        );
+        if (!hasCodexForWs) {
+          appendLog('[步骤2] 补充 Codex 工具调用记录…');
+          await ensureCodexToolPrepared(activeSession, workspace!.id);
+        }
+      }
+
+      if (!workspace) {
+        throw new Error('未能解析 Workspace');
+      }
+
+      if (workspace.status !== 'ready' || !workspace.worktreePath?.trim()) {
+        appendLog('[步骤2] 执行 clone/fetch/worktree 等生命周期命令…');
+        const life = await executeWorkspaceLifecycle.mutateAsync({
+          id: workspace.id,
+          sessionId: activeSession.id,
+        });
+        for (const tc of life.toolCalls) {
+          appendLog(`[步骤2] ${tc.toolName} → ${tc.status} (exit=${tc.exitCode ?? '-'})`);
+          if (tc.status === 'failed' && (tc.outputSummary || tc.metadata)) {
+            const tail = (tc.outputSummary || '').trim();
+            if (tail) {
+              appendLog(`[步骤2][${tc.toolName} 输出]\n${tail}`);
+            }
+          }
+        }
+        appendLog(`[步骤2] Workspace 状态：${life.workspace.status}`);
+        if (life.workspace.status !== 'ready') {
+          const failed = [...life.toolCalls].reverse().find((tc) => tc.status === 'failed');
+          const detail = (failed?.outputSummary || '').trim().slice(0, 1200);
+          const hint =
+            /Permission denied \(publickey\)/i.test(detail) || /publickey/i.test(detail)
+              ? '（常见原因：流水线填了 SSH 地址，但运行后端的环境未配置 SSH 私钥；可改为 HTTPS + Token 或配置 deploy key。）'
+              : /could not read from remote/i.test(detail) || /unable to access/i.test(detail)
+                ? '（常见原因：仓库私有、网络不可达或需代理。）'
+                : /fatal: invalid branch name|not found in upstream/i.test(detail) || /couldn't find remote ref/i.test(detail)
+                  ? '（常见原因：基准分支名与远端不一致，请检查流水线里的分支是否为远端存在的分支，例如 main / master。）'
+                  : /already exists/i.test(detail)
+                    ? '（常见原因：缓存目录残留；已尝试自动清理，若仍失败请手动删除对应 /tmp/rd-agent-workspaces/cache 子目录后重试。）'
+                    : '';
+          if (detail) {
+            appendLog(`[步骤2][诊断]${hint}`);
+            toast.error('Workspace 准备失败', { description: `${detail.slice(0, 500)}${hint ? `\n${hint}` : ''}` });
+          } else {
+            toast.error('Workspace 准备未完成', {
+              description: `状态：${life.workspace.status}。请检查 Git 地址、分支与运行环境的网络/权限。`,
+            });
+          }
+          return;
+        }
+      } else {
+        appendLog('[步骤2] Workspace 已处于 ready，跳过生命周期');
+      }
+
+      toast.success('步骤 2 完成：仓库与文档上下文已就绪');
     } catch (error) {
-      logger.error('批准 Agent 计划失败', error);
-      toast.error(error instanceof Error ? error.message : '批准 Agent 计划失败');
+      logger.error('准备 Workspace 失败', error);
+      appendLog(`[步骤2][错误] ${error instanceof Error ? error.message : '准备 Workspace 失败'}`);
+      toast.error(error instanceof Error ? error.message : '准备 Workspace 失败');
     }
   };
 
@@ -251,7 +389,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         sessionId: activeSession.id,
         approved: true,
         approver: operatorName,
-        reason: 'MVP 手动批准',
+        reason: '工作台批准',
       });
       toast.success('工具调用已批准');
     } catch (error) {
@@ -260,20 +398,21 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     }
   };
 
-  const handleRunCodex = async () => {
-    if (!activeSession || !codexToolCall) return;
-    if (!isCodexWorkspaceReady) {
-      toast.error('Workspace 尚未 ready，请先完成 git 生命周期工具调用');
-      setRuntimeState({
-        ...initialCodexRuntimeState,
-        phase: 'error',
-        toolCallId: codexToolCall.id,
-        status: codexToolCall.status,
-        message: '未获得 PID：Workspace 尚未 ready，Codex CLI 尚未启动',
-      });
+  const handleRunCoding = async () => {
+    if (codingTool !== 'codex_cli') {
+      toast.message('该编码工具尚未接入', { description: '请暂时选择 Codex CLI' });
       return;
     }
-    setRuntimeOutput('');
+    if (!activeSession || !codexToolCall) {
+      toast.error('请先完成步骤 1 与 2');
+      return;
+    }
+    if (!isCodexWorkspaceReady) {
+      toast.error('Workspace 未就绪，请先完成步骤 2');
+      return;
+    }
+    appendLog('[步骤3] 启动编码工具…');
+    setRuntimeOutput((prev) => `${prev}\n`);
     setRuntimeState({
       ...initialCodexRuntimeState,
       phase: 'starting',
@@ -292,8 +431,8 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
           workspaceId: codexToolCall.workspaceId,
           toolName: 'codex.exec',
           toolCategory: 'ai',
-          inputSummary: '重试调用 Codex CLI 在隔离 workspace 中执行编码任务',
-          command: codexToolCall.command || 'codex exec --cd <workspace> --sandbox workspace-write --ask-for-approval never <prompt>',
+          inputSummary: '重试：在隔离 workspace 中执行编码任务',
+          command: codexToolCall.command || 'codex exec --cd <workspace> --sandbox workspace-write <prompt>',
           metadata: {
             ...codexToolCall.metadata,
             retryOfToolCallId: codexToolCall.id,
@@ -301,11 +440,8 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
             prompt: activeSession.planMarkdown || instruction,
           },
         });
-        setRuntimeState((prev) => ({
-          ...prev,
-          toolCallId: runnableToolCall.id,
-        }));
-        setRuntimeOutput((prev) => `${prev}[executor] retry tool call created: ${runnableToolCall.id}\n`);
+        setRuntimeState((prev) => ({ ...prev, toolCallId: runnableToolCall.id }));
+        appendLog(`[步骤3] 已创建重试工具调用 ${runnableToolCall.id}`);
       }
       await runCodexToolCall.mutateAsync({
         id: runnableToolCall.id,
@@ -320,7 +456,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               status: event.status || prev.status,
               lastEventAt: new Date().toISOString(),
             }));
-            setRuntimeOutput((prev) => `${prev}[executor] Codex CLI started\n`);
+            appendLog('[步骤4] Codex 已启动');
           }
           if (event.type === 'spawned') {
             setRuntimeState((prev) => ({
@@ -333,7 +469,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               status: event.status || prev.status,
               lastEventAt: event.timestamp || new Date().toISOString(),
             }));
-            setRuntimeOutput((prev) => `${prev}[executor] spawned pid=${event.pid ?? 'unknown'} cwd=${event.cwd || '-'}\n`);
+            appendLog(`[步骤4] 子进程 pid=${event.pid ?? '?'} cwd=${event.cwd || '-'}`);
           }
           if (event.type === 'stdout' && event.chunk) {
             setRuntimeState((prev) => ({
@@ -377,10 +513,10 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               phase: 'error',
               toolCallId: event.toolCallId,
               status: event.status || prev.status,
-              message: event.message || 'Codex 执行失败',
+              message: event.message || '执行失败',
               lastEventAt: event.timestamp || new Date().toISOString(),
             }));
-            setRuntimeOutput((prev) => `${prev}[error] ${event.message || 'Codex 执行失败'}\n`);
+            appendLog(`[步骤4][错误] ${event.message || '执行失败'}`);
           }
           if (event.type === 'finished') {
             setRuntimeState((prev) => ({
@@ -395,61 +531,22 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               changedFilesCount: event.changedFilesCount ?? prev.changedFilesCount,
               lastEventAt: event.timestamp || new Date().toISOString(),
             }));
-            setRuntimeOutput((prev) => `${prev}\n[executor] finished exit=${event.exitCode ?? 'unknown'} duration=${event.durationMs ?? 0}ms\n`);
+            appendLog(
+              `[步骤4] 结束 exit=${event.exitCode ?? '?'} 耗时=${event.durationMs ?? 0}ms 变更文件≈${event.changedFilesCount ?? 0}`,
+            );
           }
         },
       });
-      toast.success('Codex CLI 执行结束');
+      toast.success('编码任务已结束');
     } catch (error) {
       setRuntimeState((prev) => ({
         ...prev,
         phase: 'error',
-        message: error instanceof Error ? error.message : 'Codex CLI 执行失败',
+        message: error instanceof Error ? error.message : '编码任务失败',
         lastEventAt: new Date().toISOString(),
       }));
-      logger.error('Codex CLI 执行失败', error);
-      toast.error(error instanceof Error ? error.message : 'Codex CLI 执行失败');
-    }
-  };
-
-  const handlePrepareWorkspaceRuntime = async () => {
-    if (!activeSession || !codexWorkspace) return;
-    setRuntimeOutput('[workspace] start lifecycle preparation\n');
-    setRuntimeState({
-      ...initialCodexRuntimeState,
-      phase: 'starting',
-      status: codexWorkspace.status,
-      message: '正在执行 Workspace 准备，Codex CLI 尚未启动',
-    });
-    try {
-      const result = await executeWorkspaceLifecycle.mutateAsync({
-        id: codexWorkspace.id,
-        sessionId: activeSession.id,
-      });
-      const lines = result.toolCalls.map((toolCall) => {
-        const exit = toolCall.exitCode ?? '-';
-        return `[workspace] ${toolCall.toolName} ${toolCall.status} exit=${exit}\n${toolCall.outputSummary || ''}`;
-      });
-      setRuntimeOutput((prev) => `${prev}${lines.join('\n')}\n[workspace] status=${result.workspace.status}\n`);
-      setRuntimeState({
-        ...initialCodexRuntimeState,
-        phase: result.workspace.status === 'ready' ? 'idle' : 'error',
-        status: result.workspace.status,
-        message: result.workspace.status === 'ready'
-          ? 'Workspace 已 ready，可以运行 Codex CLI'
-          : 'Workspace 准备失败，请查看 git 生命周期日志',
-      });
-      toast.success('Workspace 已准备完成');
-    } catch (error) {
-      logger.error('执行 Workspace 准备失败', error);
-      setRuntimeOutput((prev) => `${prev}[workspace:error] ${error instanceof Error ? error.message : '执行 Workspace 准备失败'}\n`);
-      setRuntimeState({
-        ...initialCodexRuntimeState,
-        phase: 'error',
-        status: codexWorkspace.status,
-        message: error instanceof Error ? error.message : '执行 Workspace 准备失败',
-      });
-      toast.error(error instanceof Error ? error.message : '执行 Workspace 准备失败');
+      logger.error('编码任务失败', error);
+      toast.error(error instanceof Error ? error.message : '编码任务失败');
     }
   };
 
@@ -460,375 +557,259 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         id: codexToolCall.id,
         sessionId: activeSession.id,
       });
-      setRuntimeState((prev) => ({
-        ...prev,
-        phase: 'finished',
-        status: 'cancelled',
-        message: '已请求停止 Codex CLI',
-        lastEventAt: new Date().toISOString(),
-      }));
-      setRuntimeOutput((prev) => `${prev}\n[executor] cancellation requested\n`);
-      toast.success('已请求停止 Codex CLI');
+      appendLog('[步骤4] 已请求停止编码进程');
+      toast.success('已请求停止');
     } catch (error) {
-      logger.error('停止 Codex CLI 失败', error);
-      toast.error(error instanceof Error ? error.message : '停止 Codex CLI 失败');
+      logger.error('停止失败', error);
+      toast.error(error instanceof Error ? error.message : '停止失败');
     }
   };
 
-  const handleApproveDiffReview = async () => {
-    if (!activeSession) return;
-    try {
-      await prepareToolCall.mutateAsync({
-        sessionId: activeSession.id,
-        toolName: 'review.approve_diff',
-        toolCategory: 'other',
-        status: 'succeeded',
-        approvalStatus: 'approved',
-        riskLevel: reviewSummary.riskHints.length ? 'medium' : 'low',
-        inputSummary: '人工批准 Agent diff review 与测试报告',
-        outputSummary: `批准文件 ${reviewSummary.files.length} 个，测试命令 ${reviewSummary.testCommands.length} 条`,
-        metadata: {
-          diffReviewApproved: true,
-          approvedBy: operatorName,
-          approvedAt: new Date().toISOString(),
-          files: reviewSummary.files,
-          testCommands: reviewSummary.testCommands,
-          failedCommands: reviewSummary.failedCommands,
-          riskHints: reviewSummary.riskHints,
-        },
-      });
-      toast.success('Diff Review 已批准');
-    } catch (error) {
-      logger.error('批准 Diff Review 失败', error);
-      toast.error('批准 Diff Review 失败');
-    }
-  };
+  const runtimePlaceholder =
+    '日志：步骤 2 的 Workspace 命令与步骤 3/4 的编码输出将显示在此处。';
 
-  return (
-    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-4">
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Bot className="size-4 text-primary" />
-            Agent Thread
-          </CardTitle>
-          <CardDescription>
-            对话式派活、计划审核、workspace 准备与工具调用审计。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Textarea
-            value={instruction}
-            onChange={(event) => setInstruction(event.target.value)}
-            className="min-h-[120px]"
-            placeholder="给 Agent 的执行要求"
-          />
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={handleStartPlanning} disabled={isBusy}>
-              {isBusy ? <Loader2 className="mr-2 size-4 animate-spin" /> : <MessageSquareText className="mr-2 size-4" />}
-              创建 Agent Thread
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleApprovePlan}
-              disabled={!activeSession || isBusy}
+  const stepper = (
+    <ol className="space-y-6">
+      <li
+        className={cn(
+          'rounded-lg border border-border bg-card p-4 shadow-sm',
+          'border-l-[3px] border-l-primary',
+        )}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2 mb-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+              1
+            </span>
+            创建 Agent Thread（生成提示词）
+          </div>
+          {step1Done ? (
+            <Badge variant="outline" className="border-green-500/30 bg-green-500/10 text-green-700">
+              <CheckCircle2 className="mr-1 size-3" />
+              已完成
+            </Badge>
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground mb-3 flex items-start gap-1.5">
+          <FileText className="size-3.5 shrink-0 mt-0.5 text-primary" />
+          系统会根据流水线关联需求打包 ContextPack（含 PRD、FS/TS 等），再结合下方指令生成可执行的编码提示词。
+        </p>
+        <Textarea
+          value={instruction}
+          onChange={(event) => setInstruction(event.target.value)}
+          className="min-h-[100px] text-sm"
+          placeholder="用自然语言描述要实现什么、验收标准或约束…"
+        />
+        <Button className="mt-3" onClick={handleCreateThread} disabled={isBusy}>
+          {createAgentSession.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Bot className="mr-2 size-4" />}
+          创建任务并生成提示词
+        </Button>
+      </li>
+
+      <li
+        className={cn(
+          'rounded-lg border border-border bg-card p-4 shadow-sm',
+          'border-l-[3px] border-l-primary',
+        )}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2 mb-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+              2
+            </span>
+            准备 Workspace（仓库 + 文档上下文）
+          </div>
+          {step2Done ? (
+            <Badge variant="outline" className="border-green-500/30 bg-green-500/10 text-green-700">
+              <CheckCircle2 className="mr-1 size-3" />
+              已就绪
+            </Badge>
+          ) : null}
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">
+          一键完成：确认提示词 → 登记隔离目录 → 克隆/拉取代码仓库，并把 ContextPack 落到 Workspace 侧供编码工具读取。
+        </p>
+        <Button variant="secondary" onClick={handlePrepareWorkspace} disabled={!step1Done || isBusy}>
+          {executeWorkspaceLifecycle.isPending || provisionWorkspace.isPending ? (
+            <Loader2 className="mr-2 size-4 animate-spin" />
+          ) : (
+            <ChevronRight className="mr-2 size-4" />
+          )}
+          准备 Workspace
+        </Button>
+        {primaryWorkspace ? (
+          <div className="mt-3 rounded-md border bg-muted/20 px-3 py-2 font-mono text-xs text-muted-foreground break-all">
+            <span className="font-sans font-medium text-foreground">当前目录：</span>
+            {primaryWorkspace.worktreePath || primaryWorkspace.repoUrl} · {primaryWorkspace.status}
+          </div>
+        ) : null}
+      </li>
+
+      <li
+        className={cn(
+          'rounded-lg border border-border bg-card p-4 shadow-sm',
+          'border-l-[3px] border-l-primary',
+        )}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2 mb-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+              3
+            </span>
+            调用编码工具
+          </div>
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="flex-1 space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">编码工具</label>
+            <Select
+              value={codingTool}
+              onValueChange={(v) => setCodingTool(v as ICodingToolChoice)}
             >
-              <ShieldCheck className="mr-2 size-4" />
-              批准计划并准备 Workspace
-            </Button>
+              <SelectTrigger className="w-full sm:max-w-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CODING_TOOL_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.id} value={opt.id} disabled={!opt.enabled}>
+                    {opt.label} — {opt.description}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <Button
-              variant="outline"
-              onClick={handleRunCodex}
-              disabled={!activeSession || !codexToolCall || !isCodexWorkspaceReady || isCodexRunning}
+              onClick={handleRunCoding}
+              disabled={!step2Done || !codexToolCall || isCodexRunning || codingTool !== 'codex_cli'}
             >
               {runCodexToolCall.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Terminal className="mr-2 size-4" />}
-              运行 Codex CLI
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handlePrepareWorkspaceRuntime}
-              disabled={!activeSession || !codexWorkspace || isCodexWorkspaceReady || executeWorkspaceLifecycle.isPending}
-            >
-              {executeWorkspaceLifecycle.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <CheckCircle2 className="mr-2 size-4" />}
-              执行 Workspace 准备
+              开始编码
             </Button>
             <Button
               variant="outline"
               onClick={handleCancelCodex}
-              disabled={!activeSession || !codexToolCall || !isCodexRunning || cancelCodexExecution.isPending}
+              disabled={!codexToolCall || !isCodexRunning || cancelCodexExecution.isPending}
             >
               {cancelCodexExecution.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Square className="mr-2 size-4" />}
-              停止执行
+              停止
             </Button>
           </div>
-          {activeSession ? (
-            <div className="rounded-md border p-4 space-y-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="secondary">{activeSession.status}</Badge>
-                <span className="font-mono text-xs text-muted-foreground">{activeSession.id}</span>
-                {activeSession.contextPackId && (
-                  <span className="font-mono text-xs text-muted-foreground">ContextPack: {activeSession.contextPackId}</span>
-                )}
-              </div>
-              <div className="prose prose-sm max-w-none text-sm whitespace-pre-wrap">
-                {activeSession.planMarkdown || '暂无计划内容'}
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-              暂无 Agent Thread，请先创建计划。
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        </div>
+      </li>
 
-      <div className="space-y-4">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Workflow className="size-4 text-primary" />
-              Plan Board
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {tasks.length ? (
-              tasks.map((item) => (
-                <div key={item.id} className="rounded-md border p-3 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{item.title}</span>
-                    <Badge variant="outline">{item.status}</Badge>
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {item.role} · order {item.orderIndex}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">暂无 Agent 任务。</p>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Terminal className="size-4 text-primary" />
-              Tool Timeline
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="mb-3 rounded-md border bg-card p-3">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Badge variant={runtimeState.phase === 'error' ? 'destructive' : 'outline'}>
-                    {runtimeState.phase}
-                  </Badge>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {runtimeState.toolCallId || codexToolCall?.id || 'no tool call'}
-                  </span>
-                </div>
-                <span className="text-xs text-muted-foreground">
-                  {runtimeState.lastEventAt ? `last ${new Date(runtimeState.lastEventAt).toLocaleTimeString()}` : '等待事件'}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-                <div className="rounded-md border p-2">
-                  <div className="text-muted-foreground">PID</div>
-                  <div className="font-mono">{runtimeState.pid ?? '-'}</div>
-                </div>
-                <div className="rounded-md border p-2">
-                  <div className="text-muted-foreground">Exit</div>
-                  <div className="font-mono">{runtimeState.exitCode ?? '-'}</div>
-                </div>
-                <div className="rounded-md border p-2">
-                  <div className="text-muted-foreground">耗时</div>
-                  <div className="font-mono">{runtimeState.durationMs != null ? `${runtimeState.durationMs}ms` : '-'}</div>
-                </div>
-                <div className="rounded-md border p-2">
-                  <div className="text-muted-foreground">变更</div>
-                  <div className="font-mono">{runtimeState.changedFilesCount}</div>
-                </div>
-                <div className="rounded-md border p-2">
-                  <div className="text-muted-foreground">stdout</div>
-                  <div className="font-mono">{runtimeState.stdoutBytes} B</div>
-                </div>
-                <div className="rounded-md border p-2">
-                  <div className="text-muted-foreground">stderr</div>
-                  <div className="font-mono">{runtimeState.stderrBytes} B</div>
-                </div>
-                <div className="rounded-md border p-2 md:col-span-2">
-                  <div className="text-muted-foreground">状态</div>
-                  <div className="font-mono">{runtimeState.status || codexToolCall?.status || '-'}</div>
-                </div>
-              </div>
-              <div className="mt-2 space-y-1 text-xs">
-                <div className="break-all font-mono text-muted-foreground">
-                  cwd: {runtimeState.cwd || String(codexToolCall?.metadata?.cwd || '-')}
-                </div>
-                <div className="break-all font-mono text-muted-foreground">
-                  cmd: {runtimeState.command || codexToolCall?.command || '-'}
-                </div>
-                {runtimeState.message && (
-                  <div className="text-red-600">{runtimeState.message}</div>
-                )}
-                {!runtimeState.pid && (runtimeState.phase === 'starting' || runtimeState.phase === 'error') && (
-                  <div className="text-amber-600">
-                    未获得 PID：尚未收到 spawned 事件，不能判定 Codex CLI 已执行。
-                  </div>
-                )}
-                {codexToolCall && !isCodexWorkspaceReady && (
-                  <div className="text-amber-600">
-                    Workspace 未就绪：请先点击“执行 Workspace 准备”，完成 git.clone_cache / git.fetch / git.worktree_add。
-                  </div>
-                )}
-                {workspaceLifecycleCalls.length > 0 && !isCodexWorkspaceReady && (
-                  <div className="space-y-1 pt-1">
-                    {workspaceLifecycleCalls.map((toolCall) => (
-                      <div key={toolCall.id} className="flex items-center justify-between gap-2 rounded border px-2 py-1">
-                        <span className="font-mono">{toolCall.toolName}</span>
-                        <span className="font-mono">{toolCall.status}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+      <li
+        className={cn(
+          'rounded-lg border border-border bg-card p-4 shadow-sm',
+          'border-l-[3px] border-l-primary',
+        )}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2 mb-3">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+              4
+            </span>
+            实时反馈
+          </div>
+          <Badge variant={runtimeState.phase === 'error' ? 'destructive' : 'outline'}>{runtimeState.phase}</Badge>
+        </div>
+        {(runCodexToolCall.isPending || codexToolCall?.status === 'running') && (
+          <Alert variant="warning" className="mb-3">
+            <Terminal className="size-4" />
+            <AlertTitle>编码任务与连接状态</AlertTitle>
+            <AlertDescription>
+              {runCodexToolCall.isPending
+                ? '本页正通过流式连接接收输出；离开页面会断开该连接（服务端 Codex 多数情况下仍会继续跑完）。完整输出以步骤 4 顶部「服务端完整日志文件」为准。'
+                : '工具调用状态为 running：Codex 可能仍在服务端执行；本页每 2.5s 拉取数据库中的输出摘要。也可登录运行后端的主机查看日志文件。'}
+            </AlertDescription>
+          </Alert>
+        )}
+        <div className="mb-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+          <div className="rounded-md border border-border px-2 py-1.5">
+            <div className="text-muted-foreground">PID</div>
+            <div className="font-mono">{runtimeState.pid ?? '—'}</div>
+          </div>
+          <div className="rounded-md border border-border px-2 py-1.5">
+            <div className="text-muted-foreground">Exit</div>
+            <div className="font-mono">{runtimeState.exitCode ?? '—'}</div>
+          </div>
+          <div className="rounded-md border border-border px-2 py-1.5">
+            <div className="text-muted-foreground">耗时</div>
+            <div className="font-mono">{runtimeState.durationMs != null ? `${runtimeState.durationMs}ms` : '—'}</div>
+          </div>
+          <div className="rounded-md border border-border px-2 py-1.5">
+            <div className="text-muted-foreground">变更文件</div>
+            <div className="font-mono">{reviewSummary.files.length || runtimeState.changedFilesCount}</div>
+          </div>
+        </div>
+        {activeSession ? (
+          <details className="mb-3 rounded-md border border-border text-sm">
+            <summary className="cursor-pointer select-none px-3 py-2 font-medium text-foreground bg-muted/30">
+              查看生成的提示词（plan）
+            </summary>
+            <div className="max-h-40 overflow-auto whitespace-pre-wrap border-t border-border p-3 text-xs leading-relaxed text-muted-foreground">
+              {activeSession.planMarkdown || '（空）'}
             </div>
-            <ScrollArea className="h-[280px] pr-3">
-              <div className="space-y-2">
-                {toolCalls.length ? (
-                  toolCalls.map((toolCall) => (
-                    <div key={toolCall.id} className="rounded-md border p-3 text-sm">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium">{toolCall.toolName}</span>
-                        <Badge variant={toolCall.riskLevel === 'high' ? 'destructive' : 'outline'}>
-                          {toolCall.riskLevel}
-                        </Badge>
-                      </div>
-                      <div className="mt-1 font-mono text-xs break-all text-muted-foreground">
-                        {toolCall.command || toolCall.inputSummary}
-                      </div>
-                      <div className="mt-2 flex items-center justify-between gap-2">
-                        <span className="text-xs text-muted-foreground">
-                          {toolCall.status} / {toolCall.approvalStatus}
-                        </span>
-                        {toolCall.approvalStatus === 'pending' && (
-                          <Button size="sm" variant="outline" onClick={() => handleApproveTool(toolCall.id)}>
-                            批准
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-muted-foreground">暂无工具调用。</p>
-                )}
-              </div>
-            </ScrollArea>
-            <div className="mt-3 rounded-md border bg-slate-950 p-3">
-              <div className="mb-2 text-xs font-medium text-slate-400">实时 stdout / stderr</div>
-              <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap font-mono text-xs leading-5 text-slate-100">
-                {runtimeOutput || runtimePlaceholder}
-              </pre>
-            </div>
-          </CardContent>
-        </Card>
+          </details>
+        ) : null}
+        {tasks.length > 0 ? (
+          <div className="mb-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+            {tasks.map((t) => (
+              <span key={t.id} className="rounded-full border border-border px-2 py-0.5">
+                {t.title}: {t.status}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {pendingApprovals.length > 0 ? (
+          <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+            <div className="mb-2 font-medium text-amber-800">有待审批的工具调用</div>
+            <ul className="space-y-2">
+              {pendingApprovals.map((tc) => (
+                <li key={tc.id} className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-mono text-xs">{tc.toolName}</span>
+                  <Button size="sm" variant="outline" onClick={() => handleApproveTool(tc.id)}>
+                    批准
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        <div className="rounded-lg border border-border bg-slate-950 p-3">
+          <div className="mb-2 text-xs font-medium text-slate-400">输出流</div>
+          <pre className="max-h-[min(360px,50vh)] overflow-auto whitespace-pre-wrap font-mono text-xs leading-5 text-slate-100">
+            {runtimeOutput.trim() || runtimePlaceholder}
+          </pre>
+        </div>
+        {runtimeState.message ? (
+          <p className="mt-2 text-xs text-red-600">{runtimeState.message}</p>
+        ) : null}
+      </li>
+    </ol>
+  );
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileDiff className="size-4 text-primary" />
-              Diff Review
-            </CardTitle>
-            <CardDescription>
-              基于工具调用汇总变更文件、测试命令和风险提示。
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="rounded-md border p-2">
-                <div className="text-lg font-semibold">{reviewSummary.files.length}</div>
-                <div className="text-xs text-muted-foreground">变更文件</div>
-              </div>
-              <div className="rounded-md border p-2">
-                <div className="text-lg font-semibold">{reviewSummary.testCommands.length}</div>
-                <div className="text-xs text-muted-foreground">测试命令</div>
-              </div>
-              <div className="rounded-md border p-2">
-                <div className="text-lg font-semibold text-red-600">{reviewSummary.failedCommands.length}</div>
-                <div className="text-xs text-muted-foreground">失败项</div>
-              </div>
-            </div>
-            <ScrollArea className="h-[180px] rounded-md border p-3">
-              <div className="space-y-3 text-sm">
-                {reviewSummary.files.length > 0 ? (
-                  <div className="space-y-1">
-                    <div className="text-xs font-medium text-muted-foreground">变更文件</div>
-                    {reviewSummary.files.map((file) => (
-                      <div key={file.path} className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-xs break-all">{file.path}</span>
-                        <Badge variant="outline">{file.changeType}</Badge>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-muted-foreground">暂无变更文件记录，可由后续工具调用写入 metadata.changedFiles。</p>
-                )}
-                {reviewSummary.testCommands.length > 0 && (
-                  <div className="space-y-1">
-                    <div className="text-xs font-medium text-muted-foreground">测试命令</div>
-                    {reviewSummary.testCommands.map((command) => (
-                      <div key={command} className="font-mono text-xs break-all">{command}</div>
-                    ))}
-                  </div>
-                )}
-                {reviewSummary.riskHints.length > 0 && (
-                  <div className="space-y-1">
-                    <div className="text-xs font-medium text-muted-foreground">风险提示</div>
-                    {reviewSummary.riskHints.map((hint) => (
-                      <div key={hint} className="text-xs text-red-600">{hint}</div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-            <Button
-              className="w-full"
-              variant={reviewSummary.approved ? 'outline' : 'default'}
-              onClick={handleApproveDiffReview}
-              disabled={!activeSession || reviewSummary.approved || isBusy}
-            >
-              <ShieldCheck className="mr-2 size-4" />
-              {reviewSummary.approved ? '已批准 Diff Review' : '批准 Diff Review'}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <CheckCircle2 className="size-4 text-primary" />
-              Workspace
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {workspaces.length ? (
-              workspaces.map((workspace) => (
-                <div key={workspace.id} className="rounded-md border p-3 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">{workspace.agentBranch}</span>
-                    <Badge variant="outline">{workspace.status}</Badge>
-                  </div>
-                  <div className="mt-1 font-mono text-xs break-all text-muted-foreground">
-                    {workspace.worktreePath || workspace.repoUrl}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">计划批准后将生成隔离 workspace。</p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+  return (
+    <Card className="border-border shadow-sm">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg flex items-center gap-2">
+          <Bot className="size-5 text-primary" />
+          Agent 工作台
+        </CardTitle>
+        <CardDescription className="text-sm leading-relaxed max-w-[720px]">
+          参考{' '}
+          <a
+            href="https://miaoda.feishu.cn/home"
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline-offset-4 hover:underline"
+          >
+            飞书妙搭
+          </a>
+          ：在网页下达指令，由 ContextPack 携带 PRD / FS / TS 等文档，与仓库一起在 Workspace 中交给编码工具执行，并在步骤 4 查看实时输出。
+        </CardDescription>
+      </CardHeader>
+      <CardContent>{stepper}</CardContent>
+    </Card>
   );
 }

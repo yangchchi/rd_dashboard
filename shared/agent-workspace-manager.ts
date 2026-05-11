@@ -33,6 +33,10 @@ export interface IBuildAgentWorkspacePlanInput {
   agentBranch?: string | null;
   workspaceRoot?: string | null;
   kind?: 'clone' | 'worktree' | 'container';
+  /** 产品目录段，如 ai-generation；存在时 worktree 根为 {workspaceRoot}/{productSlug} */
+  productSlug?: string | null;
+  /** 与仓库内 docs/{该名}/ 一致；仅用于元数据/提示，不参与 worktree 物理路径 */
+  sessionFolderName?: string | null;
 }
 
 const DEFAULT_WORKSPACE_ROOT = '/tmp/rd-agent-workspaces';
@@ -100,20 +104,25 @@ export function buildAgentWorkspaceLifecyclePlan(
     throw new Error('repoUrl is required');
   }
   const baseBranch = String(input.baseBranch || 'main').trim() || 'main';
-  const agentBranch =
-    input.agentBranch?.trim() ||
-    buildAgentBranch({
-      requirementId: input.requirementId,
-      pipelineRunId: input.pipelineRunId,
-      sessionId: input.sessionId,
-    });
+  const autoAgentBranch = buildAgentBranch({
+    requirementId: input.requirementId,
+    pipelineRunId: input.pipelineRunId,
+    sessionId: input.sessionId,
+  });
+  const workspaceBranchSuffix = sanitizeWorkspaceSegment(input.workspaceId, 'wt');
+  /** 每个 Workspace 独占一条分支名，避免多个 worktree 报「branch is already checked out」 */
+  const agentBranch = input.agentBranch?.trim() || `${autoAgentBranch}-${workspaceBranchSuffix}`;
   const workspaceRoot = normalizeWorkspaceRoot(input.workspaceRoot);
   const sessionSegment = sanitizeWorkspaceSegment(input.sessionId, 'session');
   const workspaceSegment = sanitizeWorkspaceSegment(input.workspaceId, 'workspace');
   const requirementSegment = sanitizeWorkspaceSegment(input.requirementId, 'requirement');
   const repoSegment = repoNameFromUrl(repoUrl);
   const cachePath = joinPath(workspaceRoot, 'cache', `${requirementSegment}-${repoSegment}`);
-  const worktreePath = joinPath(workspaceRoot, 'sessions', sessionSegment, workspaceSegment);
+  const productSeg = sanitizeWorkspaceSegment(input.productSlug || 'default', 'product');
+  const useProductWorkspaceRoot = Boolean(input.productSlug?.trim());
+  const worktreePath = useProductWorkspaceRoot
+    ? joinPath(workspaceRoot, productSeg)
+    : joinPath(workspaceRoot, 'sessions', sessionSegment, workspaceSegment);
   const kind = input.kind || 'worktree';
 
   if (kind === 'clone') {

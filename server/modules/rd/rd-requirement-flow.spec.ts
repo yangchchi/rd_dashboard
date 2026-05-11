@@ -33,6 +33,25 @@ function createService(existing: IRequirementRow | null) {
 }
 
 describe('RdService requirement flow', () => {
+  it('rejects creating requirement without product', async () => {
+    const db = {
+      execute: jest.fn().mockResolvedValueOnce([]),
+    };
+    const service = new RdService(db as never);
+
+    await expect(
+      service.upsertRequirement({
+        id: 'req-new',
+        title: '标题',
+        description: '描述',
+        submitter: 'u1',
+        status: 'backlog',
+      })
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(db.execute).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects illegal status jumps', async () => {
     const { service, db } = createService(BASE_REQUIREMENT);
 

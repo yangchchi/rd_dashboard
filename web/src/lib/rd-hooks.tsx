@@ -416,11 +416,23 @@ export function useUpsertAgentTask() {
   });
 }
 
-export function useAgentToolCalls(sessionId: string | undefined, taskId?: string) {
+export function useAgentToolCalls(
+  sessionId: string | undefined,
+  taskId?: string,
+  options?: { pollWhileCodexRunningMs?: number },
+) {
+  const pollMs = options?.pollWhileCodexRunningMs;
   return useQuery({
     queryKey: rdKeys.agentToolCalls(sessionId, taskId),
     queryFn: () => (sessionId ? rdApi.listAgentToolCalls(sessionId, taskId) : Promise.resolve([])),
     enabled: Boolean(sessionId),
+    refetchInterval: (query) => {
+      if (!pollMs) return false;
+      const rows = query.state.data as IAgentToolCall[] | undefined;
+      if (!rows?.length) return false;
+      const codexRunning = rows.some((row) => row.toolName === 'codex.exec' && row.status === 'running');
+      return codexRunning ? pollMs : false;
+    },
   });
 }
 
@@ -591,6 +603,8 @@ export function useProvisionAgentWorkspace() {
       workspaceRoot?: string | null;
       kind?: IAgentWorkspace['kind'];
       createdBy?: string | null;
+      productSlug?: string | null;
+      sessionFolderName?: string | null;
     }) => rdApi.provisionAgentWorkspace(body),
     onSuccess: (result: IAgentWorkspaceProvisionResult) => {
       void qc.invalidateQueries({ queryKey: rdKeys.agentWorkspaces(result.workspace.sessionId) });

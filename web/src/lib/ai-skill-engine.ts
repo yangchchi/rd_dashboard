@@ -34,7 +34,8 @@ const THINK_CLOSE = '\u003c/think\u003e';
 const RR_OPEN = '\u003credacted_reasoning\u003e';
 const RR_CLOSE = '\u003c/redacted_reasoning\u003e';
 
-function fillPrompt(template: string, variables: Record<string, string>) {
+/** 将 `{{var}}` 占位符替换为 variables 中的值（与插件 Skill 配置一致）。 */
+export function fillAiSkillPromptTemplate(template: string, variables: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => variables[key] ?? '');
 }
 
@@ -138,7 +139,7 @@ export async function runAiSkillStream(skill: IAiSkillConfig, params: IAiSkillRu
   let rawAccum = '';
   let lastSanitized = '';
 
-  const prompt = fillPrompt(skill.promptTemplate, params.variables);
+  const prompt = fillAiSkillPromptTemplate(skill.promptTemplate, params.variables);
   const response = await fetch(skill.endpoint || DEFAULT_ARK_ENDPOINT, {
     method: 'POST',
     headers: {

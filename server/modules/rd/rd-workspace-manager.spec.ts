@@ -27,7 +27,7 @@ const WORKSPACE_ROW = {
   status: 'provisioning',
   repo_url: 'git@example.com:demo/repo.git',
   base_branch: 'main',
-  agent_branch: 'codex/rd-req-1-run-1',
+  agent_branch: 'codex/rd-req-1-run-1-awork_1_3llllll',
   worktree_path: `/tmp/rd-agent-workspaces/sessions/session-1/${WORKSPACE_ID}`,
   base_commit: null,
   head_commit: null,
@@ -68,6 +68,7 @@ describe('RdService workspace manager', () => {
       execute: jest
         .fn()
         .mockResolvedValueOnce([SESSION_ROW])
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([SESSION_ROW])
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce([WORKSPACE_ROW])
@@ -98,7 +99,7 @@ describe('RdService workspace manager', () => {
       });
 
       expect(result.workspace.id).toBe(WORKSPACE_ID);
-      expect(result.plan.agentBranch).toBe('codex/rd-req-1-run-1');
+      expect(result.plan.agentBranch).toBe('codex/rd-req-1-run-1-awork_1_3llllll');
       expect(result.plan.commands.map((command) => command.key)).toEqual([
         'clone_cache',
         'fetch_base',

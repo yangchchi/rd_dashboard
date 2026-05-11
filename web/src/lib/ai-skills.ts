@@ -1,12 +1,13 @@
 import type { IAiSkillConfig } from '@/lib/ai-skill-engine';
 import { rdApi } from '@/lib/rd-api';
 import {
+  AGENT_WORKBENCH_PLAN_SKILL_ID,
   DEFAULT_AI_SKILLS as SHARED_DEFAULT_AI_SKILLS,
   PLUGIN_SKILL_ORDER as SHARED_PLUGIN_SKILL_ORDER,
   PRD_GENERATION_SKILL_ID,
 } from '@shared/ai-skill-defaults';
 
-export { PRD_GENERATION_SKILL_ID };
+export { AGENT_WORKBENCH_PLAN_SKILL_ID, PRD_GENERATION_SKILL_ID };
 export const PLUGIN_SKILL_ORDER: string[] = SHARED_PLUGIN_SKILL_ORDER;
 const DEFAULT_AI_SKILLS: Record<string, IAiSkillConfig> = SHARED_DEFAULT_AI_SKILLS;
 let cache: Record<string, IAiSkillConfig> | null = null;
@@ -43,7 +44,8 @@ async function ensureCache(force = false): Promise<Record<string, IAiSkillConfig
   if (!force && cache) return cache;
   try {
     const remote = await rdApi.listAiSkills();
-    cache = toMap(remote as IAiSkillConfig[]);
+    // 远端覆盖内置默认，避免 DB 已更新仍因合并顺序误用旧内置文案
+    cache = { ...DEFAULT_AI_SKILLS, ...toMap(remote as IAiSkillConfig[]) };
   } catch {
     cache = { ...DEFAULT_AI_SKILLS };
   }

@@ -65,9 +65,11 @@ function mapProduct(p: Record<string, unknown>): IProduct {
   const codeRaw = p.code != null ? String(p.code).trim() : '';
   const tmRaw = p.technicalManager ?? p.technical_manager;
   const ptRaw = p.productType ?? p.product_type;
+  const idRaw = p.identifier != null ? String(p.identifier).trim() : '';
   return {
     id: p.id as string,
     code: codeRaw || undefined,
+    identifier: idRaw || undefined,
     name: (p.name as string) || '',
     description: (p.description as string) || '',
     owner: (p.owner as string) || undefined,
@@ -746,6 +748,8 @@ export const rdApi = {
     workspaceRoot?: string | null;
     kind?: IAgentWorkspace['kind'];
     createdBy?: string | null;
+    productSlug?: string | null;
+    sessionFolderName?: string | null;
   }): Promise<IAgentWorkspaceProvisionResult> {
     const raw = await json<Record<string, unknown>>('/agent-workspaces/provision', {
       method: 'POST',

@@ -25,7 +25,7 @@ describe('agent workspace manager', () => {
       baseBranch: 'main',
     });
 
-    expect(plan.agentBranch).toBe('codex/rd-req-1-run-1');
+    expect(plan.agentBranch).toBe('codex/rd-req-1-run-1-workspace-1');
     expect(plan.worktreePath).toContain('/sessions/session-1/workspace-1');
     expect(plan.commands.map((command) => command.key)).toEqual([
       'clone_cache',
@@ -54,5 +54,21 @@ describe('agent workspace manager', () => {
     ]);
     expect(plan.commands[0].command).toContain('git clone --branch develop');
     expect(plan.agentBranch).toBe('codex/custom');
+  });
+
+  it('uses product slug as worktree root (code gen root); session folder is not a path segment', () => {
+    const plan = buildAgentWorkspaceLifecyclePlan({
+      workspaceId: 'workspace-1',
+      sessionId: 'session-1',
+      requirementId: 'req-1',
+      pipelineRunId: 'run-1',
+      repoUrl: 'git@example.com:demo/repo.git',
+      baseBranch: 'main',
+      productSlug: 'ai-generation',
+      sessionFolderName: 'ai焦虑缓解器-20260511134758',
+    });
+    expect(plan.worktreePath).toMatch(/\/ai-generation$/);
+    expect(plan.worktreePath).not.toContain('ai焦虑缓解器');
+    expect(plan.worktreePath).not.toContain('/sessions/');
   });
 });

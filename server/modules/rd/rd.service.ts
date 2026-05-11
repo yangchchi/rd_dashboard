@@ -6,9 +6,12 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { stat } from 'node:fs/promises';
+import { createWriteStream, type WriteStream } from 'node:fs';
+import { mkdir, rm, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { finished as waitStreamFinished } from 'node:stream/promises';
 import { DRIZZLE_DATABASE } from '../../database/database.constants';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
@@ -19,6 +22,7 @@ import {
   type IAgentWorkspaceLifecyclePlan,
   type IWorkspaceLifecycleCommand,
 } from '../../../shared/agent-workspace-manager';
+import { resolveWorkspaceProductSlug } from '../../../shared/pipeline-workspace-path';
 import { assertToolCallCanStart, prepareToolCallPolicy } from '../../../shared/agent-tool-gateway';
 import { createDefaultOrgSpecConfig } from '../../../shared/org-spec-defaults';
 
@@ -264,6 +268,10 @@ export interface IPipelineMeta {
   prdIds?: string[];
   specIds?: string[];
   publishedDocuments?: IPipelinePublishedDocument[];
+  /** Agent worktree 第一层目录，与产品 identifier 对齐，如 ai-generation */
+  workspaceProductSlug?: string;
+  /** 与仓库 docs/{该名} 一致，本会话/需求文档目录唯一标识 */
+  workspaceSessionFolder?: string;
 }
 
 export interface IGitCommitRecord {
@@ -475,7 +483,8 @@ export interface IAgentExecutionEvent {
 }
 
 interface IAgentExecutionProcess {
-  child: ChildProcessWithoutNullStreams;
+  /** Codex 子进程使用 ignore stdin；类型需允许 stdin 为 null */
+  child: ChildProcess;
   startedAt: number;
   stdout: string;
   stderr: string;
@@ -546,6 +555,8 @@ export interface IPipelineDocsExportItem {
 export interface IProductRow {
   id: string;
   code?: string | null;
+  /** 产品标识（必填） */
+  identifier?: string | null;
   name: string;
   description: string;
   owner?: string | null;
@@ -1344,6 +1355,9 @@ export class RdService implements OnModuleInit {
       await this.db.execute(sql`
         ALTER TABLE rd_products ADD COLUMN IF NOT EXISTS product_type TEXT;
       `);
+      await this.db.execute(sql`
+        ALTER TABLE rd_products ADD COLUMN IF NOT EXISTS identifier TEXT;
+      `);
     } catch (e) {
       this.logger.warn(
         `rd_products 结构升级跳过: ${e instanceof Error ? e.message : String(e)}`,
@@ -1711,6 +1725,7 @@ export class RdService implements OnModuleInit {
     return {
       id: r.id as string,
       code: (r.code as string) || null,
+      identifier: (r.identifier as string) || null,
       name: (r.name as string) || '',
       description: (r.description as string) || '',
       owner: (r.owner as string) || null,
@@ -1906,6 +1921,17 @@ export class RdService implements OnModuleInit {
           createdBy: body.createdBy ?? body.updatedBy ?? body.submitter ?? null,
           updatedBy: body.updatedBy ?? body.createdBy ?? body.submitter ?? null,
         };
+
+    const productTrimmed = (merged.product ?? '').trim();
+    if (!productTrimmed) {
+      if (!existing) {
+        throw new BadRequestException('所属产品不能为空');
+      }
+      if (body.product !== undefined) {
+        throw new BadRequestException('所属产品不能为空');
+      }
+    }
+
     const statusChanged = existing ? existing.status !== merged.status : true;
     if (statusChanged) {
       this.assertRequirementStatusTransition(existing?.status ?? null, merged.status);
@@ -3586,8 +3612,6 @@ export class RdService implements OnModuleInit {
       input.workspacePath,
       '--sandbox',
       'workspace-write',
-      '--ask-for-approval',
-      'never',
     ];
     const model = input.model?.trim() || process.env.CODEX_CLI_MODEL?.trim();
     if (model) {
@@ -3623,6 +3647,58 @@ export class RdService implements OnModuleInit {
         resolve({ exitCode: code, stdout, stderr });
       });
     });
+  }
+
+  private async pathLooksLikeGitRepo(absDir: string): Promise<boolean> {
+    try {
+      await stat(join(absDir, '.git'));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 删除占位的空/损坏缓存目录，避免 `git clone` 报 destination already exists */
+  private async removeOrphanAgentCacheDir(workspace: IAgentWorkspaceRow, cachePath: string): Promise<void> {
+    const metaRoot = String(this.parseJsonObject(workspace.metadata).workspaceRoot || '')
+      .trim()
+      .replace(/\/+$/, '');
+    if (!metaRoot || !cachePath.startsWith(`${metaRoot}/`)) return;
+    try {
+      await stat(cachePath);
+    } catch {
+      return;
+    }
+    if (await this.pathLooksLikeGitRepo(cachePath)) return;
+    try {
+      await rm(cachePath, { recursive: true, force: true });
+    } catch {
+      /* 忽略 */
+    }
+  }
+
+  /** 清理上次失败的 worktree 目录，避免 `worktree add` 报目录已存在 */
+  private async bestEffortRemoveStaleWorktree(
+    workspace: IAgentWorkspaceRow,
+    command: IWorkspaceLifecycleCommand,
+  ): Promise<void> {
+    if (command.key !== 'add_worktree' || command.args[0] !== 'git' || command.args[1] !== '-C') {
+      return;
+    }
+    const cachePath = command.args[2];
+    const worktreePath = command.args[7];
+    if (!cachePath || !worktreePath) return;
+    const metaRoot = String(this.parseJsonObject(workspace.metadata).workspaceRoot || '')
+      .trim()
+      .replace(/\/+$/, '');
+    await this.runTextCommand('git', ['-C', cachePath, 'worktree', 'remove', '--force', worktreePath], process.cwd());
+    if (metaRoot && worktreePath.startsWith(`${metaRoot}/`)) {
+      try {
+        await rm(worktreePath, { recursive: true, force: true });
+      } catch {
+        /* 目录不存在或非空残留时忽略 */
+      }
+    }
   }
 
   private parseGitNameStatus(output: string): Array<{ path: string; changeType: 'add' | 'modify' | 'delete' }> {
@@ -3740,8 +3816,19 @@ export class RdService implements OnModuleInit {
 
     const startedAt = Date.now();
     const metadata = this.parseJsonObject(current.metadata);
-    const prompt = String(body?.prompt || metadata.prompt || current.inputSummary || '').trim();
-    if (!prompt) {
+    const rawPrompt = String(body?.prompt || metadata.prompt || current.inputSummary || '').trim();
+    const wsMeta = this.parseJsonObject(workspace.metadata);
+    const docsPath =
+      typeof wsMeta.docsRelativePath === 'string' && wsMeta.docsRelativePath.trim()
+        ? wsMeta.docsRelativePath.trim()
+        : 'docs/<会话目录>/';
+    /** 旧版 plan 含「等待 TM 批准」时，模型会只读分析后 exit=0 不落盘；注入硬性执行授权 */
+    const agentExecPostamble =
+      '\n\n---\n【系统执行授权】当前为 RD Agent 已准备的 Git worktree（产品目录为代码生成根，可含 backend、frontend、Dockerfile 等），Workspace 与计划在网页侧已就绪。\n' +
+      '你必须在本仓库内**实际改文件**（分支、实现、测试或类型检查至少其一），不得以「等待技术经理批准」结束且无变更。\n' +
+      `规格与 PRD 位于本 worktree 下 \`${docsPath}\`（相对仓库根；勿使用已废弃的 docs/ai-pipeline/），勿依赖不存在的 \`context/\` 路径。`;
+    const prompt = `${rawPrompt}${agentExecPostamble}`;
+    if (!rawPrompt) {
       const message = 'Codex 执行缺少 prompt';
       const failed = await this.finishAgentToolCall(id, { exitCode: 1, errorMessage: message });
       yield { type: 'error', toolCallId: id, status: failed.status, message, toolCall: failed };
@@ -3772,6 +3859,8 @@ export class RdService implements OnModuleInit {
       cwd: workspacePath,
       env: process.env,
       shell: false,
+      /** 不设 ignore 时默认 stdin 为 pipe，Codex 会等待 stdin，出现 “Reading additional input from stdin…” 长时间无进展 */
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     const spawnedAt = new Date().toISOString();
     latestToolCall = await this.upsertAgentToolCall({
@@ -3803,6 +3892,40 @@ export class RdService implements OnModuleInit {
     };
     this.runningExecutions.set(id, execution);
 
+    const codexLogRoot = String(process.env.RD_AGENT_CODEX_LOG_DIR || '/tmp/rd-agent-workspaces/codex-logs').trim();
+    const logDir = join(codexLogRoot, workspace.sessionId);
+    let logStream: WriteStream | null = null;
+    let executorLogPath: string | null = null;
+    const appendCodexLog = (channel: 'out' | 'err', text: string) => {
+      if (!logStream) return;
+      const tag = channel === 'err' ? '[stderr] ' : '';
+      try {
+        logStream.write(`[${new Date().toISOString()}] ${tag}${text}`);
+      } catch {
+        /* 磁盘满等 */
+      }
+    };
+    try {
+      await mkdir(logDir, { recursive: true });
+      executorLogPath = join(logDir, `${id}.log`);
+      logStream = createWriteStream(executorLogPath, { flags: 'w' });
+      logStream.write(
+        `# rd-dashboard Codex 执行日志\n# toolCallId=${id}\n# sessionId=${workspace.sessionId}\n# started=${spawnedAt}\n# cwd=${workspacePath}\n# command=${[command.command, ...command.args].join(' ')}\n\n`,
+      );
+      latestToolCall = await this.upsertAgentToolCall({
+        ...latestToolCall,
+        metadata: {
+          ...this.parseJsonObject(latestToolCall.metadata),
+          executorLogPath,
+          executorLogStartedAt: spawnedAt,
+        },
+      });
+    } catch (error) {
+      this.logger.warn(`打开 Codex 落盘日志失败 session=${workspace.sessionId} tool=${id}: ${String(error)}`);
+      logStream = null;
+      executorLogPath = null;
+    }
+
     const queue: IAgentExecutionEvent[] = [];
     let settled = false;
     let exitCode: number | null = null;
@@ -3823,6 +3946,7 @@ export class RdService implements OnModuleInit {
       firstOutputAt = firstOutputAt || new Date().toISOString();
       stdout += text;
       execution.stdout = stdout;
+      appendCodexLog('out', text);
       push({
         type: 'stdout',
         toolCallId: id,
@@ -3838,6 +3962,7 @@ export class RdService implements OnModuleInit {
       firstOutputAt = firstOutputAt || new Date().toISOString();
       stderr += text;
       execution.stderr = stderr;
+      appendCodexLog('err', text);
       push({
         type: 'stderr',
         toolCallId: id,
@@ -3860,33 +3985,47 @@ export class RdService implements OnModuleInit {
       notify();
     });
 
-    const heartbeat = setInterval(() => {
-      if (settled) return;
-      push({
-        type: 'heartbeat',
-        toolCallId: id,
-        status: 'running',
-        durationMs: Date.now() - startedAt,
-        stdoutBytes: Buffer.byteLength(stdout),
-        stderrBytes: Buffer.byteLength(stderr),
-        timestamp: new Date().toISOString(),
-      });
-    }, 1000);
-
-    while (!settled || queue.length > 0) {
-      const event = queue.shift();
-      if (event) {
-        latestToolCall = await this.persistAgentExecutionOutput(latestToolCall, {
-          stdout,
-          stderr,
-          lastEventType: event.type,
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    try {
+      heartbeat = setInterval(() => {
+        if (settled) return;
+        push({
+          type: 'heartbeat',
+          toolCallId: id,
+          status: 'running',
+          durationMs: Date.now() - startedAt,
+          stdoutBytes: Buffer.byteLength(stdout),
+          stderrBytes: Buffer.byteLength(stderr),
+          timestamp: new Date().toISOString(),
         });
-        yield event;
-        continue;
+      }, 1000);
+
+      while (!settled || queue.length > 0) {
+        const event = queue.shift();
+        if (event) {
+          latestToolCall = await this.persistAgentExecutionOutput(latestToolCall, {
+            stdout,
+            stderr,
+            lastEventType: event.type,
+          });
+          yield event;
+          continue;
+        }
+        await new Promise<void>((resolve) => waiters.push(resolve));
       }
-      await new Promise<void>((resolve) => waiters.push(resolve));
+    } finally {
+      if (heartbeat) clearInterval(heartbeat);
+      if (logStream) {
+        try {
+          logStream.write(`\n# end exit=${exitCode ?? '?'} cancelled=${execution.cancelled}\n`);
+          logStream.end();
+          await waitStreamFinished(logStream);
+        } catch (error) {
+          this.logger.warn(`关闭 Codex 日志文件失败 tool=${id}: ${String(error)}`);
+        }
+        logStream = null;
+      }
     }
-    clearInterval(heartbeat);
 
     const durationMs = Date.now() - startedAt;
     const outputSummary = stdout.slice(-4000) || stderr.slice(-4000) || errorMessage || null;
@@ -3906,6 +4045,8 @@ export class RdService implements OnModuleInit {
       cwd: workspacePath,
       stdout: stdout.slice(-20000),
       stderr: stderr.slice(-20000),
+      executorLogPath: executorLogPath ?? this.parseJsonObject(finished.metadata).executorLogPath ?? null,
+      executorLogFinishedAt: executorLogPath ? new Date().toISOString() : null,
       executorCancelled: wasCancelled,
       firstOutputAt,
       changedFiles: reviewSummary.changedFiles,
@@ -4077,6 +4218,46 @@ export class RdService implements OnModuleInit {
       const toolCallId = `wtool_${workspaceId}_${command.orderIndex}_${command.key}`;
       const startedAt = Date.now();
       const existing = await this.getAgentToolCall(toolCallId);
+
+      if (command.key === 'clone_cache') {
+        const cachePath = command.args[command.args.length - 1];
+        if (cachePath && (await this.pathLooksLikeGitRepo(cachePath))) {
+          const skipped = await this.upsertAgentToolCall({
+            ...(existing || {
+              id: toolCallId,
+              sessionId: workspace.sessionId,
+              workspaceId,
+              toolName: command.toolName,
+              toolCategory: command.toolCategory,
+              riskLevel: command.riskLevel,
+              approvalStatus: command.riskLevel === 'high' ? 'pending' : 'not_required',
+              inputSummary: command.summary,
+              command: command.command,
+              metadata: {},
+            }),
+            status: 'succeeded',
+            exitCode: 0,
+            durationMs: 0,
+            outputSummary: `已存在本地缓存，跳过 clone：${cachePath}`,
+            finishedAt: new Date().toISOString(),
+            metadata: {
+              ...this.parseJsonObject(existing?.metadata),
+              args: command.args,
+              workspaceCommandKey: command.key,
+              orderIndex: command.orderIndex,
+              skippedCloneCache: true,
+            },
+          });
+          toolCalls.push(skipped);
+          continue;
+        }
+        await this.removeOrphanAgentCacheDir(workspace, cachePath);
+      }
+
+      if (command.key === 'add_worktree') {
+        await this.bestEffortRemoveStaleWorktree(workspace, command);
+      }
+
       const started = await this.upsertAgentToolCall({
         ...(existing || {
           id: toolCallId,
@@ -4147,10 +4328,41 @@ export class RdService implements OnModuleInit {
     workspaceRoot?: string | null;
     kind?: AgentWorkspaceKind;
     createdBy?: string | null;
+    productSlug?: string | null;
+    sessionFolderName?: string | null;
   }): Promise<IAgentWorkspaceProvisionResult> {
     const session = await this.getAgentSession(body.sessionId);
     if (!session) {
       throw new BadRequestException('关联 AgentSession 不存在或已删除');
+    }
+    let productSlug = (body.productSlug || '').trim();
+    let sessionFolderName = (body.sessionFolderName || '').trim();
+    if (session.pipelineRunId) {
+      const run = await this.getPipelineRun(session.pipelineRunId);
+      const snap = (run?.contextSnapshot || {}) as Record<string, unknown>;
+      if (!productSlug) {
+        productSlug = String(snap.workspaceProductSlug || snap.workspace_product_slug || '').trim();
+      }
+      if (!sessionFolderName) {
+        sessionFolderName = String(snap.workspaceSessionFolder || snap.workspace_session_folder || '').trim();
+      }
+      const taskId = String(snap.pipelineTaskId || '').trim();
+      if ((!productSlug || !sessionFolderName) && taskId) {
+        const task = await this.getPipelineTask(taskId);
+        const meta = (task?.pipelineMeta || {}) as IPipelineMeta;
+        if (!productSlug) productSlug = (meta.workspaceProductSlug || '').trim();
+        if (!sessionFolderName) sessionFolderName = (meta.workspaceSessionFolder || '').trim();
+      }
+    }
+    if (!productSlug && sessionFolderName && session.requirementId) {
+      const req = await this.getRequirement(session.requirementId);
+      if (req) {
+        productSlug = resolveWorkspaceProductSlug({
+          productIdentifier: undefined,
+          productId: undefined,
+          requirementProductKey: req.product,
+        });
+      }
     }
     const id = `awork_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const plan = buildAgentWorkspaceLifecyclePlan({
@@ -4160,9 +4372,11 @@ export class RdService implements OnModuleInit {
       pipelineRunId: session.pipelineRunId,
       repoUrl: body.repoUrl,
       baseBranch: body.baseBranch || session.baseBranch,
-      agentBranch: body.agentBranch || session.agentBranch,
+      agentBranch: body.agentBranch?.trim() || undefined,
       workspaceRoot: body.workspaceRoot,
       kind: body.kind || 'worktree',
+      productSlug: productSlug || undefined,
+      sessionFolderName: sessionFolderName || undefined,
     });
     const workspace = await this.upsertAgentWorkspace({
       id,
@@ -4178,6 +4392,8 @@ export class RdService implements OnModuleInit {
       metadata: {
         workspaceRoot: plan.workspaceRoot,
         cachePath: plan.cachePath,
+        docsSessionFolder: sessionFolderName || null,
+        docsRelativePath: sessionFolderName ? `docs/${sessionFolderName}` : null,
         lifecyclePlan: plan.commands.map((command) => ({
           key: command.key,
           toolName: command.toolName,
@@ -4294,6 +4510,8 @@ export class RdService implements OnModuleInit {
           ...existing,
           ...body,
           code: body.code !== undefined ? nullIfEmpty(body.code) : existing.code,
+          identifier:
+            body.identifier !== undefined ? nullIfEmpty(body.identifier) : existing.identifier,
           name: body.name !== undefined ? String(body.name) : existing.name,
           description: body.description !== undefined ? String(body.description) : existing.description,
           owner: body.owner !== undefined ? nullIfEmpty(body.owner) : existing.owner,
@@ -4312,6 +4530,7 @@ export class RdService implements OnModuleInit {
       : {
           id: body.id,
           code: nullIfEmpty(body.code),
+          identifier: nullIfEmpty(body.identifier),
           name: String(body.name || '').trim(),
           description: String(body.description ?? ''),
           owner: nullIfEmpty(body.owner),
@@ -4330,15 +4549,19 @@ export class RdService implements OnModuleInit {
     if (!merged.name.trim()) {
       throw new BadRequestException('产品名称不能为空');
     }
+    if (!(merged.identifier ?? '').trim()) {
+      throw new BadRequestException('产品标识不能为空');
+    }
 
     await this.db.execute(sql`
       INSERT INTO rd_products (
-        id, code, name, description, owner, technical_manager, product_type,
+        id, code, identifier, name, description, owner, technical_manager, product_type,
         sandbox_url, production_url, git_url,
         status, created_by, updated_by, created_at, updated_at
       ) VALUES (
         ${merged.id},
         ${merged.code ?? null},
+        ${merged.identifier!.trim()},
         ${merged.name.trim()},
         ${merged.description},
         ${merged.owner ?? null},
@@ -4355,6 +4578,7 @@ export class RdService implements OnModuleInit {
       )
       ON CONFLICT (id) DO UPDATE SET
         code = EXCLUDED.code,
+        identifier = EXCLUDED.identifier,
         name = EXCLUDED.name,
         description = EXCLUDED.description,
         owner = EXCLUDED.owner,

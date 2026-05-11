@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { buildWorkspaceSessionFolderName } from '../../../shared/pipeline-workspace-path';
+
 const execFileAsync = promisify(execFile);
 
 export interface IPipelinePrdDocInput {
@@ -76,6 +78,10 @@ export interface IPublishPipelineDocsPayload {
   operator?: string;
   prds: IPipelinePrdDocInput[];
   specs: IPipelineSpecDocInput[];
+  /** 与 Agent worktree 路径第一层一致，如 ai-generation */
+  productSlug?: string;
+  /** 与 Agent worktree / docs 子目录一致；不传则按需求标题与时间戳生成 */
+  sessionFolderName?: string;
 }
 
 export interface IPublishedDocumentRef {
@@ -168,8 +174,10 @@ export class PipelineGitService {
       await this.runGitWithRetry(['clone', '--depth', '1', gitUrl, repoDir], tempRoot, gitEnv);
       await this.runGit(['checkout', '-B', branch], repoDir, gitEnv);
 
-      const docsDirName = `${this.slugify(payload.requirementTitle || pipelineName)}-${this.timestamp()}`;
-      const docsBaseDir = join(repoDir, 'docs', 'ai-pipeline', docsDirName);
+      const docsDirName =
+        (payload.sessionFolderName || '').trim() ||
+        buildWorkspaceSessionFolderName(payload.requirementTitle || pipelineName);
+      const docsBaseDir = join(repoDir, 'docs', docsDirName);
       await mkdir(docsBaseDir, { recursive: true });
       await this.runGit(['config', 'user.name', payload.operator || 'rd-pipeline-bot'], repoDir, gitEnv);
       await this.runGit(
@@ -187,10 +195,10 @@ export class PipelineGitService {
       const fsFileName = 'fs-spec.md';
       const tsFileName = 'ts-spec.md';
       const cpFileName = 'plan.md';
-      const prdRel = join('docs', 'ai-pipeline', docsDirName, prdFileName).replace(/\\/g, '/');
-      const fsRel = join('docs', 'ai-pipeline', docsDirName, fsFileName).replace(/\\/g, '/');
-      const tsRel = join('docs', 'ai-pipeline', docsDirName, tsFileName).replace(/\\/g, '/');
-      const cpRel = join('docs', 'ai-pipeline', docsDirName, cpFileName).replace(/\\/g, '/');
+      const prdRel = join('docs', docsDirName, prdFileName).replace(/\\/g, '/');
+      const fsRel = join('docs', docsDirName, fsFileName).replace(/\\/g, '/');
+      const tsRel = join('docs', docsDirName, tsFileName).replace(/\\/g, '/');
+      const cpRel = join('docs', docsDirName, cpFileName).replace(/\\/g, '/');
       await writeFile(join(docsBaseDir, prdFileName), this.renderPrdMarkdown(latestPrd, payload), 'utf8');
       await writeFile(join(docsBaseDir, fsFileName), this.renderFsMarkdown(latestSpec, payload), 'utf8');
       await writeFile(join(docsBaseDir, tsFileName), this.renderTsMarkdown(latestSpec, payload), 'utf8');
@@ -299,21 +307,6 @@ esac
       RD_GIT_USERNAME: (gitUsername || '').trim() || 'git',
       RD_GIT_PAT: token,
     };
-  }
-
-  private slugify(value: string) {
-    return value
-      .trim()
-      .toLowerCase()
-      .replace(/[^\w\u4e00-\u9fa5-]+/g, '-')
-      .replace(/-{2,}/g, '-')
-      .replace(/^-+|-+$/g, '') || 'untitled';
-  }
-
-  private timestamp() {
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
   }
 
   private renderPrdMarkdown(prd: IPipelinePrdDocInput, payload: IPublishPipelineDocsPayload) {

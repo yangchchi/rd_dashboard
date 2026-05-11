@@ -73,6 +73,7 @@ import {
   pipelineStatusConfig,
   publishedDocsFromPublishResult,
 } from '@/lib/pipeline-page-utils';
+import { buildWorkspaceSessionFolderName, resolveWorkspaceProductSlug } from '@shared/pipeline-workspace-path';
 import { AgentWorkbenchPanel } from './AgentWorkbenchPanel';
 import { toast } from 'sonner';
 
@@ -477,6 +478,16 @@ const AIPipelinePage: React.FC = () => {
 
     setIsPublishingDocs(true);
     try {
+      const docSessionAt = new Date();
+      const workspaceSessionFolder = buildWorkspaceSessionFolderName(
+        selectedRequirement?.title || createForm.name.trim(),
+        docSessionAt,
+      );
+      const workspaceProductSlug = resolveWorkspaceProductSlug({
+        productIdentifier: productForSelectedRequirement?.identifier,
+        productId: productForSelectedRequirement?.id,
+        requirementProductKey: selectedRequirement?.product,
+      });
       const payload = {
         pipelineName: createForm.name.trim(),
         requirementTitle: selectedRequirement?.title || createForm.name.trim(),
@@ -488,6 +499,8 @@ const AIPipelinePage: React.FC = () => {
         operator: currentProfile?.name || currentProfile?.email || 'unknown',
         prds: selectedPrds,
         specs: selectedSpecs,
+        productSlug: workspaceProductSlug,
+        sessionFolderName: workspaceSessionFolder,
       };
 
       const publishUrls = [
@@ -602,6 +615,8 @@ const AIPipelinePage: React.FC = () => {
           prdIds: selectedPrds.map((p) => p.id),
           specIds: selectedSpecs.map((s) => s.id),
           publishedDocuments: publishedDocsFromPublishResult(publishResult),
+          workspaceProductSlug,
+          workspaceSessionFolder,
         },
         commitStore: commitStorePayload,
         ...rdAuditCreate(),
