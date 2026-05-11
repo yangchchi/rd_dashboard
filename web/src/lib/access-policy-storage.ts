@@ -174,6 +174,7 @@ export function seedDefaultRoles(): AccessRoleRecord[] {
       'page.pipeline',
       'page.acceptance',
       'page.products',
+      'action.ai.invoke',
     ],
   };
   const pm: AccessRoleRecord = {
@@ -190,6 +191,7 @@ export function seedDefaultRoles(): AccessRoleRecord[] {
       'page.acceptance',
       'page.products',
       'page.org_spec',
+      'action.ai.invoke',
     ],
   };
   const tm: AccessRoleRecord = {
@@ -208,6 +210,7 @@ export function seedDefaultRoles(): AccessRoleRecord[] {
       'page.products',
       'page.org_spec',
       'page.plugins',
+      'action.ai.invoke',
     ],
   };
   const admin: AccessRoleRecord = {

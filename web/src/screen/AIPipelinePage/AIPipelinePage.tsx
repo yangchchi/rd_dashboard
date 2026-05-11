@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCurrentUserProfile } from '@/hooks/useCurrentUserProfile';
 import { capabilityClient } from '@/lib/capability-client';
@@ -25,7 +25,6 @@ import {
   Pause, 
   RotateCcw, 
   XCircle, 
-  CheckCircle2, 
   AlertCircle,
   Terminal,
   BarChart3,
@@ -33,12 +32,19 @@ import {
   ExternalLink,
   Code2,
   FileCheck,
+  CheckCircle2,
   Loader2,
   Plus,
   GitCommitHorizontal,
   Download,
 } from 'lucide-react';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
+import {
+  ConfirmActionDialog,
+  PromptActionDialog,
+  type ConfirmActionState,
+  type PromptActionState,
+} from '@/components/business-ui/confirm-action-dialog';
 import { Streamdown } from '@/components/ui/streamdown';
 import { logger } from '@/lib/logger';
 import { rdAuditCreate, rdAuditUpdate } from '@/lib/rd-actor';
@@ -53,13 +59,21 @@ import {
 } from '@/lib/rd-hooks';
 import { gitBlobViewerUrl } from '@/lib/git-web-url';
 import { rdApi } from '@/lib/rd-api';
+import { getAuthToken } from '@/lib/auth';
 import type {
   IGitCommitRecord,
-  IPipelinePublishedDocument,
   IPipelineTask,
-  IProduct,
-  IRequirement,
 } from '@/lib/rd-types';
+import {
+  extractPipelineErrorMessage,
+  findProductForRequirement,
+  formatPipelineFileTimestamp,
+  isValidPipelineGitUrl,
+  pipelineLogLevelColors,
+  pipelineStatusConfig,
+  publishedDocsFromPublishResult,
+} from '@/lib/pipeline-page-utils';
+import { AgentWorkbenchPanel } from './AgentWorkbenchPanel';
 import { toast } from 'sonner';
 
 interface ICodeReviewResult {
@@ -69,30 +83,6 @@ interface ICodeReviewResult {
 interface IRelationOption {
   id: string;
   label: string;
-}
-
-function extractErrorMessage(input: unknown, fallback: string): string {
-  if (!input) return fallback;
-  if (typeof input === 'string') return input;
-  if (input instanceof Error) return input.message || fallback;
-  if (Array.isArray(input)) {
-    const text = input
-      .map((item) => extractErrorMessage(item, ''))
-      .filter((item) => item.trim().length > 0)
-      .join('；');
-    return text || fallback;
-  }
-  if (typeof input === 'object') {
-    const data = input as Record<string, unknown>;
-    const preferred = data.message ?? data.error ?? data.details ?? data.reason;
-    if (preferred !== undefined) {
-      const text = extractErrorMessage(preferred, '');
-      if (text) return text;
-    }
-    const json = JSON.stringify(data);
-    return json === '{}' ? fallback : json;
-  }
-  return String(input);
 }
 
 interface ICreatePipelineForm {
@@ -109,40 +99,13 @@ interface ICreatePipelineForm {
   requirementId: string;
 }
 
-/** 需求「所属产品」存的是名称；亦兼容直接填产品 id */
-function publishedDocsFromPublishResult(result: unknown): IPipelinePublishedDocument[] {
-  const r = result as { documents?: IPipelinePublishedDocument[] };
-  if (Array.isArray(r.documents) && r.documents.length > 0) return r.documents;
-  return [];
+function authJsonHeaders(): HeadersInit {
+  const token = typeof window !== 'undefined' ? getAuthToken() : null;
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 }
-
-function findProductForRequirement(
-  requirement: IRequirement | undefined,
-  products: IProduct[]
-): IProduct | undefined {
-  const key = requirement?.product?.trim();
-  if (!key) return undefined;
-  const byId = products.find((p) => p.id === key);
-  if (byId) return byId;
-  const lower = key.toLowerCase();
-  return products.find((p) => p.name.trim().toLowerCase() === lower);
-}
-
-const statusConfig: Record<string, { label: string; color: string; icon: React.ComponentType<{className?: string}> }> = {
-  code_generating: { label: '代码生成中', color: 'bg-purple-500', icon: Code2 },
-  self_testing: { label: '自动化测试中', color: 'bg-blue-500', icon: FileCheck },
-  building: { label: '构建中', color: 'bg-indigo-500', icon: Activity },
-  deploying: { label: '部署中', color: 'bg-orange-500', icon: Loader2 },
-  completed: { label: '已完成', color: 'bg-green-500', icon: CheckCircle2 },
-  failed: { label: '失败', color: 'bg-red-500', icon: XCircle },
-};
-
-const logLevelColors: Record<string, string> = {
-  info: 'text-blue-400',
-  warn: 'text-yellow-400',
-  error: 'text-red-400',
-  success: 'text-green-400',
-};
 
 const AIPipelinePage: React.FC = () => {
   const router = useRouter();
@@ -160,8 +123,8 @@ const AIPipelinePage: React.FC = () => {
   const [reviewResult, setReviewResult] = useState('');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isPublishingDocs, setIsPublishingDocs] = useState(false);
-  const [prdOptions, setPrdOptions] = useState<IRelationOption[]>([]);
-  const [specOptions, setSpecOptions] = useState<IRelationOption[]>([]);
+  const [confirmAction, setConfirmAction] = useState<ConfirmActionState | null>(null);
+  const [promptAction, setPromptAction] = useState<PromptActionState | null>(null);
   const [createForm, setCreateForm] = useState<ICreatePipelineForm>({
     name: '',
     gitUrl: '',
@@ -177,38 +140,47 @@ const AIPipelinePage: React.FC = () => {
   });
   const logsEndRef = useRef<HTMLDivElement>(null);
 
-  const formatFileTimestamp = () => {
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-  };
-
-  const selectedTask = tasks.find(t => t.id === selectedTaskId);
+  const selectedTask = useMemo(
+    () => tasks.find((t) => t.id === selectedTaskId),
+    [selectedTaskId, tasks],
+  );
   const selectedRequirement = requirements.find((r) => r.id === createForm.requirementId);
-  const requirementIdsWithPipeline = new Set(tasks.map((t) => t.requirementId));
-  const prdIdsWithSpec = new Set(specs.map((s) => s.prdId));
-  const requirementIdsWithPrd = new Set(prds.map((p) => p.requirementId));
-  const requirementIdsWithSpec = new Set(
-    prds.filter((p) => prdIdsWithSpec.has(p.id)).map((p) => p.requirementId)
+  const availableRequirementsForPipeline = useMemo(() => {
+    const requirementIdsWithPipeline = new Set(tasks.map((t) => t.requirementId));
+    const prdIdsWithSpec = new Set(specs.map((s) => s.prdId));
+    const requirementIdsWithPrd = new Set(prds.map((p) => p.requirementId));
+    const requirementIdsWithSpec = new Set(
+      prds.filter((p) => prdIdsWithSpec.has(p.id)).map((p) => p.requirementId)
+    );
+    return requirements.filter(
+      (r) =>
+        ((!requirementIdsWithPipeline.has(r.id) &&
+          requirementIdsWithPrd.has(r.id) &&
+          requirementIdsWithSpec.has(r.id)) ||
+          r.id === createForm.requirementId)
+    );
+  }, [createForm.requirementId, prds, requirements, specs, tasks]);
+  const productForSelectedRequirement = useMemo(
+    () => findProductForRequirement(selectedRequirement, products),
+    [products, selectedRequirement],
   );
-  const availableRequirementsForPipeline = requirements.filter(
-    (r) =>
-      ((!requirementIdsWithPipeline.has(r.id) &&
-        requirementIdsWithPrd.has(r.id) &&
-        requirementIdsWithSpec.has(r.id)) ||
-        r.id === createForm.requirementId)
-  );
-  const productForSelectedRequirement = findProductForRequirement(selectedRequirement, products);
+  const selectedRequirementProductGitUrl = productForSelectedRequirement?.gitUrl?.trim() ?? '';
+  const selectedRequirementProductSandboxUrl = productForSelectedRequirement?.sandboxUrl?.trim() ?? '';
+  const prdOptions = useMemo<IRelationOption[]>(() => {
+    const activeRequirementId = createForm.requirementId;
+    return prds
+      .filter((prd) => !activeRequirementId || prd.requirementId === activeRequirementId)
+      .map((prd) => ({ id: prd.id, label: prd.title || prd.id }));
+  }, [createForm.requirementId, prds]);
+  const specOptions = useMemo<IRelationOption[]>(() => {
+    const activeRequirementId = createForm.requirementId;
+    const prdIdSet = new Set(prds.filter((p) => p.requirementId === activeRequirementId).map((p) => p.id));
+    return specs
+      .filter((spec) => !activeRequirementId || prdIdSet.has(spec.prdId))
+      .map((spec) => ({ id: spec.id, label: `${spec.id} (${spec.status})` }));
+  }, [createForm.requirementId, prds, specs]);
   const defaultPipelineName = selectedRequirement ? `${selectedRequirement.title}-生产流水线` : '';
   const selectedTaskCommitStore = selectedTask?.commitStore;
-
-  const isValidGitUrl = (url: string) => {
-    const normalized = url.trim();
-    if (!normalized) return false;
-    const httpPattern = /^https?:\/\/.+\.git$/i;
-    const sshPattern = /^git@[\w.-]+:[\w./-]+\.git$/i;
-    return httpPattern.test(normalized) || sshPattern.test(normalized);
-  };
 
   const resetCreateForm = () => {
     setCreateForm({
@@ -251,7 +223,7 @@ const AIPipelinePage: React.FC = () => {
         // eslint-disable-next-line no-restricted-syntax
         const response = await globalThis.fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authJsonHeaders(),
           body: JSON.stringify(payload),
         });
         if (response.status === 404 || response.status === 403) {
@@ -259,12 +231,12 @@ const AIPipelinePage: React.FC = () => {
         }
         const result = await response.json().catch(() => ({}));
         if (!response.ok) {
-          lastError = extractErrorMessage(result, '获取 commit 记录失败');
+          lastError = extractPipelineErrorMessage(result, '获取 commit 记录失败');
           continue;
         }
         return Array.isArray(result) ? result : [];
       } catch (error) {
-        lastError = extractErrorMessage(error, '获取 commit 记录失败');
+        lastError = extractPipelineErrorMessage(error, '获取 commit 记录失败');
       }
     }
     throw new Error(lastError || '获取 commit 记录失败');
@@ -306,27 +278,11 @@ const AIPipelinePage: React.FC = () => {
     setSelectedTaskId((prev) => (tasks.some((t) => t.id === prev) ? prev : tasks[0].id));
   }, [tasks]);
 
-  useEffect(() => {
-    const activeRequirementId = createForm.requirementId;
-    const prdList = prds
-      .filter((prd) => !activeRequirementId || prd.requirementId === activeRequirementId)
-      .map((prd) => ({ id: prd.id, label: prd.title || prd.id }));
-    const prdIdSet = new Set(prds.filter((p) => p.requirementId === activeRequirementId).map((p) => p.id));
-    const specList = specs
-      .filter((spec) => !activeRequirementId || prdIdSet.has(spec.prdId))
-      .map((spec) => ({ id: spec.id, label: `${spec.id} (${spec.status})` }));
-    setPrdOptions(prdList);
-    setSpecOptions(specList);
-  }, [prds, specs, createForm.requirementId]);
-
   /** 产品列表晚于需求加载时，在 Git/沙箱仍为空时补全 */
   useEffect(() => {
-    if (!createForm.requirementId || products.length === 0) return;
-    const req = requirements.find((r) => r.id === createForm.requirementId);
-    const p = findProductForRequirement(req, products);
-    if (!p) return;
-    const g = p.gitUrl?.trim() ?? '';
-    const s = p.sandboxUrl?.trim() ?? '';
+    if (!createForm.requirementId) return;
+    const g = selectedRequirementProductGitUrl;
+    const s = selectedRequirementProductSandboxUrl;
     if (!g && !s) return;
     setCreateForm((prev) => {
       const nextGit = prev.gitUrl.trim() ? prev.gitUrl : g;
@@ -334,7 +290,7 @@ const AIPipelinePage: React.FC = () => {
       if (nextGit === prev.gitUrl && nextSandbox === prev.sandboxUrl) return prev;
       return { ...prev, gitUrl: nextGit, sandboxUrl: nextSandbox };
     });
-  }, [createForm.requirementId, products, requirements]);
+  }, [createForm.requirementId, selectedRequirementProductGitUrl, selectedRequirementProductSandboxUrl]);
 
   const handleAction = async (action: 'pause' | 'retry' | 'rollback', taskId: string) => {
     const task = tasks.find((t) => t.id === taskId);
@@ -364,11 +320,9 @@ const AIPipelinePage: React.FC = () => {
     setSelectedTaskId(taskId);
   };
 
-  const handleEditTask = async (taskId: string) => {
+  const renamePipelineTask = async (taskId: string, nextName: string) => {
     const target = tasks.find((t) => t.id === taskId);
     if (!target) return;
-    const nextName = window.prompt('请输入新的流水线名称', target.requirementTitle);
-    if (!nextName || !nextName.trim()) return;
     try {
       await upsertPipelineTask.mutateAsync({
         ...target,
@@ -382,8 +336,7 @@ const AIPipelinePage: React.FC = () => {
     }
   };
 
-  const handleDeleteTask = async (taskId: string) => {
-    if (!window.confirm('确认删除该流水线任务吗？')) return;
+  const deletePipelineTaskById = async (taskId: string) => {
     try {
       await deletePipelineTask.mutateAsync(taskId);
       toast.success('已删除');
@@ -393,6 +346,38 @@ const AIPipelinePage: React.FC = () => {
     }
   };
 
+  const handleEditTask = (taskId: string) => {
+    const target = tasks.find((t) => t.id === taskId);
+    if (!target) return;
+    setPromptAction({
+      title: '重命名流水线',
+      description: '更新后会同步显示在流水线列表和详情区域。',
+      label: '流水线名称',
+      initialValue: target.requirementTitle,
+      confirmLabel: '保存',
+      onConfirm: async (nextName) => {
+        setPromptAction(null);
+        await renamePipelineTask(taskId, nextName);
+      },
+    });
+  };
+
+  const handleDeleteTask = (taskId: string) => {
+    const target = tasks.find((t) => t.id === taskId);
+    setConfirmAction({
+      title: '删除流水线任务',
+      description: target
+        ? `确认删除「${target.requirementTitle}」吗？流水线日志、报告与关联元数据将一并删除。`
+        : '确认删除该流水线任务吗？流水线日志、报告与关联元数据将一并删除。',
+      confirmLabel: '删除',
+      destructive: true,
+      onConfirm: async () => {
+        setConfirmAction(null);
+        await deletePipelineTaskById(taskId);
+      },
+    });
+  };
+
   const handleDownloadDocs = async (task: IPipelineTask) => {
     try {
       const blob = await rdApi.downloadPipelineDocsZip(task.requirementId);
@@ -400,7 +385,7 @@ const AIPipelinePage: React.FC = () => {
       const anchor = window.document.createElement('a');
       const safeTitle = task.requirementTitle.replace(/[\\/:*?"<>|]/g, '_').trim() || task.requirementId;
       anchor.href = url;
-      anchor.download = `${safeTitle}-${formatFileTimestamp()}.zip`;
+      anchor.download = `${safeTitle}-${formatPipelineFileTimestamp()}.zip`;
       window.document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
@@ -454,7 +439,7 @@ const AIPipelinePage: React.FC = () => {
       toast.error('该需求已存在研发流水线，不允许重复创建');
       return;
     }
-    if (!isValidGitUrl(createForm.gitUrl)) {
+    if (!isValidPipelineGitUrl(createForm.gitUrl)) {
       toast.error('请输入有效的Git地址（https/ssh且以.git结尾）');
       return;
     }
@@ -519,29 +504,29 @@ const AIPipelinePage: React.FC = () => {
           // eslint-disable-next-line no-restricted-syntax
           const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authJsonHeaders(),
             body: JSON.stringify(payload),
           });
           result = await response.json().catch(() => ({}));
           if (response.status === 404 || response.status === 403) {
-            publishError = extractErrorMessage(result, publishError);
+            publishError = extractPipelineErrorMessage(result, publishError);
             continue;
           }
           if (!response.ok) {
-            publishError = extractErrorMessage(result, publishError);
+            publishError = extractPipelineErrorMessage(result, publishError);
             continue;
           }
           publishSuccess = true;
           break;
         } catch (error) {
-          publishError = extractErrorMessage(error, publishError);
+          publishError = extractPipelineErrorMessage(error, publishError);
         }
       }
 
       if (!publishSuccess) {
         throw new Error(publishError);
       }
-      const publishResult = result as { commitHash?: string; documents?: IPipelinePublishedDocument[] };
+      const publishResult = result as { commitHash?: string };
 
       const now = new Date();
       const taskId = `task-${Date.now()}`;
@@ -628,7 +613,7 @@ const AIPipelinePage: React.FC = () => {
       resetCreateForm();
       toast.success(`流水线创建成功，文档已提交（${publishResult.commitHash || '未知提交号'}）`);
     } catch (error) {
-      const message = extractErrorMessage(error, '提交失败');
+      const message = extractPipelineErrorMessage(error, '提交失败');
       toast.error(message);
       logger.error('创建流水线并提交文档失败:', error);
     } finally {
@@ -637,7 +622,7 @@ const AIPipelinePage: React.FC = () => {
   };
 
   const getStatusBadge = (status: string) => {
-    const config = statusConfig[status];
+    const config = pipelineStatusConfig[status];
     if (!config) return null;
     const Icon = config.icon;
     return (
@@ -664,6 +649,18 @@ const AIPipelinePage: React.FC = () => {
       `}</style>
 
       <div className="w-full space-y-6">
+        <ConfirmActionDialog
+          state={confirmAction}
+          onOpenChange={(open) => {
+            if (!open) setConfirmAction(null);
+          }}
+        />
+        <PromptActionDialog
+          state={promptAction}
+          onOpenChange={(open) => {
+            if (!open) setPromptAction(null);
+          }}
+        />
         {/* 页面标题 */}
         <section className="w-full">
           <div className="flex items-center justify-between">
@@ -828,8 +825,9 @@ const AIPipelinePage: React.FC = () => {
         {selectedTask && (
           <section className="w-full">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-4 max-w-2xl">
+              <TabsList className="grid w-full grid-cols-5 max-w-3xl">
                 <TabsTrigger value="overview">概览</TabsTrigger>
+                <TabsTrigger value="agent">Agent工作台</TabsTrigger>
                 <TabsTrigger value="logs">实时日志</TabsTrigger>
                 <TabsTrigger value="tests">测试报告</TabsTrigger>
                 <TabsTrigger value="commits">commit记录</TabsTrigger>
@@ -1030,6 +1028,13 @@ const AIPipelinePage: React.FC = () => {
                 </div>
               </TabsContent>
 
+              <TabsContent value="agent" className="mt-4">
+                <AgentWorkbenchPanel
+                  task={selectedTask}
+                  operatorName={currentProfile?.name || currentProfile?.email || 'unknown'}
+                />
+              </TabsContent>
+
               <TabsContent value="logs" className="mt-4">
                 <Card>
                   <CardHeader className="pb-3">
@@ -1043,7 +1048,7 @@ const AIPipelinePage: React.FC = () => {
                       {selectedTask.logs.map((log, index) => (
                         <div key={log.id} className="flex gap-3 py-1">
                           <span className="text-slate-500 shrink-0 w-[80px]">[{log.timestamp}]</span>
-                          <span className={`shrink-0 w-[50px] font-medium ${logLevelColors[log.level]}`}>
+                          <span className={`shrink-0 w-[50px] font-medium ${pipelineLogLevelColors[log.level]}`}>
                             {log.level.toUpperCase()}
                           </span>
                           <span className="text-slate-300 break-all">{log.message}</span>

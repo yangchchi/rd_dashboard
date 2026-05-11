@@ -17,6 +17,10 @@ import { rdAuditUpdate } from '@/lib/rd-actor';
 import { useUpsertRequirement, useDeleteRequirement } from '@/lib/rd-hooks';
 import type { IRequirement } from '@/lib/rd-types';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
+import {
+  ConfirmActionDialog,
+  type ConfirmActionState,
+} from '@/components/business-ui/confirm-action-dialog';
 
 interface IKanbanColumn {
   id: string;
@@ -53,6 +57,7 @@ export interface RequirementsKanbanProps {
   hidePageHeading?: boolean;
   pageTitle?: string;
   pageIcon?: React.ReactNode;
+  allowDragStatusChange?: boolean;
 }
 
 export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
@@ -62,6 +67,7 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
   hidePageHeading = false,
   pageTitle = '需求看板',
   pageIcon,
+  allowDragStatusChange = false,
 }) => {
   const router = useRouter();
   const currentProfile = useCurrentUserProfile();
@@ -70,6 +76,7 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
   const [filter, setFilter] = useState<RequirementsKanbanFilter>('all');
   const [draggedItem, setDraggedItem] = useState<IRequirement | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmActionState | null>(null);
 
   const scoped = filteredRequirements.filter((req) => {
     if (filter === 'mine') {
@@ -85,10 +92,12 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
     scoped.filter((r) => r.status === status);
 
   const handleDragStart = (req: IRequirement) => {
+    if (!allowDragStatusChange) return;
     setDraggedItem(req);
   };
 
   const handleDragOver = (e: React.DragEvent, columnId: string) => {
+    if (!allowDragStatusChange) return;
     e.preventDefault();
     setDragOverColumn(columnId);
   };
@@ -98,6 +107,7 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
   };
 
   const handleDrop = (e: React.DragEvent, status: IRequirement['status']) => {
+    if (!allowDragStatusChange) return;
     e.preventDefault();
     setDragOverColumn(null);
 
@@ -117,8 +127,19 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
   };
 
   const handleDeleteRequirement = (reqId: string) => {
-    if (!window.confirm('确认删除该需求吗？')) return;
-    void deleteRequirement.mutateAsync(reqId);
+    const target = filteredRequirements.find((req) => req.id === reqId);
+    setConfirmAction({
+      title: '删除需求',
+      description: target
+        ? `确认删除「${target.title}」吗？删除后关联流程数据将不可恢复。`
+        : '确认删除该需求吗？删除后关联流程数据将不可恢复。',
+      confirmLabel: '删除',
+      destructive: true,
+      onConfirm: () => {
+        setConfirmAction(null);
+        void deleteRequirement.mutateAsync(reqId);
+      },
+    });
   };
 
   const filterLabels: Record<RequirementsKanbanFilter, string> = {
@@ -186,6 +207,12 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
       `}</style>
 
       <div className="w-full kanban-container relative">
+        <ConfirmActionDialog
+          state={confirmAction}
+          onOpenChange={(open) => {
+            if (!open) setConfirmAction(null);
+          }}
+        />
         <div className="glow-orb top-0 right-0 opacity-50" />
 
         {/* {showToolbar ? (
@@ -283,7 +310,7 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
                       {columnReqs.map((req, cardIndex) => (
                         <div
                           key={req.id}
-                          draggable
+                          draggable={allowDragStatusChange}
                           onDragStart={() => handleDragStart(req)}
                           onClick={() => handleCardClick(req.id)}
                           className={`

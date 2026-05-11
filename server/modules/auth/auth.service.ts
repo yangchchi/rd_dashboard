@@ -11,7 +11,8 @@ import { DRIZZLE_DATABASE } from '../../database/database.constants';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
 
-import { hashPassword, signAuthToken, verifyPassword } from './auth.utils';
+import type { IAuthenticatedUser } from './auth-context';
+import { hashPassword, signAuthToken, verifyAuthToken, verifyPassword } from './auth.utils';
 
 export interface IUserRow {
   id: string;
@@ -66,6 +67,7 @@ const DEFAULT_PERMISSION_IDS = [
   'action.users.create',
   'action.users.delete',
   'action.users.assign_role',
+  'action.ai.invoke',
 ];
 
 @Injectable()
@@ -78,6 +80,102 @@ export class AuthService implements OnModuleInit {
 
   private getJwtExpireSec(): number {
     return Number(process.env.JWT_EXPIRES_IN_SEC || 60 * 60 * 24);
+  }
+
+  private permissionSetForBuiltInRole(roleId: string): Set<string> {
+    if (roleId === 'role_admin') return new Set(DEFAULT_PERMISSION_IDS);
+    if (roleId === 'role_stakeholder') {
+      return new Set([
+        'page.dashboard',
+        'page.requirements',
+        'page.pipeline',
+        'page.acceptance',
+        'page.products',
+        'action.ai.invoke',
+      ]);
+    }
+    if (roleId === 'role_pm') {
+      return new Set([
+        'page.dashboard',
+        'page.requirements',
+        'page.prd',
+        'page.pipeline',
+        'page.acceptance',
+        'page.products',
+        'page.org_spec',
+        'action.ai.invoke',
+      ]);
+    }
+    if (roleId === 'role_tm') {
+      return new Set([
+        'page.dashboard',
+        'page.requirements',
+        'page.prd',
+        'page.spec',
+        'page.pipeline',
+        'page.acceptance',
+        'page.products',
+        'page.org_spec',
+        'page.plugins',
+        'action.ai.invoke',
+      ]);
+    }
+    return new Set();
+  }
+
+  private async getPermissionIdsForRole(roleId: string): Promise<string[]> {
+    const result = await this.db.execute(sql`
+      SELECT permission_ids FROM rd_access_roles WHERE id = ${roleId} LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute<{ permission_ids?: unknown; permissionIds?: unknown }>(result);
+    const raw = rows[0]?.permission_ids ?? rows[0]?.permissionIds;
+    if (Array.isArray(raw)) {
+      return this.normalizePermissionIds(raw.filter((v) => typeof v === 'string') as string[]);
+    }
+    return [...this.permissionSetForBuiltInRole(roleId)];
+  }
+
+  async getUserPermissionIds(userId: string): Promise<string[]> {
+    const roleIds = await this.fetchUserRoleIds(userId);
+    if (roleIds.length === 0) {
+      const result = await this.db.execute(sql`
+        SELECT access_role_id FROM rd_users WHERE id = ${userId} LIMIT 1;
+      `);
+      const rows = this.rowsFromExecute<{ access_role_id?: string }>(result);
+      const legacy = rows[0]?.access_role_id?.trim();
+      if (legacy) roleIds.push(legacy);
+    }
+
+    const permissionSet = new Set<string>();
+    for (const roleId of roleIds) {
+      for (const permissionId of await this.getPermissionIdsForRole(roleId)) {
+        permissionSet.add(permissionId);
+      }
+    }
+    return [...permissionSet].sort();
+  }
+
+  async authenticateToken(token: string): Promise<IAuthenticatedUser> {
+    try {
+      const payload = verifyAuthToken(token, this.getJwtSecret());
+      const user = await this.getUserByUsername(payload.username);
+      if (!user || user.id !== payload.userId) {
+        throw new UnauthorizedException('登录态无效');
+      }
+      const roleIds = await this.fetchUserRoleIds(user.id);
+      const fallbackRole = user.accessRoleId?.trim();
+      const accessRoleIds = roleIds.length > 0 ? roleIds : fallbackRole ? [fallbackRole] : [];
+      const permissionIds =
+        user.username === 'admin' ? [...DEFAULT_PERMISSION_IDS] : await this.getUserPermissionIds(user.id);
+      return {
+        ...payload,
+        accessRoleIds,
+        permissionIds,
+      };
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error;
+      throw new UnauthorizedException('未登录或登录已过期');
+    }
   }
 
   private rowsFromExecute<T extends Record<string, unknown>>(result: unknown): T[] {
@@ -184,6 +282,7 @@ export class AuthService implements OnModuleInit {
     await this.migrateLegacyUserRolesIntoJunction();
     await this.ensureAccessRolesTable();
     await this.seedDefaultAccessRolesIfEmpty();
+    await this.ensureBuiltInAccessRolePermissions();
     await this.ensureDefaultAdmin();
   }
 
@@ -256,6 +355,17 @@ export class AuthService implements OnModuleInit {
     return this.normalizeAccessRoleIds(
       rows.map((r) => (typeof r.role_id === 'string' ? r.role_id : '')).filter(Boolean),
     );
+  }
+
+  async getUserAccessRoleIds(userId: string): Promise<string[]> {
+    const roleIds = await this.fetchUserRoleIds(userId);
+    if (roleIds.length > 0) return roleIds;
+    const result = await this.db.execute(sql`
+      SELECT access_role_id FROM rd_users WHERE id = ${userId} LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute<{ access_role_id?: string }>(result);
+    const legacy = rows[0]?.access_role_id?.trim();
+    return legacy ? [legacy] : [];
   }
 
   private async replaceUserAccessRoles(userId: string, roleIds: string[]): Promise<void> {
@@ -342,6 +452,7 @@ export class AuthService implements OnModuleInit {
           'page.pipeline',
           'page.acceptance',
           'page.products',
+          'action.ai.invoke',
         ],
       },
       {
@@ -358,6 +469,7 @@ export class AuthService implements OnModuleInit {
           'page.acceptance',
           'page.products',
           'page.org_spec',
+          'action.ai.invoke',
         ],
       },
       {
@@ -376,6 +488,7 @@ export class AuthService implements OnModuleInit {
           'page.products',
           'page.org_spec',
           'page.plugins',
+          'action.ai.invoke',
         ],
       },
     ];
@@ -427,6 +540,22 @@ export class AuthService implements OnModuleInit {
           permission_ids = EXCLUDED.permission_ids,
           built_in = EXCLUDED.built_in,
           updated_at = EXCLUDED.updated_at;
+      `);
+    }
+  }
+
+  private async ensureBuiltInAccessRolePermissions(): Promise<void> {
+    for (const role of this.defaultAccessRoles()) {
+      await this.db.execute(sql`
+        UPDATE rd_access_roles
+        SET permission_ids = (
+          SELECT jsonb_agg(DISTINCT value ORDER BY value)
+          FROM jsonb_array_elements_text(
+            COALESCE(rd_access_roles.permission_ids, '[]'::jsonb) || ${JSON.stringify(role.permissionIds)}::jsonb
+          ) AS t(value)
+        ),
+        updated_at = NOW()
+        WHERE id = ${role.id} AND built_in = TRUE;
       `);
     }
   }

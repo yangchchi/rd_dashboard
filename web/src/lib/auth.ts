@@ -4,6 +4,7 @@ import { clearAiSkillCache } from './ai-skills';
 const TOKEN_KEY = '__rd_auth_token';
 const USER_KEY = '__rd_auth_user';
 const USER_UPDATED_EVENT = 'rd-auth-user-updated';
+const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
 function emitStoredUserUpdated(): void {
   if (typeof window === 'undefined') return;
@@ -12,22 +13,48 @@ function emitStoredUserUpdated(): void {
 }
 
 export function getAuthToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  if (typeof window === 'undefined') return null;
+  const localToken = safeStorageGet(localStorage, TOKEN_KEY);
+  if (localToken) return localToken;
+  const sessionToken = safeStorageGet(sessionStorage, TOKEN_KEY);
+  if (sessionToken) {
+    safeStorageSet(localStorage, TOKEN_KEY, sessionToken);
+    return sessionToken;
+  }
+  const cookieToken = getCookieValue(TOKEN_KEY);
+  if (cookieToken) {
+    safeStorageSet(localStorage, TOKEN_KEY, cookieToken);
+    safeStorageSet(sessionStorage, TOKEN_KEY, cookieToken);
+    return cookieToken;
+  }
+  return null;
 }
 
 export function getCurrentUser(): IUser | null {
-  const raw = localStorage.getItem(USER_KEY);
+  if (typeof window === 'undefined') return null;
+  const raw =
+    safeStorageGet(localStorage, USER_KEY) ||
+    safeStorageGet(sessionStorage, USER_KEY) ||
+    getCookieValue(USER_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as IUser;
+    const user = JSON.parse(raw) as IUser;
+    safeStorageSet(localStorage, USER_KEY, JSON.stringify(user));
+    safeStorageSet(sessionStorage, USER_KEY, JSON.stringify(user));
+    return user;
   } catch {
     return null;
   }
 }
 
 export function saveAuthSession(token: string, user: IUser): void {
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  const userJson = JSON.stringify(user);
+  safeStorageSet(localStorage, TOKEN_KEY, token);
+  safeStorageSet(localStorage, USER_KEY, userJson);
+  safeStorageSet(sessionStorage, TOKEN_KEY, token);
+  safeStorageSet(sessionStorage, USER_KEY, userJson);
+  setCookieValue(TOKEN_KEY, token);
+  setCookieValue(USER_KEY, userJson);
   clearAiSkillCache();
   if (typeof window !== 'undefined') {
     try {
@@ -47,8 +74,12 @@ export function saveAuthSession(token: string, user: IUser): void {
 }
 
 export function clearAuthSession(): void {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  safeStorageRemove(localStorage, TOKEN_KEY);
+  safeStorageRemove(localStorage, USER_KEY);
+  safeStorageRemove(sessionStorage, TOKEN_KEY);
+  safeStorageRemove(sessionStorage, USER_KEY);
+  clearCookieValue(TOKEN_KEY);
+  clearCookieValue(USER_KEY);
   clearAiSkillCache();
   emitStoredUserUpdated();
 }
@@ -64,7 +95,10 @@ export function updateStoredCurrentUser(
     ...updates,
     updatedAt: new Date().toISOString(),
   };
-  localStorage.setItem(USER_KEY, JSON.stringify(next));
+  const userJson = JSON.stringify(next);
+  safeStorageSet(localStorage, USER_KEY, userJson);
+  safeStorageSet(sessionStorage, USER_KEY, userJson);
+  setCookieValue(USER_KEY, userJson);
   emitStoredUserUpdated();
   return next;
 }
@@ -73,4 +107,53 @@ export function onStoredUserUpdated(listener: () => void): () => void {
   if (typeof window === 'undefined') return () => {};
   window.addEventListener(USER_UPDATED_EVENT, listener);
   return () => window.removeEventListener(USER_UPDATED_EVENT, listener);
+}
+
+function safeStorageGet(storage: Storage | undefined, key: string): string | null {
+  try {
+    return storage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function safeStorageSet(storage: Storage | undefined, key: string, value: string): void {
+  try {
+    storage?.setItem(key, value);
+  } catch {
+    // ignore storage quota / private mode
+  }
+}
+
+function safeStorageRemove(storage: Storage | undefined, key: string): void {
+  try {
+    storage?.removeItem(key);
+  } catch {
+    // ignore storage quota / private mode
+  }
+}
+
+function getCookieValue(key: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const prefix = `${encodeURIComponent(key)}=`;
+  const match = document.cookie
+    .split(';')
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(prefix));
+  if (!match) return null;
+  try {
+    return decodeURIComponent(match.slice(prefix.length));
+  } catch {
+    return null;
+  }
+}
+
+function setCookieValue(key: string, value: string): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${encodeURIComponent(key)}=${encodeURIComponent(value)}; Path=/; Max-Age=${COOKIE_MAX_AGE_SECONDS}; SameSite=Lax`;
+}
+
+function clearCookieValue(key: string): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${encodeURIComponent(key)}=; Path=/; Max-Age=0; SameSite=Lax`;
 }

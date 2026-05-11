@@ -1,29 +1,42 @@
 import type {
   IAcceptanceRecord,
+  IAgentSession,
+  IAgentExecutionEvent,
+  IAgentTask,
+  IAgentToolCall,
+  IAgentWorkspace,
+  IAgentWorkspaceProvisionResult,
   IBountyTask,
+  IContextPack,
   IOrganizationSpecConfig,
   IPipelineCommitStore,
   IPipelineLogEntry,
   IPipelineMeta,
   IPipelineQualityMetrics,
+  IPipelineRun,
+  IPipelineStepRun,
   IPipelineTask,
   IPipelineTestReport,
   IPrd,
   IProduct,
   IRequirement,
+  IRequirementFlowEvent,
   ITaskAcceptanceRecord,
   ISpecification,
   IAiSkillConfig,
   ISiteMessage,
 } from './rd-types';
+import { getAuthToken } from './auth';
 
 const BASE = '/api/rd';
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = typeof window !== 'undefined' ? getAuthToken() : null;
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
   });
@@ -124,6 +137,20 @@ function mapRequirement(r: Record<string, unknown>): IRequirement {
     aiCategory: (r.aiCategory as string) || (r.ai_category as string) || undefined,
     createdBy: (r.createdBy as string) || (r.created_by as string) || undefined,
     updatedBy: (r.updatedBy as string) || (r.updated_by as string) || undefined,
+  };
+}
+
+function mapRequirementFlowEvent(r: Record<string, unknown>): IRequirementFlowEvent {
+  return {
+    id: String(r.id || ''),
+    requirementId: String(r.requirementId || r.requirement_id || ''),
+    fromStatus: (r.fromStatus as IRequirementFlowEvent['fromStatus']) || (r.from_status as IRequirementFlowEvent['fromStatus']) || null,
+    toStatus: (r.toStatus as IRequirementFlowEvent['toStatus']) || (r.to_status as IRequirementFlowEvent['toStatus']),
+    action: String(r.action || ''),
+    operator: (r.operator as string) || undefined,
+    comment: (r.comment as string) || undefined,
+    metadata: (r.metadata as Record<string, unknown>) || {},
+    createdAt: (r.createdAt as string) || (r.created_at as string),
   };
 }
 
@@ -234,6 +261,13 @@ export const rdApi = {
   async getRequirement(id: string): Promise<IRequirement | null> {
     const r = await json<Record<string, unknown> | null>(`/requirements/${encodeURIComponent(id)}`);
     return r ? mapRequirement(r) : null;
+  },
+
+  async listRequirementFlowEvents(requirementId: string): Promise<IRequirementFlowEvent[]> {
+    const rows = await json<Record<string, unknown>[]>(
+      `/requirements/${encodeURIComponent(requirementId)}/flow-events`
+    );
+    return rows.map(mapRequirementFlowEvent);
   },
 
   async upsertRequirement(body: Partial<IRequirement> & { id: string }): Promise<IRequirement> {
@@ -473,8 +507,309 @@ export const rdApi = {
     await json(`/pipeline-tasks/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 
+  async listPipelineRuns(requirementId?: string): Promise<IPipelineRun[]> {
+    const query = requirementId ? `?requirementId=${encodeURIComponent(requirementId)}` : '';
+    const rows = await json<Record<string, unknown>[]>(`/pipeline-runs${query}`);
+    return rows.map(mapPipelineRun);
+  },
+
+  async getPipelineRun(id: string): Promise<IPipelineRun | null> {
+    const row = await json<Record<string, unknown> | null>(`/pipeline-runs/${encodeURIComponent(id)}`);
+    return row ? mapPipelineRun(row) : null;
+  },
+
+  async createPipelineRun(body: Partial<IPipelineRun> & { requirementId: string }): Promise<IPipelineRun> {
+    const raw = await json<Record<string, unknown>>('/pipeline-runs', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return mapPipelineRun(raw);
+  },
+
+  async listPipelineStepRuns(pipelineRunId: string): Promise<IPipelineStepRun[]> {
+    const rows = await json<Record<string, unknown>[]>(
+      `/pipeline-runs/${encodeURIComponent(pipelineRunId)}/steps`
+    );
+    return rows.map(mapPipelineStepRun);
+  },
+
+  async upsertPipelineStepRun(
+    body: Partial<IPipelineStepRun> & { pipelineRunId: string; stepKey: string; name: string }
+  ): Promise<IPipelineStepRun> {
+    const raw = await json<Record<string, unknown>>('/pipeline-step-runs', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    return mapPipelineStepRun(raw);
+  },
+
+  async listAgentSessions(filters?: {
+    pipelineRunId?: string;
+    requirementId?: string;
+  }): Promise<IAgentSession[]> {
+    const params = new URLSearchParams();
+    if (filters?.pipelineRunId) params.set('pipelineRunId', filters.pipelineRunId);
+    if (filters?.requirementId) params.set('requirementId', filters.requirementId);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const rows = await json<Record<string, unknown>[]>(`/agent-sessions${query}`);
+    return rows.map(mapAgentSession);
+  },
+
+  async getAgentSession(id: string): Promise<IAgentSession | null> {
+    const row = await json<Record<string, unknown> | null>(`/agent-sessions/${encodeURIComponent(id)}`);
+    return row ? mapAgentSession(row) : null;
+  },
+
+  async createAgentSession(
+    body: Partial<IAgentSession> & { requirementId: string; title: string }
+  ): Promise<IAgentSession> {
+    const raw = await json<Record<string, unknown>>('/agent-sessions', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return mapAgentSession(raw);
+  },
+
+  async listAgentTasks(sessionId: string): Promise<IAgentTask[]> {
+    const rows = await json<Record<string, unknown>[]>(
+      `/agent-sessions/${encodeURIComponent(sessionId)}/tasks`
+    );
+    return rows.map(mapAgentTask);
+  },
+
+  async upsertAgentTask(
+    body: Partial<IAgentTask> & { sessionId: string; role: IAgentTask['role']; title: string }
+  ): Promise<IAgentTask> {
+    const raw = await json<Record<string, unknown>>('/agent-tasks', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    return mapAgentTask(raw);
+  },
+
+  async listAgentToolCalls(sessionId: string, taskId?: string): Promise<IAgentToolCall[]> {
+    const query = taskId ? `?taskId=${encodeURIComponent(taskId)}` : '';
+    const rows = await json<Record<string, unknown>[]>(
+      `/agent-sessions/${encodeURIComponent(sessionId)}/tool-calls${query}`
+    );
+    return rows.map(mapAgentToolCall);
+  },
+
+  async upsertAgentToolCall(
+    body: Partial<IAgentToolCall> & { sessionId: string; toolName: string }
+  ): Promise<IAgentToolCall> {
+    const raw = await json<Record<string, unknown>>('/agent-tool-calls', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    return mapAgentToolCall(raw);
+  },
+
+  async prepareAgentToolCall(
+    body: Partial<IAgentToolCall> & {
+      sessionId: string;
+      toolName: string;
+      toolCategory: IAgentToolCall['toolCategory'];
+      timeoutMs?: number | null;
+    }
+  ): Promise<IAgentToolCall> {
+    const raw = await json<Record<string, unknown>>('/agent-tool-calls/prepare', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return mapAgentToolCall(raw);
+  },
+
+  async approveAgentToolCall(
+    id: string,
+    body: { approved: boolean; approver?: string | null; reason?: string | null }
+  ): Promise<IAgentToolCall> {
+    const raw = await json<Record<string, unknown>>(`/agent-tool-calls/${encodeURIComponent(id)}/approval`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return mapAgentToolCall(raw);
+  },
+
+  async startAgentToolCall(id: string): Promise<IAgentToolCall> {
+    const raw = await json<Record<string, unknown>>(`/agent-tool-calls/${encodeURIComponent(id)}/start`, {
+      method: 'POST',
+    });
+    return mapAgentToolCall(raw);
+  },
+
+  async cancelAgentToolCallExecution(id: string): Promise<IAgentToolCall> {
+    const raw = await json<Record<string, unknown>>(`/agent-tool-calls/${encodeURIComponent(id)}/cancel-execution`, {
+      method: 'POST',
+    });
+    return mapAgentToolCall(raw);
+  },
+
+  async *runAgentToolCallWithCodex(
+    id: string,
+    body: { prompt?: string | null; model?: string | null }
+  ): AsyncIterable<IAgentExecutionEvent> {
+    const token = typeof window !== 'undefined' ? getAuthToken() : null;
+    const response = await fetch(`${BASE}/agent-tool-calls/${encodeURIComponent(id)}/run-codex`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok || !response.body) {
+      const text = await response.text().catch(() => '');
+      throw new Error(`${response.status}: ${text || 'Codex stream failed'}`);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6);
+          let parsed: {
+            status_code?: string;
+            data?: IAgentExecutionEvent & { toolCall?: Record<string, unknown> };
+            error_msg?: string;
+          };
+          try {
+            parsed = JSON.parse(raw) as typeof parsed;
+          } catch {
+            continue;
+          }
+          if (parsed.status_code !== '0') {
+            throw new Error(parsed.error_msg || 'Codex stream failed');
+          }
+          if (!parsed.data) continue;
+          yield {
+            ...parsed.data,
+            toolCall: parsed.data.toolCall ? mapAgentToolCall(parsed.data.toolCall) : undefined,
+          };
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  },
+
+  async finishAgentToolCall(
+    id: string,
+    body: {
+      exitCode?: number | null;
+      outputSummary?: string | null;
+      errorMessage?: string | null;
+      durationMs?: number | null;
+    }
+  ): Promise<IAgentToolCall> {
+    const raw = await json<Record<string, unknown>>(`/agent-tool-calls/${encodeURIComponent(id)}/finish`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return mapAgentToolCall(raw);
+  },
+
+  async listAgentWorkspaces(sessionId: string): Promise<IAgentWorkspace[]> {
+    const rows = await json<Record<string, unknown>[]>(
+      `/agent-sessions/${encodeURIComponent(sessionId)}/workspaces`
+    );
+    return rows.map(mapAgentWorkspace);
+  },
+
+  async upsertAgentWorkspace(
+    body: Partial<IAgentWorkspace> & {
+      sessionId: string;
+      repoUrl: string;
+      baseBranch: string;
+      agentBranch: string;
+    }
+  ): Promise<IAgentWorkspace> {
+    const raw = await json<Record<string, unknown>>('/agent-workspaces', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    return mapAgentWorkspace(raw);
+  },
+
+  async provisionAgentWorkspace(body: {
+    sessionId: string;
+    repoUrl: string;
+    baseBranch?: string | null;
+    agentBranch?: string | null;
+    workspaceRoot?: string | null;
+    kind?: IAgentWorkspace['kind'];
+    createdBy?: string | null;
+  }): Promise<IAgentWorkspaceProvisionResult> {
+    const raw = await json<Record<string, unknown>>('/agent-workspaces/provision', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return mapAgentWorkspaceProvisionResult(raw);
+  },
+
+  async markAgentWorkspaceReady(
+    id: string,
+    body?: { baseCommit?: string | null; headCommit?: string | null; lockOwnerTaskId?: string | null }
+  ): Promise<IAgentWorkspace> {
+    const raw = await json<Record<string, unknown>>(`/agent-workspaces/${encodeURIComponent(id)}/ready`, {
+      method: 'POST',
+      body: JSON.stringify(body || {}),
+    });
+    return mapAgentWorkspace(raw);
+  },
+
+  async executeAgentWorkspaceLifecycle(id: string): Promise<IAgentWorkspaceProvisionResult> {
+    const raw = await json<Record<string, unknown>>(`/agent-workspaces/${encodeURIComponent(id)}/execute-lifecycle`, {
+      method: 'POST',
+    });
+    return mapAgentWorkspaceProvisionResult(raw);
+  },
+
+  async cleanupAgentWorkspace(id: string): Promise<IAgentWorkspaceProvisionResult> {
+    const raw = await json<Record<string, unknown>>(`/agent-workspaces/${encodeURIComponent(id)}/cleanup`, {
+      method: 'POST',
+    });
+    return mapAgentWorkspaceProvisionResult(raw);
+  },
+
+  async listContextPacks(requirementId?: string): Promise<IContextPack[]> {
+    const query = requirementId ? `?requirementId=${encodeURIComponent(requirementId)}` : '';
+    const rows = await json<Record<string, unknown>[]>(`/context-packs${query}`);
+    return rows.map(mapContextPack);
+  },
+
+  async getContextPack(id: string): Promise<IContextPack | null> {
+    const row = await json<Record<string, unknown> | null>(`/context-packs/${encodeURIComponent(id)}`);
+    return row ? mapContextPack(row) : null;
+  },
+
+  async createContextPack(body: {
+    id?: string;
+    requirementId: string;
+    prdId?: string | null;
+    specId?: string | null;
+    pipelineRunId?: string | null;
+    createdBy?: string | null;
+  }): Promise<IContextPack> {
+    const raw = await json<Record<string, unknown>>('/context-packs', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return mapContextPack(raw);
+  },
+
   async downloadPipelineDocsZip(requirementId: string): Promise<Blob> {
-    const res = await fetch(`${BASE}/pipeline-docs/download?requirementId=${encodeURIComponent(requirementId)}`);
+    const token = typeof window !== 'undefined' ? getAuthToken() : null;
+    const res = await fetch(`${BASE}/pipeline-docs/download?requirementId=${encodeURIComponent(requirementId)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
     if (!res.ok) {
       const t = await res.text();
       throw new Error(`${res.status}: ${t}`);
@@ -624,5 +959,188 @@ function mapPipelineTask(row: Record<string, unknown>): IPipelineTask {
     updatedAt: (row.updatedAt as string) || (row.updated_at as string),
     createdBy: (row.createdBy as string) || (row.created_by as string) || undefined,
     updatedBy: (row.updatedBy as string) || (row.updated_by as string) || undefined,
+  };
+}
+
+function mapPipelineRun(row: Record<string, unknown>): IPipelineRun {
+  return {
+    id: row.id as string,
+    pipelineTaskId: (row.pipelineTaskId as string) || (row.pipeline_task_id as string) || undefined,
+    requirementId: (row.requirementId as string) || (row.requirement_id as string),
+    status: row.status as IPipelineRun['status'],
+    triggerMode:
+      ((row.triggerMode as IPipelineRun['triggerMode']) ||
+        (row.trigger_mode as IPipelineRun['triggerMode']) ||
+        'manual'),
+    contextSnapshot:
+      ((row.contextSnapshot as Record<string, unknown>) ||
+        (row.context_snapshot as Record<string, unknown>) ||
+        {}),
+    startedAt: (row.startedAt as string) || (row.started_at as string) || undefined,
+    finishedAt: (row.finishedAt as string) || (row.finished_at as string) || undefined,
+    createdAt: (row.createdAt as string) || (row.created_at as string),
+    updatedAt: (row.updatedAt as string) || (row.updated_at as string),
+    createdBy: (row.createdBy as string) || (row.created_by as string) || undefined,
+    updatedBy: (row.updatedBy as string) || (row.updated_by as string) || undefined,
+  };
+}
+
+function mapPipelineStepRun(row: Record<string, unknown>): IPipelineStepRun {
+  return {
+    id: row.id as string,
+    pipelineRunId: (row.pipelineRunId as string) || (row.pipeline_run_id as string),
+    stepKey: (row.stepKey as string) || (row.step_key as string),
+    name: row.name as string,
+    status: row.status as IPipelineStepRun['status'],
+    orderIndex: Number(row.orderIndex ?? row.order_index ?? 0),
+    inputRef: (row.inputRef as string) || (row.input_ref as string) || undefined,
+    outputRef: (row.outputRef as string) || (row.output_ref as string) || undefined,
+    errorCode: (row.errorCode as string) || (row.error_code as string) || undefined,
+    errorMessage: (row.errorMessage as string) || (row.error_message as string) || undefined,
+    startedAt: (row.startedAt as string) || (row.started_at as string) || undefined,
+    finishedAt: (row.finishedAt as string) || (row.finished_at as string) || undefined,
+    createdAt: (row.createdAt as string) || (row.created_at as string),
+    updatedAt: (row.updatedAt as string) || (row.updated_at as string),
+  };
+}
+
+function mapAgentSession(row: Record<string, unknown>): IAgentSession {
+  return {
+    id: row.id as string,
+    pipelineRunId: (row.pipelineRunId as string) || (row.pipeline_run_id as string) || undefined,
+    requirementId: (row.requirementId as string) || (row.requirement_id as string),
+    specId: (row.specId as string) || (row.spec_id as string) || undefined,
+    contextPackId: (row.contextPackId as string) || (row.context_pack_id as string) || undefined,
+    title: String(row.title || ''),
+    status: row.status as IAgentSession['status'],
+    runtimeAdapter:
+      ((row.runtimeAdapter as IAgentSession['runtimeAdapter']) ||
+        (row.runtime_adapter as IAgentSession['runtimeAdapter']) ||
+        'custom'),
+    model: (row.model as string) || undefined,
+    baseBranch: (row.baseBranch as string) || (row.base_branch as string) || undefined,
+    agentBranch: (row.agentBranch as string) || (row.agent_branch as string) || undefined,
+    planMarkdown: (row.planMarkdown as string) || (row.plan_markdown as string) || undefined,
+    riskLevel:
+      ((row.riskLevel as IAgentSession['riskLevel']) ||
+        (row.risk_level as IAgentSession['riskLevel']) ||
+        'medium'),
+    metadata:
+      ((row.metadata as Record<string, unknown>) ||
+        {}),
+    createdAt: (row.createdAt as string) || (row.created_at as string),
+    updatedAt: (row.updatedAt as string) || (row.updated_at as string),
+    createdBy: (row.createdBy as string) || (row.created_by as string) || undefined,
+    updatedBy: (row.updatedBy as string) || (row.updated_by as string) || undefined,
+  };
+}
+
+function mapAgentTask(row: Record<string, unknown>): IAgentTask {
+  return {
+    id: row.id as string,
+    sessionId: (row.sessionId as string) || (row.session_id as string),
+    pipelineStepRunId:
+      (row.pipelineStepRunId as string) || (row.pipeline_step_run_id as string) || undefined,
+    parentTaskId: (row.parentTaskId as string) || (row.parent_task_id as string) || undefined,
+    role: row.role as IAgentTask['role'],
+    title: String(row.title || ''),
+    instructions: String(row.instructions || ''),
+    status: row.status as IAgentTask['status'],
+    orderIndex: Number(row.orderIndex ?? row.order_index ?? 0),
+    locked: Boolean(row.locked ?? false),
+    requiresApproval: Boolean(row.requiresApproval ?? row.requires_approval ?? false),
+    metadata: (row.metadata as Record<string, unknown>) || {},
+    startedAt: (row.startedAt as string) || (row.started_at as string) || undefined,
+    finishedAt: (row.finishedAt as string) || (row.finished_at as string) || undefined,
+    createdAt: (row.createdAt as string) || (row.created_at as string),
+    updatedAt: (row.updatedAt as string) || (row.updated_at as string),
+  };
+}
+
+function mapAgentToolCall(row: Record<string, unknown>): IAgentToolCall {
+  const exitCodeRaw = row.exitCode ?? row.exit_code;
+  const durationRaw = row.durationMs ?? row.duration_ms;
+  return {
+    id: row.id as string,
+    sessionId: (row.sessionId as string) || (row.session_id as string),
+    taskId: (row.taskId as string) || (row.task_id as string) || undefined,
+    workspaceId: (row.workspaceId as string) || (row.workspace_id as string) || undefined,
+    toolName: String(row.toolName || row.tool_name || ''),
+    toolCategory:
+      ((row.toolCategory as IAgentToolCall['toolCategory']) ||
+        (row.tool_category as IAgentToolCall['toolCategory']) ||
+        'other'),
+    status: row.status as IAgentToolCall['status'],
+    approvalStatus:
+      ((row.approvalStatus as IAgentToolCall['approvalStatus']) ||
+        (row.approval_status as IAgentToolCall['approvalStatus']) ||
+        'not_required'),
+    riskLevel:
+      ((row.riskLevel as IAgentToolCall['riskLevel']) ||
+        (row.risk_level as IAgentToolCall['riskLevel']) ||
+        'low'),
+    inputSummary: String(row.inputSummary || row.input_summary || ''),
+    outputSummary: (row.outputSummary as string) || (row.output_summary as string) || undefined,
+    command: (row.command as string) || undefined,
+    exitCode: exitCodeRaw != null ? Number(exitCodeRaw) : undefined,
+    durationMs: durationRaw != null ? Number(durationRaw) : undefined,
+    metadata: (row.metadata as Record<string, unknown>) || {},
+    startedAt: (row.startedAt as string) || (row.started_at as string) || undefined,
+    finishedAt: (row.finishedAt as string) || (row.finished_at as string) || undefined,
+    createdAt: (row.createdAt as string) || (row.created_at as string),
+    updatedAt: (row.updatedAt as string) || (row.updated_at as string),
+  };
+}
+
+function mapAgentWorkspace(row: Record<string, unknown>): IAgentWorkspace {
+  return {
+    id: row.id as string,
+    sessionId: (row.sessionId as string) || (row.session_id as string),
+    pipelineRunId: (row.pipelineRunId as string) || (row.pipeline_run_id as string) || undefined,
+    kind: row.kind as IAgentWorkspace['kind'],
+    status: row.status as IAgentWorkspace['status'],
+    repoUrl: String(row.repoUrl || row.repo_url || ''),
+    baseBranch: String(row.baseBranch || row.base_branch || ''),
+    agentBranch: String(row.agentBranch || row.agent_branch || ''),
+    worktreePath: (row.worktreePath as string) || (row.worktree_path as string) || undefined,
+    baseCommit: (row.baseCommit as string) || (row.base_commit as string) || undefined,
+    headCommit: (row.headCommit as string) || (row.head_commit as string) || undefined,
+    lockOwnerTaskId:
+      (row.lockOwnerTaskId as string) || (row.lock_owner_task_id as string) || undefined,
+    isWriteLocked: Boolean(row.isWriteLocked ?? row.is_write_locked ?? false),
+    metadata: (row.metadata as Record<string, unknown>) || {},
+    createdAt: (row.createdAt as string) || (row.created_at as string),
+    updatedAt: (row.updatedAt as string) || (row.updated_at as string),
+    cleanedAt: (row.cleanedAt as string) || (row.cleaned_at as string) || undefined,
+  };
+}
+
+function mapAgentWorkspaceProvisionResult(row: Record<string, unknown>): IAgentWorkspaceProvisionResult {
+  const toolCalls = Array.isArray(row.toolCalls) ? row.toolCalls : [];
+  return {
+    workspace: mapAgentWorkspace(row.workspace as Record<string, unknown>),
+    plan: row.plan as IAgentWorkspaceProvisionResult['plan'],
+    toolCalls: toolCalls.map((toolCall) => mapAgentToolCall(toolCall as Record<string, unknown>)),
+  };
+}
+
+function mapContextPack(row: Record<string, unknown>): IContextPack {
+  return {
+    id: row.id as string,
+    requirementId: (row.requirementId as string) || (row.requirement_id as string),
+    prdId: (row.prdId as string) || (row.prd_id as string) || undefined,
+    specId: (row.specId as string) || (row.spec_id as string) || undefined,
+    pipelineRunId: (row.pipelineRunId as string) || (row.pipeline_run_id as string) || undefined,
+    version: Number(row.version ?? 1),
+    checksum: String(row.checksum || ''),
+    manifest: (row.manifest as IContextPack['manifest']) || {
+      requirementId: '',
+      generatedAt: '',
+      sources: {},
+      files: [],
+    },
+    content: (row.content as IContextPack['content']) || {},
+    createdAt: (row.createdAt as string) || (row.created_at as string),
+    createdBy: (row.createdBy as string) || (row.created_by as string) || undefined,
   };
 }

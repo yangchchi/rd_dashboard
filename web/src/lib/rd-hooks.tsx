@@ -7,11 +7,21 @@ import {
 import { rdApi } from './rd-api';
 import type {
   IAcceptanceRecord,
+  IAgentExecutionEvent,
+  IAgentSession,
+  IAgentTask,
+  IAgentToolCall,
+  IAgentWorkspace,
+  IAgentWorkspaceProvisionResult,
   IBountyTask,
+  IContextPack,
   IOrganizationSpecConfig,
+  IPipelineRun,
+  IPipelineStepRun,
   IPipelineTask,
   IPrd,
   IRequirement,
+  IRequirementFlowEvent,
   ISpecification,
 } from './rd-types';
 
@@ -20,11 +30,23 @@ export const rdSiteMessagesQueryKey = (userId: string | undefined) =>
 
 export const rdKeys = {
   requirements: ['rd', 'requirements'] as const,
+  requirementFlowEvents: (id: string | undefined) => ['rd', 'requirements', id ?? '', 'flow-events'] as const,
   prds: ['rd', 'prds'] as const,
   specs: ['rd', 'specs'] as const,
   orgSpec: ['rd', 'orgSpec'] as const,
   acceptance: ['rd', 'acceptance'] as const,
   pipelineTasks: ['rd', 'pipeline-tasks'] as const,
+  pipelineRuns: ['rd', 'pipeline-runs'] as const,
+  pipelineStepRuns: (pipelineRunId: string | undefined) =>
+    ['rd', 'pipeline-runs', pipelineRunId ?? '', 'steps'] as const,
+  agentSessions: ['rd', 'agent-sessions'] as const,
+  agentTasks: (sessionId: string | undefined) =>
+    ['rd', 'agent-sessions', sessionId ?? '', 'tasks'] as const,
+  agentToolCalls: (sessionId: string | undefined, taskId?: string) =>
+    ['rd', 'agent-sessions', sessionId ?? '', 'tool-calls', taskId ?? ''] as const,
+  agentWorkspaces: (sessionId: string | undefined) =>
+    ['rd', 'agent-sessions', sessionId ?? '', 'workspaces'] as const,
+  contextPacks: ['rd', 'context-packs'] as const,
   products: ['rd', 'products'] as const,
   bountyTasks: ['rd', 'bounty-tasks'] as const,
   bountyHuntTasks: ['rd', 'bounty-hunt-tasks'] as const,
@@ -52,12 +74,21 @@ export function useRequirement(id: string | undefined) {
   });
 }
 
+export function useRequirementFlowEvents(id: string | undefined) {
+  return useQuery<IRequirementFlowEvent[]>({
+    queryKey: rdKeys.requirementFlowEvents(id),
+    queryFn: () => (id ? rdApi.listRequirementFlowEvents(id) : Promise.resolve([])),
+    enabled: Boolean(id),
+  });
+}
+
 export function useUpsertRequirement() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Partial<IRequirement> & { id: string }) => rdApi.upsertRequirement(body),
-    onSuccess: () => {
+    onSuccess: (data) => {
       void qc.invalidateQueries({ queryKey: rdKeys.requirements });
+      void qc.invalidateQueries({ queryKey: rdKeys.requirementFlowEvents(data.id) });
     },
   });
 }
@@ -287,6 +318,359 @@ export function useDeletePipelineTask() {
     mutationFn: (id: string) => rdApi.deletePipelineTask(id),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rdKeys.pipelineTasks });
+    },
+  });
+}
+
+export function usePipelineRunsList(requirementId?: string) {
+  return useQuery({
+    queryKey: requirementId ? [...rdKeys.pipelineRuns, requirementId] : rdKeys.pipelineRuns,
+    queryFn: () => rdApi.listPipelineRuns(requirementId),
+  });
+}
+
+export function useCreatePipelineRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<IPipelineRun> & { requirementId: string }) =>
+      rdApi.createPipelineRun(body),
+    onSuccess: (run) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.pipelineRuns });
+      void qc.invalidateQueries({ queryKey: [...rdKeys.pipelineRuns, run.requirementId] });
+    },
+  });
+}
+
+export function usePipelineStepRuns(pipelineRunId: string | undefined) {
+  return useQuery({
+    queryKey: rdKeys.pipelineStepRuns(pipelineRunId),
+    queryFn: () => (pipelineRunId ? rdApi.listPipelineStepRuns(pipelineRunId) : Promise.resolve([])),
+    enabled: Boolean(pipelineRunId),
+  });
+}
+
+export function useUpsertPipelineStepRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      body: Partial<IPipelineStepRun> & { pipelineRunId: string; stepKey: string; name: string }
+    ) => rdApi.upsertPipelineStepRun(body),
+    onSuccess: (step) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.pipelineStepRuns(step.pipelineRunId) });
+    },
+  });
+}
+
+export function useAgentSessionsList(filters?: { pipelineRunId?: string; requirementId?: string }) {
+  return useQuery({
+    queryKey: [
+      ...rdKeys.agentSessions,
+      filters?.pipelineRunId ?? '',
+      filters?.requirementId ?? '',
+    ] as const,
+    queryFn: () => rdApi.listAgentSessions(filters),
+  });
+}
+
+export function useAgentSession(id: string | undefined) {
+  return useQuery({
+    queryKey: [...rdKeys.agentSessions, id ?? ''] as const,
+    queryFn: () => (id ? rdApi.getAgentSession(id) : Promise.resolve(null)),
+    enabled: Boolean(id),
+  });
+}
+
+export function useCreateAgentSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<IAgentSession> & { requirementId: string; title: string }) =>
+      rdApi.createAgentSession(body),
+    onSuccess: (session) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentSessions });
+      if (session.pipelineRunId) {
+        void qc.invalidateQueries({
+          queryKey: [...rdKeys.agentSessions, session.pipelineRunId],
+        });
+      }
+    },
+  });
+}
+
+export function useAgentTasks(sessionId: string | undefined) {
+  return useQuery({
+    queryKey: rdKeys.agentTasks(sessionId),
+    queryFn: () => (sessionId ? rdApi.listAgentTasks(sessionId) : Promise.resolve([])),
+    enabled: Boolean(sessionId),
+  });
+}
+
+export function useUpsertAgentTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      body: Partial<IAgentTask> & { sessionId: string; role: IAgentTask['role']; title: string }
+    ) => rdApi.upsertAgentTask(body),
+    onSuccess: (task) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentTasks(task.sessionId) });
+    },
+  });
+}
+
+export function useAgentToolCalls(sessionId: string | undefined, taskId?: string) {
+  return useQuery({
+    queryKey: rdKeys.agentToolCalls(sessionId, taskId),
+    queryFn: () => (sessionId ? rdApi.listAgentToolCalls(sessionId, taskId) : Promise.resolve([])),
+    enabled: Boolean(sessionId),
+  });
+}
+
+export function useUpsertAgentToolCall() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<IAgentToolCall> & { sessionId: string; toolName: string }) =>
+      rdApi.upsertAgentToolCall(body),
+    onSuccess: (toolCall) => {
+      void qc.invalidateQueries({
+        queryKey: rdKeys.agentToolCalls(toolCall.sessionId),
+      });
+      if (toolCall.taskId) {
+        void qc.invalidateQueries({
+          queryKey: rdKeys.agentToolCalls(toolCall.sessionId, toolCall.taskId),
+        });
+      }
+    },
+  });
+}
+
+export function usePrepareAgentToolCall() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      body: Partial<IAgentToolCall> & {
+        sessionId: string;
+        toolName: string;
+        toolCategory: IAgentToolCall['toolCategory'];
+        timeoutMs?: number | null;
+      }
+    ) => rdApi.prepareAgentToolCall(body),
+    onSuccess: (toolCall) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentToolCalls(toolCall.sessionId) });
+    },
+  });
+}
+
+export function useApproveAgentToolCall() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      id: string;
+      sessionId: string;
+      approved: boolean;
+      approver?: string | null;
+      reason?: string | null;
+    }) =>
+      rdApi.approveAgentToolCall(args.id, {
+        approved: args.approved,
+        approver: args.approver,
+        reason: args.reason,
+      }),
+    onSuccess: (toolCall) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentToolCalls(toolCall.sessionId) });
+      if (toolCall.taskId) {
+        void qc.invalidateQueries({
+          queryKey: rdKeys.agentToolCalls(toolCall.sessionId, toolCall.taskId),
+        });
+      }
+    },
+  });
+}
+
+export function useStartAgentToolCall() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; sessionId: string }) => rdApi.startAgentToolCall(args.id),
+    onSuccess: (toolCall) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentToolCalls(toolCall.sessionId) });
+    },
+  });
+}
+
+export function useCancelAgentToolCallExecution() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; sessionId: string }) => rdApi.cancelAgentToolCallExecution(args.id),
+    onSuccess: (toolCall) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentToolCalls(toolCall.sessionId) });
+    },
+  });
+}
+
+export function useRunAgentToolCallWithCodex() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: {
+      id: string;
+      sessionId: string;
+      prompt?: string | null;
+      model?: string | null;
+      onEvent?: (event: IAgentExecutionEvent) => void;
+    }) => {
+      let finalEvent: IAgentExecutionEvent | null = null;
+      for await (const event of rdApi.runAgentToolCallWithCodex(args.id, {
+        prompt: args.prompt,
+        model: args.model,
+      })) {
+        finalEvent = event;
+        args.onEvent?.(event);
+      }
+      return finalEvent;
+    },
+    onSettled: (_data, _error, args) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentToolCalls(args.sessionId) });
+      void qc.invalidateQueries({ queryKey: rdKeys.agentWorkspaces(args.sessionId) });
+    },
+  });
+}
+
+export function useFinishAgentToolCall() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      id: string;
+      sessionId: string;
+      exitCode?: number | null;
+      outputSummary?: string | null;
+      errorMessage?: string | null;
+      durationMs?: number | null;
+    }) =>
+      rdApi.finishAgentToolCall(args.id, {
+        exitCode: args.exitCode,
+        outputSummary: args.outputSummary,
+        errorMessage: args.errorMessage,
+        durationMs: args.durationMs,
+      }),
+    onSuccess: (toolCall) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentToolCalls(toolCall.sessionId) });
+    },
+  });
+}
+
+export function useAgentWorkspaces(sessionId: string | undefined) {
+  return useQuery({
+    queryKey: rdKeys.agentWorkspaces(sessionId),
+    queryFn: () => (sessionId ? rdApi.listAgentWorkspaces(sessionId) : Promise.resolve([])),
+    enabled: Boolean(sessionId),
+  });
+}
+
+export function useUpsertAgentWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      body: Partial<IAgentWorkspace> & {
+        sessionId: string;
+        repoUrl: string;
+        baseBranch: string;
+        agentBranch: string;
+      }
+    ) => rdApi.upsertAgentWorkspace(body),
+    onSuccess: (workspace) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentWorkspaces(workspace.sessionId) });
+    },
+  });
+}
+
+export function useProvisionAgentWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      sessionId: string;
+      repoUrl: string;
+      baseBranch?: string | null;
+      agentBranch?: string | null;
+      workspaceRoot?: string | null;
+      kind?: IAgentWorkspace['kind'];
+      createdBy?: string | null;
+    }) => rdApi.provisionAgentWorkspace(body),
+    onSuccess: (result: IAgentWorkspaceProvisionResult) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentWorkspaces(result.workspace.sessionId) });
+      void qc.invalidateQueries({ queryKey: rdKeys.agentToolCalls(result.workspace.sessionId) });
+    },
+  });
+}
+
+export function useMarkAgentWorkspaceReady() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      id: string;
+      sessionId: string;
+      baseCommit?: string | null;
+      headCommit?: string | null;
+      lockOwnerTaskId?: string | null;
+    }) =>
+      rdApi.markAgentWorkspaceReady(args.id, {
+        baseCommit: args.baseCommit,
+        headCommit: args.headCommit,
+        lockOwnerTaskId: args.lockOwnerTaskId,
+      }),
+    onSuccess: (workspace) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentWorkspaces(workspace.sessionId) });
+    },
+  });
+}
+
+export function useExecuteAgentWorkspaceLifecycle() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; sessionId: string }) => rdApi.executeAgentWorkspaceLifecycle(args.id),
+    onSuccess: (result: IAgentWorkspaceProvisionResult) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentWorkspaces(result.workspace.sessionId) });
+      void qc.invalidateQueries({ queryKey: rdKeys.agentToolCalls(result.workspace.sessionId) });
+    },
+  });
+}
+
+export function useCleanupAgentWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; sessionId: string }) => rdApi.cleanupAgentWorkspace(args.id),
+    onSuccess: (result: IAgentWorkspaceProvisionResult) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentWorkspaces(result.workspace.sessionId) });
+      void qc.invalidateQueries({ queryKey: rdKeys.agentToolCalls(result.workspace.sessionId) });
+    },
+  });
+}
+
+export function useContextPacksList(requirementId?: string) {
+  return useQuery({
+    queryKey: requirementId ? [...rdKeys.contextPacks, requirementId] : rdKeys.contextPacks,
+    queryFn: () => rdApi.listContextPacks(requirementId),
+  });
+}
+
+export function useContextPack(id: string | undefined) {
+  return useQuery({
+    queryKey: [...rdKeys.contextPacks, id ?? ''] as const,
+    queryFn: () => (id ? rdApi.getContextPack(id) : Promise.resolve(null)),
+    enabled: Boolean(id),
+  });
+}
+
+export function useCreateContextPack() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      id?: string;
+      requirementId: string;
+      prdId?: string | null;
+      specId?: string | null;
+      pipelineRunId?: string | null;
+      createdBy?: string | null;
+    }) => rdApi.createContextPack(body),
+    onSuccess: (pack: IContextPack) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.contextPacks });
+      void qc.invalidateQueries({ queryKey: [...rdKeys.contextPacks, pack.requirementId] });
     },
   });
 }

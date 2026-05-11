@@ -1,5 +1,6 @@
 import type { ILoginResponse, IUser } from './rd-types';
 import type { AccessRoleRecord } from './access-policy-storage';
+import { getAuthToken } from './auth';
 
 const BASE = '/api/auth';
 
@@ -25,10 +26,12 @@ export function getAuthActionErrorMessage(error: unknown, action: AuthAction): s
 }
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = typeof window !== 'undefined' ? getAuthToken() : null;
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers || {}),
     },
   });

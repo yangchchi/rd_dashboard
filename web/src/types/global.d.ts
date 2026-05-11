@@ -52,10 +52,7 @@ declare namespace React {
   }
 }
 
-interface ImportMetaEnv {
-  readonly VITE_ARK_API_KEY?: string;
-  readonly NEXT_PUBLIC_ARK_API_KEY?: string;
-}
+interface ImportMetaEnv {}
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;

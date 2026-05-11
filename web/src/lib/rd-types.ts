@@ -123,6 +123,18 @@ export interface IRequirement {
   updatedBy?: string;
 }
 
+export interface IRequirementFlowEvent {
+  id: string;
+  requirementId: string;
+  fromStatus?: RequirementStatus | null;
+  toStatus: RequirementStatus;
+  action: string;
+  operator?: string | null;
+  comment?: string | null;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface IFeature {
   id: string;
   name: string;
@@ -350,4 +362,239 @@ export interface IPipelineTask {
   updatedAt?: string;
   createdBy?: string;
   updatedBy?: string;
+}
+
+export type PipelineRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type PipelineStepRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
+
+export interface IPipelineRun {
+  id: string;
+  pipelineTaskId?: string | null;
+  requirementId: string;
+  status: PipelineRunStatus;
+  triggerMode: 'manual' | 'push' | 'schedule' | 'agent';
+  contextSnapshot: Record<string, unknown>;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string | null;
+  updatedBy?: string | null;
+}
+
+export interface IPipelineStepRun {
+  id: string;
+  pipelineRunId: string;
+  stepKey: string;
+  name: string;
+  status: PipelineStepRunStatus;
+  orderIndex: number;
+  inputRef?: string | null;
+  outputRef?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AgentSessionStatus =
+  | 'draft'
+  | 'planning'
+  | 'awaiting_approval'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+export type AgentTaskRole = 'planner' | 'coder' | 'tester' | 'reviewer' | 'deployer' | 'integrator';
+export type AgentTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'awaiting_approval'
+  | 'blocked'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+export type AgentToolCallStatus =
+  | 'pending'
+  | 'awaiting_approval'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+export type AgentToolApprovalStatus = 'not_required' | 'pending' | 'approved' | 'rejected';
+export type AgentRiskLevel = 'low' | 'medium' | 'high';
+export type AgentWorkspaceKind = 'clone' | 'worktree' | 'container';
+export type AgentWorkspaceStatus = 'provisioning' | 'ready' | 'dirty' | 'archived' | 'failed';
+
+export interface IAgentSession {
+  id: string;
+  pipelineRunId?: string | null;
+  requirementId: string;
+  specId?: string | null;
+  contextPackId?: string | null;
+  title: string;
+  status: AgentSessionStatus;
+  runtimeAdapter: 'codex_cli' | 'codex_cloud' | 'openclaw' | 'claude_code' | 'custom';
+  model?: string | null;
+  baseBranch?: string | null;
+  agentBranch?: string | null;
+  planMarkdown?: string | null;
+  riskLevel: AgentRiskLevel;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string | null;
+  updatedBy?: string | null;
+}
+
+export interface IAgentTask {
+  id: string;
+  sessionId: string;
+  pipelineStepRunId?: string | null;
+  parentTaskId?: string | null;
+  role: AgentTaskRole;
+  title: string;
+  instructions: string;
+  status: AgentTaskStatus;
+  orderIndex: number;
+  locked: boolean;
+  requiresApproval: boolean;
+  metadata: Record<string, unknown>;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IAgentToolCall {
+  id: string;
+  sessionId: string;
+  taskId?: string | null;
+  workspaceId?: string | null;
+  toolName: string;
+  toolCategory: 'shell' | 'git' | 'file' | 'test' | 'deploy' | 'browser' | 'ai' | 'other';
+  status: AgentToolCallStatus;
+  approvalStatus: AgentToolApprovalStatus;
+  riskLevel: AgentRiskLevel;
+  inputSummary: string;
+  outputSummary?: string | null;
+  command?: string | null;
+  exitCode?: number | null;
+  durationMs?: number | null;
+  metadata: Record<string, unknown>;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AgentExecutionEventType = 'started' | 'spawned' | 'stdout' | 'stderr' | 'heartbeat' | 'finished' | 'error';
+
+export interface IAgentExecutionEvent {
+  type: AgentExecutionEventType;
+  toolCallId: string;
+  chunk?: string;
+  status?: AgentToolCallStatus;
+  exitCode?: number | null;
+  durationMs?: number | null;
+  pid?: number | null;
+  cwd?: string | null;
+  command?: string | null;
+  stdoutBytes?: number;
+  stderrBytes?: number;
+  changedFilesCount?: number;
+  timestamp?: string;
+  message?: string;
+  toolCall?: IAgentToolCall;
+}
+
+export interface IAgentWorkspace {
+  id: string;
+  sessionId: string;
+  pipelineRunId?: string | null;
+  kind: AgentWorkspaceKind;
+  status: AgentWorkspaceStatus;
+  repoUrl: string;
+  baseBranch: string;
+  agentBranch: string;
+  worktreePath?: string | null;
+  baseCommit?: string | null;
+  headCommit?: string | null;
+  lockOwnerTaskId?: string | null;
+  isWriteLocked: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  cleanedAt?: string | null;
+}
+
+export interface IWorkspaceLifecycleCommand {
+  key: 'clone_cache' | 'fetch_base' | 'add_worktree' | 'clone_branch' | 'checkout_agent_branch' | 'cleanup_worktree';
+  toolName: string;
+  toolCategory: 'git' | 'file';
+  summary: string;
+  command: string;
+  args: string[];
+  riskLevel: AgentRiskLevel;
+  orderIndex: number;
+  cleanup?: boolean;
+}
+
+export interface IAgentWorkspaceLifecyclePlan {
+  repoUrl: string;
+  baseBranch: string;
+  agentBranch: string;
+  workspaceRoot: string;
+  cachePath: string;
+  worktreePath: string;
+  commands: IWorkspaceLifecycleCommand[];
+}
+
+export interface IAgentWorkspaceProvisionResult {
+  workspace: IAgentWorkspace;
+  plan: IAgentWorkspaceLifecyclePlan;
+  toolCalls: IAgentToolCall[];
+}
+
+export interface IContextPackFile {
+  path: string;
+  kind: 'markdown' | 'json' | 'text';
+  content: string;
+}
+
+export interface IContextPackManifest {
+  requirementId: string;
+  prdId?: string | null;
+  specId?: string | null;
+  pipelineRunId?: string | null;
+  generatedAt: string;
+  sources: {
+    requirementUpdatedAt?: string;
+    prdUpdatedAt?: string;
+    specUpdatedAt?: string;
+    orgSpecVersion?: number;
+  };
+  files: Array<{
+    path: string;
+    kind: IContextPackFile['kind'];
+    bytes: number;
+    sha256: string;
+  }>;
+}
+
+export interface IContextPack {
+  id: string;
+  requirementId: string;
+  prdId?: string | null;
+  specId?: string | null;
+  pipelineRunId?: string | null;
+  version: number;
+  checksum: string;
+  manifest: IContextPackManifest;
+  content: Record<string, IContextPackFile>;
+  createdAt: string;
+  createdBy?: string | null;
 }

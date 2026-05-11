@@ -4,6 +4,7 @@ import type {
   IPipelineTask,
   IPrd,
   IRequirement,
+  IRequirementFlowEvent,
   ISpecification,
 } from '@/lib/rd-types';
 
@@ -24,6 +25,15 @@ export interface IFlowHistoryViewer {
 }
 
 const PLACEHOLDER_OPERATOR_LABELS = new Set(['当前用户', '未知', '未知用户']);
+
+const REQUIREMENT_STATUS_LABELS: Record<IRequirement['status'], string> = {
+  backlog: '需求池',
+  prd_writing: 'PRD编写中',
+  spec_defining: '规格说明书',
+  ai_developing: 'AI开发中',
+  pending_acceptance: '待验收',
+  released: '已发布',
+};
 
 function isPlaceholderOperatorLabel(label: string): boolean {
   return PLACEHOLDER_OPERATOR_LABELS.has(label.trim());
@@ -191,4 +201,20 @@ export function buildRequirementFlowHistory(
   items.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
   return items;
+}
+
+export function buildRequirementFlowHistoryFromEvents(
+  events: IRequirementFlowEvent[],
+  viewer?: IFlowHistoryViewer | null
+): IFlowHistoryItem[] {
+  return events
+    .map((event) => ({
+      id: event.id,
+      action: event.action || (event.fromStatus ? '状态流转' : '需求创建'),
+      stage: REQUIREMENT_STATUS_LABELS[event.toStatus] || event.toStatus,
+      operator: operatorUser(event.operator, undefined, viewer),
+      timestamp: event.createdAt,
+      comment: event.comment || undefined,
+    }))
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 }

@@ -121,20 +121,13 @@ function extractChunkText(payload: unknown): string {
 }
 
 function getArkApiKey(): string | undefined {
-  // Next.js 客户端仅内联 NEXT_PUBLIC_*；Vite 风格 VITE_* 在浏览器 bundle 中通常不存在
-  if (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_ARK_API_KEY) {
-    return process.env.NEXT_PUBLIC_ARK_API_KEY;
-  }
-  if (typeof import.meta !== 'undefined' && import.meta.env && 'VITE_ARK_API_KEY' in import.meta.env) {
-    return (import.meta.env as { VITE_ARK_API_KEY?: string }).VITE_ARK_API_KEY;
-  }
   return undefined;
 }
 
 export async function runAiSkillStream(skill: IAiSkillConfig, params: IAiSkillRunParams): Promise<string> {
   const apiKey = getArkApiKey();
   if (!apiKey) {
-    throw new Error('未配置 Ark API Key：请在环境变量中设置 NEXT_PUBLIC_ARK_API_KEY（Next.js）或 VITE_ARK_API_KEY（Vite）');
+    throw new Error('浏览器端直连 Ark 已禁用。请通过服务端 capabilityClient 调用 /api/capability/:id/stream。');
   }
 
   if (skill.provider !== 'ark') {

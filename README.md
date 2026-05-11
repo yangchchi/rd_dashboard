@@ -118,13 +118,18 @@ NODE_ENV=production node server/main.js
 - `npm run dev`：本地开发（API + Next）
 - `npm run dev:server`：仅启动后端
 - `npm run dev:web`：仅启动前端（Next，默认端口 3001）
+- `npm run db:migrate`：执行数据库迁移（读取 `SUDA_DATABASE_URL`，迁移文件位于 `server/database/migrations/`）
+- `npm run db:migrate:status`：查看数据库迁移状态
 - `npm run build`：构建并整理产物
 - `npm run build:server`：仅构建后端
 - `npm run build:web`：仅构建前端
 - `npm run test`：Jest 单元测试
+- `npm run test:p0`：P0 可信底座聚焦测试（鉴权、权限、AI 能力网关、前端鉴权 header）
 - `npm run test:e2e`：e2e 测试
+- `npm run ci:check`：CI 质量门禁（服务端 typecheck、服务端/共享 ESLint、P0 聚焦测试）
 - `npm run lint`：统一 lint
 - `npm run eslint`：ESLint
+- `npm run eslint:server`：服务端与 shared ESLint
 - `npm run stylelint`：Stylelint
 - `npm run type:check`：前后端类型检查
 - `npm run format`：Prettier 格式化
@@ -136,6 +141,10 @@ NODE_ENV=production node server/main.js
 - `SERVER_PORT`：后端端口（默认 `3000`）
 - `CLIENT_DEV_PORT`：前端开发端口（默认 `3001`）
 - `API_ORIGIN`：Next 代理后端 API 时使用的 origin（见 `web/next.config.ts`）
+- `ARK_API_KEY`：服务端 AI 能力网关调用 Ark 的私有 Key。不要使用 `NEXT_PUBLIC_ARK_API_KEY` / `VITE_ARK_API_KEY`，生产 AI 调用统一经 `/api/capability/*` 转发。
+- `ARK_MODEL`：服务端默认 Ark 模型，可被数据库中的 AI Skill 配置覆盖
+- `ARK_API_ENDPOINT`：服务端默认 Ark Responses endpoint，可被数据库中的 AI Skill 配置覆盖
+- `AI_DEMO_MODE`：是否允许无模型配置时返回演示 AI 输出；生产环境应显式关闭或保持未设置
 - `LOG_DIR`：开发日志目录（默认 `logs`）
 - `MAX_RESTART_COUNT`：dev 模式最大重启次数（默认 `10`）
 - `RESTART_DELAY`：dev 模式重启初始延迟秒数（默认 `2`）

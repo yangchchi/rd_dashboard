@@ -2,6 +2,7 @@ import { Body, Controller, Param, Post, Res } from '@nestjs/common';
 import type { Response } from 'express';
 
 import { CapabilitiesService } from './capabilities.service';
+import { RequirePermissions } from '../auth/permissions.decorator';
 
 interface CapabilityBody {
   action: string;
@@ -13,11 +14,13 @@ export class CapabilitiesController {
   constructor(private readonly capabilities: CapabilitiesService) {}
 
   @Post(':capabilityId')
+  @RequirePermissions('action.ai.invoke')
   invoke(@Param('capabilityId') capabilityId: string, @Body() body: CapabilityBody) {
     return this.capabilities.invoke(capabilityId, body.action, body.params);
   }
 
   @Post(':capabilityId/stream')
+  @RequirePermissions('action.ai.invoke')
   async stream(
     @Param('capabilityId') capabilityId: string,
     @Body() body: CapabilityBody,

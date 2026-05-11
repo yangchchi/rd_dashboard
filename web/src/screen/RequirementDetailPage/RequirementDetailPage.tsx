@@ -29,12 +29,17 @@ import { logger } from '@/lib/logger';
 import {
   usePrdsList,
   useRequirement,
+  useRequirementFlowEvents,
   useSpecsList,
   useAcceptanceRecords,
   usePipelineTasksList,
 } from '@/lib/rd-hooks';
 import type { IRequirement } from '@/lib/rd-types';
-import { buildRequirementFlowHistory, type IFlowHistoryItem } from '@/lib/requirement-flow-history';
+import {
+  buildRequirementFlowHistory,
+  buildRequirementFlowHistoryFromEvents,
+  type IFlowHistoryItem,
+} from '@/lib/requirement-flow-history';
 
 interface IRelatedDoc {
   id: string;
@@ -94,6 +99,7 @@ const RequirementDetailPage: React.FC = () => {
   const { data: specs = [] } = useSpecsList();
   const { data: acceptanceRecords = [] } = useAcceptanceRecords();
   const { data: pipelineTasks = [] } = usePipelineTasksList();
+  const { data: flowEvents = [] } = useRequirementFlowEvents(id);
   const [history, setHistory] = useState<IFlowHistoryItem[]>([]);
   const [relatedDocs, setRelatedDocs] = useState<IRelatedDoc[]>([]);
   const [authVersion, setAuthVersion] = useState(0);
@@ -138,17 +144,19 @@ const RequirementDetailPage: React.FC = () => {
       });
     }
     setHistory(
-      buildRequirementFlowHistory(
-        requirement,
-        prd,
-        spec,
-        pipelineTasks,
-        acceptanceRecords,
-        getCurrentUser()
-      )
+      flowEvents.length > 0
+        ? buildRequirementFlowHistoryFromEvents(flowEvents, getCurrentUser())
+        : buildRequirementFlowHistory(
+            requirement,
+            prd,
+            spec,
+            pipelineTasks,
+            acceptanceRecords,
+            getCurrentUser()
+          )
     );
     setRelatedDocs(related);
-  }, [id, requirement, prds, specs, pipelineTasks, acceptanceRecords]);
+  }, [id, requirement, prds, specs, pipelineTasks, acceptanceRecords, flowEvents]);
 
   const handleBack = () => {
     router.push('/requirements');

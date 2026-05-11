@@ -34,15 +34,6 @@ const PRIORITY_OPTIONS = [
   { value: 'P3', label: 'P3 - 低优先级', color: 'bg-slate-500' },
 ];
 
-const STATUS_OPTIONS = [
-  { value: 'backlog', label: '需求池' },
-  { value: 'prd_writing', label: 'PRD编写中' },
-  { value: 'spec_defining', label: '规格说明书' },
-  { value: 'ai_developing', label: 'AI开发中' },
-  { value: 'pending_acceptance', label: '待验收' },
-  { value: 'released', label: '已发布' },
-];
-
 const getDefaultExpectedDate = () => {
   const date = new Date();
   date.setDate(date.getDate() + 7);
@@ -224,7 +215,7 @@ const RequirementEditPage: React.FC = () => {
         tmCandidateUserId: tmCandidateUserId.trim() || undefined,
         priority: priority as 'P0' | 'P1' | 'P2' | 'P3',
         expectedDate: expectedDate.toISOString().split('T')[0],
-        status: status as IRequirement['status'],
+        status: requirement!.status,
         updatedAt: new Date().toISOString(),
         ...rdAuditUpdate(),
       };
@@ -434,8 +425,11 @@ const RequirementEditPage: React.FC = () => {
                   <PopoverContent className="w-auto p-0" align="start">
                     <Calendar
                       mode="single"
+                      required={false}
                       selected={expectedDate}
-                      onSelect={setExpectedDate}
+                      onSelect={(date) => {
+                        if (date) setExpectedDate(date);
+                      }}
                       initialFocus
                     />
                   </PopoverContent>
@@ -467,18 +461,10 @@ const RequirementEditPage: React.FC = () => {
               {/* 需求状态 */}
               <div className="space-y-2">
                 <Label>需求状态</Label>
-                <Select value={status} onValueChange={setStatus}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择需求状态" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STATUS_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Input value={status} disabled className="bg-muted/50" />
+                <p className="text-xs text-muted-foreground">
+                  状态由研发流程动作自动流转，请在对应 PRD、规格、流水线或验收环节推进。
+                </p>
               </div>
             </CardContent>
           </Card>

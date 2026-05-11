@@ -154,6 +154,13 @@ export const ACCESS_PERMISSION_LIST: AccessPermissionDef[] = [
     group: g('actions'),
     kind: 'action',
   },
+  {
+    id: 'action.ai.invoke',
+    label: 'AI：调用插件能力',
+    description: 'PRD生成、规格生成、冲突检测、验收分析等 AI 能力调用',
+    group: g('actions'),
+    kind: 'action',
+  },
 ];
 
 export const ACCESS_PERMISSION_IDS: string[] = ACCESS_PERMISSION_LIST.map((p) => p.id);

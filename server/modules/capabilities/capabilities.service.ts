@@ -2,11 +2,24 @@ import { Injectable, Logger } from '@nestjs/common';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
+import { DEFAULT_AI_SKILLS } from '../../../shared/ai-skill-defaults';
+import { RdService } from '../rd/rd.service';
+
 /** 与 @lark-apaas/client-capability ErrorCodes.SUCCESS 一致 */
 const SUCCESS = '0';
+const ERROR = '1';
+const AI_PROVIDER_UNAVAILABLE =
+  'AI 模型服务未配置或调用失败。生产环境不会返回演示输出，请配置 ARK_API_KEY 或显式开启 AI_DEMO_MODE=true。';
 
 const DEFAULT_ARK_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/responses';
 const DEFAULT_ARK_MODEL = 'deepseek-v3-2-251201';
+
+interface AiSkillConfig {
+  endpoint?: string | null;
+  model?: string | null;
+  promptTemplate: string;
+  tools?: unknown[];
+}
 
 export interface CapabilityUnaryResponse {
   status_code: string;
@@ -15,11 +28,7 @@ export interface CapabilityUnaryResponse {
 }
 
 function getArkApiKeyFromEnv(): string | undefined {
-  return (
-    process.env.ARK_API_KEY ||
-    process.env.VITE_ARK_API_KEY ||
-    process.env.NEXT_PUBLIC_ARK_API_KEY
-  );
+  return process.env.ARK_API_KEY;
 }
 
 function isReasoningPayload(data: Record<string, unknown>): boolean {
@@ -84,6 +93,10 @@ function applyInputTemplate(template: string, params: Record<string, unknown>): 
   );
 }
 
+function applySkillTemplate(template: string, params: Record<string, unknown>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => String(params[key] ?? ''));
+}
+
 function buildPromptFromCapabilityFile(
   capabilityId: string,
   action: string,
@@ -118,8 +131,13 @@ function buildPromptFromCapabilityFile(
 export class CapabilitiesService {
   private readonly logger = new Logger(CapabilitiesService.name);
 
+  constructor(private readonly rdService: RdService) {}
+
   invoke(capabilityId: string, action: string, params: unknown): CapabilityUnaryResponse {
     const p = (params ?? {}) as Record<string, unknown>;
+    if (!this.canUseDemoOutput()) {
+      return this.unavailableUnaryResponse();
+    }
     switch (action) {
       case 'aiCategorize':
         return {
@@ -152,19 +170,32 @@ export class CapabilitiesService {
       (action === 'textGenerate' || action === 'textSummary' || action === 'textToJson');
 
     if (useArk) {
-      const prompt = buildPromptFromCapabilityFile(capabilityId, action, params);
+      const skill = await this.resolveSkillConfig(capabilityId);
+      const prompt =
+        skill && (action === 'textGenerate' || action === 'textSummary')
+          ? applySkillTemplate(skill.promptTemplate, (params ?? {}) as Record<string, unknown>)
+          : buildPromptFromCapabilityFile(capabilityId, action, params);
       if (prompt) {
         const deltaField: 'content' | 'summary' =
           action === 'textSummary' ? 'summary' : 'content';
         try {
-          yield* this.streamArkSse(prompt, apiKey, deltaField);
+          yield* this.streamArkSse(prompt, apiKey, deltaField, skill);
           return;
         } catch (e) {
-          this.logger.warn(
-            `Ark 流式调用失败，回退演示输出: ${e instanceof Error ? e.message : String(e)}`
-          );
+          const message = e instanceof Error ? e.message : String(e);
+          if (!this.canUseDemoOutput()) {
+            this.logger.error(`Ark 流式调用失败，生产环境禁止回退演示输出: ${message}`);
+            yield this.unavailableStreamEvent();
+            return;
+          }
+          this.logger.warn(`Ark 流式调用失败，回退演示输出: ${message}`);
         }
       }
+    }
+
+    if (!this.canUseDemoOutput()) {
+      yield this.unavailableStreamEvent();
+      return;
     }
 
     const chunks = this.mockStreamChunks(capabilityId, action, params);
@@ -193,10 +224,12 @@ export class CapabilitiesService {
   private async *streamArkSse(
     prompt: string,
     apiKey: string,
-    deltaField: 'content' | 'summary'
+    deltaField: 'content' | 'summary',
+    skill?: AiSkillConfig | null
   ): AsyncGenerator<string> {
-    const model = process.env.ARK_MODEL || DEFAULT_ARK_MODEL;
-    const endpoint = process.env.ARK_API_ENDPOINT || DEFAULT_ARK_ENDPOINT;
+    const model = skill?.model || process.env.ARK_MODEL || DEFAULT_ARK_MODEL;
+    const endpoint = skill?.endpoint || process.env.ARK_API_ENDPOINT || DEFAULT_ARK_ENDPOINT;
+    const tools = Array.isArray(skill?.tools) ? skill.tools : [];
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -207,7 +240,7 @@ export class CapabilitiesService {
       body: JSON.stringify({
         model,
         stream: true,
-        tools: [],
+        tools,
         input: [
           {
             role: 'user',
@@ -279,6 +312,45 @@ export class CapabilitiesService {
       },
     };
     yield `data: ${JSON.stringify(end)}\n\n`;
+  }
+
+  private async resolveSkillConfig(capabilityId: string): Promise<AiSkillConfig | null> {
+    const defaultSkill = DEFAULT_AI_SKILLS[capabilityId];
+    try {
+      const stored = await this.rdService.getAiSkill(capabilityId);
+      if (stored?.promptTemplate) {
+        return {
+          endpoint: stored.endpoint,
+          model: stored.model,
+          promptTemplate: stored.promptTemplate,
+          tools: stored.tools,
+        };
+      }
+    } catch (e) {
+      this.logger.warn(
+        `读取 AI Skill 配置失败，尝试使用内置配置: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+    return defaultSkill ?? null;
+  }
+
+  private canUseDemoOutput(): boolean {
+    if (process.env.AI_DEMO_MODE === 'true') return true;
+    return process.env.NODE_ENV !== 'production';
+  }
+
+  private unavailableUnaryResponse(): CapabilityUnaryResponse {
+    return {
+      status_code: ERROR,
+      error_msg: AI_PROVIDER_UNAVAILABLE,
+    };
+  }
+
+  private unavailableStreamEvent(): string {
+    return `data: ${JSON.stringify({
+      status_code: ERROR,
+      error_msg: AI_PROVIDER_UNAVAILABLE,
+    })}\n\n`;
   }
 
   private mockCategory(text: string | undefined): string {

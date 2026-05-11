@@ -6,8 +6,10 @@ import {
   type IPublishPipelineDocsPayload,
   type IPublishPipelineDocsResult,
 } from './pipeline-git.service';
+import { RequirePermissions } from '../auth/permissions.decorator';
 
 @Controller(['pipeline-git', 'api/pipeline-git'])
+@RequirePermissions('page.pipeline')
 export class PipelineGitController {
   constructor(private readonly pipelineGitService: PipelineGitService) {}
 

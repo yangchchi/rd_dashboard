@@ -50,8 +50,7 @@ import {
   useUpsertSpec,
 } from '@/lib/rd-hooks';
 import { toast } from 'sonner';
-import { runAiSkillStream } from '@/lib/ai-skill-engine';
-import { getAiSkill } from '@/lib/ai-skills';
+import { formatSpecValidationIssues, validateSpecForReview } from '@shared/spec-validation';
 interface IApiDef {
   path: string;
   method: string;
@@ -77,6 +76,10 @@ interface IInteraction {
 }
 
 type OrgSpecLanguage = 'java' | 'python' | 'go' | 'node' | 'react' | 'vue' | 'typescript';
+
+interface SpecGenerateStreamChunk {
+  content?: string;
+}
 
 interface IOrgLanguageSpec {
   language: OrgSpecLanguage;
@@ -342,6 +345,7 @@ const SpecEditPage: React.FC = () => {
   const [cpMdMode, setCpMdMode] = useState<'edit' | 'preview'>('preview');
   const [selectedRequirementId, setSelectedRequirementId] = useState('');
   const [selectedPrdId, setSelectedPrdId] = useState('');
+  const isReviewLocked = spec.status === 'reviewing' || spec.status === 'approved';
 
   useEffect(() => {
     if (isCreateMode) return;
@@ -462,7 +466,6 @@ const SpecEditPage: React.FC = () => {
 
   const validateJson = useCallback(() => {
     setIsValidating(true);
-    setJsonError(null);
     
     try {
       const machineJson = JSON.stringify({
@@ -474,8 +477,20 @@ const SpecEditPage: React.FC = () => {
         organizationCodingSpec: organizationCodingSpecPayload,
       }, null, 2);
       
-      // 尝试解析验证JSON格式
-      JSON.parse(machineJson);
+      const validation = validateSpecForReview({
+        fsMarkdown: spec.fsMarkdown,
+        tsMarkdown: spec.tsMarkdown,
+        cpMarkdown: spec.cpMarkdown,
+        functionalSpec: spec.functionalSpec,
+        technicalSpec: spec.technicalSpec,
+        machineReadableJson: machineJson,
+      });
+      if (!validation.valid) {
+        setJsonError(formatSpecValidationIssues(validation.issues));
+        toast.warning('Machine-Readable 存在完善提醒，已保留为非阻断建议');
+      } else {
+        setJsonError(null);
+      }
       
       updateSpec({ machineReadableJson: machineJson });
       
@@ -484,7 +499,7 @@ const SpecEditPage: React.FC = () => {
         setIsValidating(false);
       }, 500);
     } catch (error) {
-      setJsonError(error instanceof Error ? error.message : 'JSON格式错误');
+      setJsonError(error instanceof Error ? error.message : 'JSON生成失败');
       setIsValidating(false);
     }
   }, [spec.fsMarkdown, spec.tsMarkdown, spec.cpMarkdown, spec.functionalSpec, spec.technicalSpec, organizationCodingSpecPayload, updateSpec]);
@@ -528,14 +543,22 @@ const SpecEditPage: React.FC = () => {
     setGeneratingFs(true);
     setFsStreamText('');
     try {
-      const skill = await getAiSkill('fs_auto_generation');
       const prdDoc = buildPrdDocument(prd);
-      const full = await runAiSkillStream(skill, {
-        variables: { prd_document: prdDoc },
-        onChunk: (chunk) => {
-          setFsStreamText((prev) => prev + chunk);
-        },
-      });
+      const stream = capabilityClient
+        .load('fs_auto_generation')
+        .callStream<SpecGenerateStreamChunk>('textGenerate', {
+          prd_document: prdDoc,
+        });
+      let full = '';
+      for await (const chunk of stream) {
+        if (chunk.content) {
+          full += chunk.content;
+          setFsStreamText((prev) => prev + chunk.content);
+        }
+      }
+      if (!full.trim()) {
+        throw new Error('AI 未返回功能规格内容');
+      }
       updateSpec({ fsMarkdown: full });
       setFsStreamText('');
       toast.success('功能规格（FS）已生成');
@@ -560,17 +583,23 @@ const SpecEditPage: React.FC = () => {
     setGeneratingTs(true);
     setTsStreamText('');
     try {
-      const skill = await getAiSkill('ts_auto_generation');
       const orgText = buildOrgSpecText(orgSpecConfig, selectedLanguages);
-      const full = await runAiSkillStream(skill, {
-        variables: {
+      const stream = capabilityClient
+        .load('ts_auto_generation')
+        .callStream<SpecGenerateStreamChunk>('textGenerate', {
           functional_spec: fsBody,
           org_spec: orgText,
-        },
-        onChunk: (chunk) => {
-          setTsStreamText((prev) => prev + chunk);
-        },
-      });
+        });
+      let full = '';
+      for await (const chunk of stream) {
+        if (chunk.content) {
+          full += chunk.content;
+          setTsStreamText((prev) => prev + chunk.content);
+        }
+      }
+      if (!full.trim()) {
+        throw new Error('AI 未返回技术规格内容');
+      }
       updateSpec({ tsMarkdown: full });
       setTsStreamText('');
       toast.success('技术规格（TS）已生成');
@@ -596,16 +625,22 @@ const SpecEditPage: React.FC = () => {
     setGeneratingCp(true);
     setCpStreamText('');
     try {
-      const skill = await getAiSkill('cp_auto_generation');
-      const full = await runAiSkillStream(skill, {
-        variables: {
+      const stream = capabilityClient
+        .load('cp_auto_generation')
+        .callStream<SpecGenerateStreamChunk>('textGenerate', {
           fs_document: fsBody,
           ts_document: tsBody,
-        },
-        onChunk: (chunk) => {
-          setCpStreamText((prev) => prev + chunk);
-        },
-      });
+        });
+      let full = '';
+      for await (const chunk of stream) {
+        if (chunk.content) {
+          full += chunk.content;
+          setCpStreamText((prev) => prev + chunk.content);
+        }
+      }
+      if (!full.trim()) {
+        throw new Error('AI 未返回编程计划内容');
+      }
       updateSpec({ cpMarkdown: full });
       setCpStreamText('');
       toast.success('编程计划（CP）已生成');
@@ -618,6 +653,10 @@ const SpecEditPage: React.FC = () => {
   }, [spec.fsMarkdown, spec.tsMarkdown, updateSpec]);
 
   const handleSave = useCallback(() => {
+    if (spec.status === 'reviewing' || spec.status === 'approved') {
+      toast.message('当前规格处于审核流程中，禁止保存');
+      return;
+    }
     validateJson();
     updateSpec({ status: 'draft' });
     setHasUnsavedChanges(false);
@@ -629,6 +668,10 @@ const SpecEditPage: React.FC = () => {
   }, [spec, validateJson, updateSpec, upsertSpecMutation]);
 
   const handleSubmit = useCallback(async () => {
+    if (spec.status === 'reviewing' || spec.status === 'approved') {
+      toast.message('当前规格已提交或已完成审核，无法重复提交');
+      return;
+    }
     if (!spec.id) {
       toast.error('当前规格尚未创建完成，请先保存后再提交审核');
       return;
@@ -647,7 +690,7 @@ const SpecEditPage: React.FC = () => {
       logger.error('Spec submit review failed:', error);
       toast.error(error instanceof Error ? error.message : '提交审核失败，请稍后重试');
     }
-  }, [spec.id, validateJson, updateSpec, submitSpecReviewMutation]);
+  }, [spec, validateJson, updateSpec, submitSpecReviewMutation]);
 
   const handleExport = useCallback(() => {
     const exportData = {
@@ -833,11 +876,15 @@ const SpecEditPage: React.FC = () => {
               <Button
                 variant="secondary"
                 onClick={handleSave}
+                disabled={isReviewLocked}
               >
                 <Save className="mr-2 size-4" />
                 保存
               </Button>
-              <Button onClick={() => void handleSubmit()} disabled={submitSpecReviewMutation.isPending}>
+              <Button
+                onClick={() => void handleSubmit()}
+                disabled={submitSpecReviewMutation.isPending || isReviewLocked}
+              >
                 {submitSpecReviewMutation.isPending ? (
                   <Loader2 className="mr-2 size-4 animate-spin" />
                 ) : (
@@ -851,10 +898,13 @@ const SpecEditPage: React.FC = () => {
 
         {/* Validation Alert */}
         {jsonError && (
-          <Alert variant="destructive">
+          <Alert variant="warning">
             <AlertTriangle className="size-4" />
-            <AlertTitle>JSON格式错误</AlertTitle>
-            <AlertDescription>{jsonError}</AlertDescription>
+            <AlertTitle>Machine-Readable 完善提醒</AlertTitle>
+            <AlertDescription>
+              <p>以下内容建议完善，但不会阻止保存或提交审核。</p>
+              <pre className="whitespace-pre-wrap font-mono text-xs leading-5">{jsonError}</pre>
+            </AlertDescription>
           </Alert>
         )}
 
@@ -1263,7 +1313,7 @@ const SpecEditPage: React.FC = () => {
                         onClick={validateJson}
                         disabled={isValidating}
                       >
-                        {isValidating ? '验证中...' : '验证格式'}
+                        {isValidating ? '检查中...' : '检查提醒'}
                       </Button>
                       <Button
                         variant="secondary"

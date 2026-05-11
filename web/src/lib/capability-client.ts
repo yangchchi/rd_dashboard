@@ -2,6 +2,8 @@
  * 兼容 @lark-apaas/client-capability 协议，请求本仓库 Nest：`/api/capability/:id` 与 `/stream`。
  * baseURL 使用相对路径，便于 Next 通过 rewrites 代理到后端。
  */
+import { getAuthToken } from './auth';
+
 const SUCCESS = '0';
 
 class CapabilityError extends Error {
@@ -19,15 +21,21 @@ function createExecutor(
   capabilityId: string,
   fetchOptions?: RequestInit
 ) {
+  const authHeaders = (): Record<string, string> => {
+    const token = typeof window !== 'undefined' ? getAuthToken() : null;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+  const jsonHeaders = (): HeadersInit => ({
+    'Content-Type': 'application/json',
+    ...authHeaders(),
+    ...(fetchOptions?.headers ?? {}),
+  });
   return {
     call: async <T>(action: string, params: unknown): Promise<T> => {
       const url = `${baseURL}/api/capability/${capabilityId}`;
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(fetchOptions?.headers ?? {}),
-        },
+        headers: jsonHeaders(),
         body: JSON.stringify({ action, params }),
         credentials: 'include',
         ...fetchOptions,
@@ -46,10 +54,7 @@ function createExecutor(
       const url = `${baseURL}/api/capability/${capabilityId}/stream`;
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(fetchOptions?.headers ?? {}),
-        },
+        headers: jsonHeaders(),
         body: JSON.stringify({ action, params }),
         credentials: 'include',
         ...fetchOptions,
@@ -73,13 +78,17 @@ function createExecutor(
             let parsed: {
               status_code?: string;
               data?: { type?: string; delta?: T; finished?: boolean };
+              error_msg?: string;
             };
             try {
               parsed = JSON.parse(raw);
             } catch {
               continue;
             }
-            if (parsed.status_code !== SUCCESS || !parsed.data) continue;
+            if (parsed.status_code !== SUCCESS) {
+              throw new CapabilityError(parsed.error_msg || 'Capability stream failed', parsed.status_code);
+            }
+            if (!parsed.data) continue;
             if (parsed.data.type === 'content' && parsed.data.delta !== undefined) {
               yield parsed.data.delta as T;
               if (parsed.data.finished) return;

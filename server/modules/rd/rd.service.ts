@@ -6,10 +6,21 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { stat } from 'node:fs/promises';
 import { DRIZZLE_DATABASE } from '../../database/database.constants';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
 import { DEFAULT_AI_SKILLS } from '../../../shared/ai-skill-defaults';
+import {
+  buildAgentWorkspaceCleanupCommand,
+  buildAgentWorkspaceLifecyclePlan,
+  type IAgentWorkspaceLifecyclePlan,
+  type IWorkspaceLifecycleCommand,
+} from '../../../shared/agent-workspace-manager';
+import { assertToolCallCanStart, prepareToolCallPolicy } from '../../../shared/agent-tool-gateway';
+import { createDefaultOrgSpecConfig } from '../../../shared/org-spec-defaults';
 
 /** 与前端 access-policy 内置角色 id 一致（rd_user_access_roles / rd_users.access_role_id 回退） */
 const BUILTIN_ACCESS_ROLE_PM = 'role_pm';
@@ -22,6 +33,24 @@ export type RequirementStatus =
   | 'ai_developing'
   | 'pending_acceptance'
   | 'released';
+
+const REQUIREMENT_STATUS_LABELS: Record<RequirementStatus, string> = {
+  backlog: '需求池',
+  prd_writing: 'PRD编写中',
+  spec_defining: '规格定义',
+  ai_developing: 'AI开发中',
+  pending_acceptance: '待验收',
+  released: '已发布',
+};
+
+const REQUIREMENT_STATUS_TRANSITIONS: Record<RequirementStatus, RequirementStatus[]> = {
+  backlog: ['prd_writing'],
+  prd_writing: ['spec_defining'],
+  spec_defining: ['ai_developing'],
+  ai_developing: ['pending_acceptance'],
+  pending_acceptance: ['released', 'prd_writing'],
+  released: [],
+};
 
 /** 任务接受记录（金币在需求验收通过/已发布后生效） */
 export interface ITaskAcceptanceRecord {
@@ -64,6 +93,18 @@ export interface IRequirementRow {
   updatedAt: string;
   createdBy?: string | null;
   updatedBy?: string | null;
+}
+
+export interface IRequirementFlowEventRow {
+  id: string;
+  requirementId: string;
+  fromStatus?: RequirementStatus | null;
+  toStatus: RequirementStatus;
+  action: string;
+  operator?: string | null;
+  comment?: string | null;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
 }
 
 export function splitBountyToRoleCoins(bounty: number): { pmCoins: number; tmCoins: number } {
@@ -260,6 +301,242 @@ export interface IPipelineTaskRow {
   updatedBy?: string | null;
 }
 
+export type PipelineRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+export type PipelineStepRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
+
+export interface IPipelineRunRow {
+  id: string;
+  pipelineTaskId?: string | null;
+  requirementId: string;
+  status: PipelineRunStatus;
+  triggerMode: 'manual' | 'push' | 'schedule' | 'agent';
+  contextSnapshot: Record<string, unknown>;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string | null;
+  updatedBy?: string | null;
+}
+
+export interface IPipelineStepRunRow {
+  id: string;
+  pipelineRunId: string;
+  stepKey: string;
+  name: string;
+  status: PipelineStepRunStatus;
+  orderIndex: number;
+  inputRef?: string | null;
+  outputRef?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AgentSessionStatus =
+  | 'draft'
+  | 'planning'
+  | 'awaiting_approval'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+export type AgentTaskRole = 'planner' | 'coder' | 'tester' | 'reviewer' | 'deployer' | 'integrator';
+export type AgentTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'awaiting_approval'
+  | 'blocked'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+export type AgentToolCallStatus =
+  | 'pending'
+  | 'awaiting_approval'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+export type AgentToolApprovalStatus = 'not_required' | 'pending' | 'approved' | 'rejected';
+export type AgentRiskLevel = 'low' | 'medium' | 'high';
+export type AgentWorkspaceKind = 'clone' | 'worktree' | 'container';
+export type AgentWorkspaceStatus = 'provisioning' | 'ready' | 'dirty' | 'archived' | 'failed';
+
+export interface IAgentSessionRow {
+  id: string;
+  pipelineRunId?: string | null;
+  requirementId: string;
+  specId?: string | null;
+  contextPackId?: string | null;
+  title: string;
+  status: AgentSessionStatus;
+  runtimeAdapter: 'codex_cli' | 'codex_cloud' | 'openclaw' | 'claude_code' | 'custom';
+  model?: string | null;
+  baseBranch?: string | null;
+  agentBranch?: string | null;
+  planMarkdown?: string | null;
+  riskLevel: AgentRiskLevel;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string | null;
+  updatedBy?: string | null;
+}
+
+export interface IAgentTaskRow {
+  id: string;
+  sessionId: string;
+  pipelineStepRunId?: string | null;
+  parentTaskId?: string | null;
+  role: AgentTaskRole;
+  title: string;
+  instructions: string;
+  status: AgentTaskStatus;
+  orderIndex: number;
+  locked: boolean;
+  requiresApproval: boolean;
+  metadata: Record<string, unknown>;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IAgentToolCallRow {
+  id: string;
+  sessionId: string;
+  taskId?: string | null;
+  workspaceId?: string | null;
+  toolName: string;
+  toolCategory: 'shell' | 'git' | 'file' | 'test' | 'deploy' | 'browser' | 'ai' | 'other';
+  status: AgentToolCallStatus;
+  approvalStatus: AgentToolApprovalStatus;
+  riskLevel: AgentRiskLevel;
+  inputSummary: string;
+  outputSummary?: string | null;
+  command?: string | null;
+  exitCode?: number | null;
+  durationMs?: number | null;
+  metadata: Record<string, unknown>;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IAgentWorkspaceRow {
+  id: string;
+  sessionId: string;
+  pipelineRunId?: string | null;
+  kind: AgentWorkspaceKind;
+  status: AgentWorkspaceStatus;
+  repoUrl: string;
+  baseBranch: string;
+  agentBranch: string;
+  worktreePath?: string | null;
+  baseCommit?: string | null;
+  headCommit?: string | null;
+  lockOwnerTaskId?: string | null;
+  isWriteLocked: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  cleanedAt?: string | null;
+}
+
+export interface IAgentWorkspaceProvisionResult {
+  workspace: IAgentWorkspaceRow;
+  plan: IAgentWorkspaceLifecyclePlan;
+  toolCalls: IAgentToolCallRow[];
+}
+
+export type AgentExecutionEventType = 'started' | 'spawned' | 'stdout' | 'stderr' | 'heartbeat' | 'finished' | 'error';
+
+export interface IAgentExecutionEvent {
+  type: AgentExecutionEventType;
+  toolCallId: string;
+  chunk?: string;
+  status?: AgentToolCallStatus;
+  exitCode?: number | null;
+  durationMs?: number | null;
+  pid?: number | null;
+  cwd?: string | null;
+  command?: string | null;
+  stdoutBytes?: number;
+  stderrBytes?: number;
+  changedFilesCount?: number;
+  timestamp?: string;
+  message?: string;
+  toolCall?: IAgentToolCallRow;
+}
+
+interface IAgentExecutionProcess {
+  child: ChildProcessWithoutNullStreams;
+  startedAt: number;
+  stdout: string;
+  stderr: string;
+  cancelled: boolean;
+}
+
+interface ICommandTextResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+interface IAgentWorkspaceReviewSummary {
+  changedFiles: Array<{ path: string; changeType: 'add' | 'modify' | 'delete' }>;
+  diffNameStatus: string;
+  diffStat: string;
+  statusShort: string;
+  detectedTestCommands: string[];
+  errorMessage?: string;
+}
+
+export interface IContextPackFile {
+  path: string;
+  kind: 'markdown' | 'json' | 'text';
+  content: string;
+}
+
+export interface IContextPackManifest {
+  requirementId: string;
+  prdId?: string | null;
+  specId?: string | null;
+  pipelineRunId?: string | null;
+  generatedAt: string;
+  sources: {
+    requirementUpdatedAt?: string;
+    prdUpdatedAt?: string;
+    specUpdatedAt?: string;
+    orgSpecVersion?: number;
+  };
+  files: Array<{
+    path: string;
+    kind: IContextPackFile['kind'];
+    bytes: number;
+    sha256: string;
+  }>;
+}
+
+export interface IContextPackRow {
+  id: string;
+  requirementId: string;
+  prdId?: string | null;
+  specId?: string | null;
+  pipelineRunId?: string | null;
+  version: number;
+  checksum: string;
+  manifest: IContextPackManifest;
+  content: Record<string, IContextPackFile>;
+  createdAt: string;
+  createdBy?: string | null;
+}
+
 export interface IPipelineDocsExportItem {
   fileName: string;
   content: string;
@@ -344,6 +621,7 @@ export interface IAiSkillConfig {
 @Injectable()
 export class RdService implements OnModuleInit {
   private readonly logger = new Logger(RdService.name);
+  private readonly runningExecutions = new Map<string, IAgentExecutionProcess>();
 
   constructor(@Inject(DRIZZLE_DATABASE) private readonly db: PostgresJsDatabase) {}
 
@@ -375,6 +653,10 @@ export class RdService implements OnModuleInit {
     await this.ensureRequirementExtraColumns();
     await this.ensureBountyDualSlotColumns();
     await this.ensureSiteMessagesTable();
+    await this.ensureRequirementFlowEventsTable();
+    await this.ensurePipelineRunTables();
+    await this.ensureAgentTables();
+    await this.ensureContextPackTables();
     await this.ensureAiSkillTables();
     await this.ensureAiSkillDefaults();
     await this.ensureDatapaasRoleGrants();
@@ -803,6 +1085,211 @@ export class RdService implements OnModuleInit {
     `);
   }
 
+  private async ensureRequirementFlowEventsTable(): Promise<void> {
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_requirement_flow_events (
+        id TEXT PRIMARY KEY,
+        requirement_id TEXT NOT NULL REFERENCES rd_requirements(id) ON DELETE CASCADE,
+        from_status TEXT,
+        to_status TEXT NOT NULL,
+        action TEXT NOT NULL,
+        operator TEXT,
+        comment TEXT,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_requirement_flow_events_requirement_created
+      ON rd_requirement_flow_events (requirement_id, created_at ASC);
+    `);
+  }
+
+  private async ensurePipelineRunTables(): Promise<void> {
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_pipeline_runs (
+        id TEXT PRIMARY KEY,
+        pipeline_task_id TEXT REFERENCES rd_pipeline_tasks(id) ON DELETE SET NULL,
+        requirement_id TEXT NOT NULL REFERENCES rd_requirements(id) ON DELETE CASCADE,
+        status TEXT NOT NULL,
+        trigger_mode TEXT NOT NULL DEFAULT 'manual',
+        context_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        created_by TEXT,
+        updated_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_pipeline_runs_requirement_created
+      ON rd_pipeline_runs (requirement_id, created_at DESC);
+    `);
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_pipeline_step_runs (
+        id TEXT PRIMARY KEY,
+        pipeline_run_id TEXT NOT NULL REFERENCES rd_pipeline_runs(id) ON DELETE CASCADE,
+        step_key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        status TEXT NOT NULL,
+        order_index INT NOT NULL DEFAULT 0,
+        input_ref TEXT,
+        output_ref TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_pipeline_step_runs_run_order
+      ON rd_pipeline_step_runs (pipeline_run_id, order_index ASC);
+    `);
+  }
+
+  private async ensureAgentTables(): Promise<void> {
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_agent_sessions (
+        id TEXT PRIMARY KEY,
+        pipeline_run_id TEXT REFERENCES rd_pipeline_runs(id) ON DELETE SET NULL,
+        requirement_id TEXT NOT NULL REFERENCES rd_requirements(id) ON DELETE CASCADE,
+        spec_id TEXT REFERENCES rd_specs(id) ON DELETE SET NULL,
+        context_pack_id TEXT,
+        title TEXT NOT NULL,
+        status TEXT NOT NULL,
+        runtime_adapter TEXT NOT NULL DEFAULT 'custom',
+        model TEXT,
+        base_branch TEXT,
+        agent_branch TEXT,
+        plan_markdown TEXT,
+        risk_level TEXT NOT NULL DEFAULT 'medium',
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_by TEXT,
+        updated_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_agent_sessions_pipeline_run
+      ON rd_agent_sessions (pipeline_run_id, created_at DESC);
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_agent_sessions_requirement
+      ON rd_agent_sessions (requirement_id, created_at DESC);
+    `);
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_agent_tasks (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES rd_agent_sessions(id) ON DELETE CASCADE,
+        pipeline_step_run_id TEXT REFERENCES rd_pipeline_step_runs(id) ON DELETE SET NULL,
+        parent_task_id TEXT REFERENCES rd_agent_tasks(id) ON DELETE SET NULL,
+        role TEXT NOT NULL,
+        title TEXT NOT NULL,
+        instructions TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL,
+        order_index INT NOT NULL DEFAULT 0,
+        locked BOOLEAN NOT NULL DEFAULT FALSE,
+        requires_approval BOOLEAN NOT NULL DEFAULT FALSE,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_agent_tasks_session_order
+      ON rd_agent_tasks (session_id, order_index ASC);
+    `);
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_agent_workspaces (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES rd_agent_sessions(id) ON DELETE CASCADE,
+        pipeline_run_id TEXT REFERENCES rd_pipeline_runs(id) ON DELETE SET NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        repo_url TEXT NOT NULL,
+        base_branch TEXT NOT NULL,
+        agent_branch TEXT NOT NULL,
+        worktree_path TEXT,
+        base_commit TEXT,
+        head_commit TEXT,
+        lock_owner_task_id TEXT REFERENCES rd_agent_tasks(id) ON DELETE SET NULL,
+        is_write_locked BOOLEAN NOT NULL DEFAULT FALSE,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        cleaned_at TIMESTAMPTZ
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_agent_workspaces_session
+      ON rd_agent_workspaces (session_id, created_at DESC);
+    `);
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_agent_tool_calls (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES rd_agent_sessions(id) ON DELETE CASCADE,
+        task_id TEXT REFERENCES rd_agent_tasks(id) ON DELETE SET NULL,
+        workspace_id TEXT REFERENCES rd_agent_workspaces(id) ON DELETE SET NULL,
+        tool_name TEXT NOT NULL,
+        tool_category TEXT NOT NULL,
+        status TEXT NOT NULL,
+        approval_status TEXT NOT NULL DEFAULT 'not_required',
+        risk_level TEXT NOT NULL DEFAULT 'low',
+        input_summary TEXT NOT NULL DEFAULT '',
+        output_summary TEXT,
+        command TEXT,
+        exit_code INT,
+        duration_ms INT,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_agent_tool_calls_session_created
+      ON rd_agent_tool_calls (session_id, created_at ASC);
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_agent_tool_calls_task_created
+      ON rd_agent_tool_calls (task_id, created_at ASC);
+    `);
+  }
+
+  private async ensureContextPackTables(): Promise<void> {
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_context_packs (
+        id TEXT PRIMARY KEY,
+        requirement_id TEXT NOT NULL REFERENCES rd_requirements(id) ON DELETE CASCADE,
+        prd_id TEXT REFERENCES rd_prds(id) ON DELETE SET NULL,
+        spec_id TEXT REFERENCES rd_specs(id) ON DELETE SET NULL,
+        pipeline_run_id TEXT REFERENCES rd_pipeline_runs(id) ON DELETE SET NULL,
+        version INT NOT NULL,
+        checksum TEXT NOT NULL,
+        manifest JSONB NOT NULL,
+        content JSONB NOT NULL,
+        created_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (requirement_id, version)
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_context_packs_requirement_version
+      ON rd_context_packs (requirement_id, version DESC);
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_context_packs_pipeline_run
+      ON rd_context_packs (pipeline_run_id, created_at DESC);
+    `);
+  }
+
   /** 悬赏双槽位：PM / TM 分别领取；齐满后 bounty 任务进入 developing（需求流转不由领取驱动） */
   private async ensureBountyDualSlotColumns(): Promise<void> {
     await this.db.execute(sql`
@@ -939,17 +1426,49 @@ export class RdService implements OnModuleInit {
     };
   }
 
+  private rowToRequirementFlowEvent(r: Record<string, unknown>): IRequirementFlowEventRow {
+    return {
+      id: String(r.id || ''),
+      requirementId: String(r.requirement_id || r.requirementId || ''),
+      fromStatus: (r.from_status as RequirementStatus) || (r.fromStatus as RequirementStatus) || null,
+      toStatus: (r.to_status as RequirementStatus) || (r.toStatus as RequirementStatus),
+      action: String(r.action || ''),
+      operator: (r.operator as string) || undefined,
+      comment: (r.comment as string) || undefined,
+      metadata: this.parseJsonObject(r.metadata),
+      createdAt: this.toIso(r.created_at ?? r.createdAt),
+    };
+  }
+
+  private parseJsonObject(value: unknown): Record<string, unknown> {
+    if (!value) return {};
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value) as unknown;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed as Record<string, unknown>;
+        }
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  }
+
   private rowToPrd(r: Record<string, unknown>): IPrdRow {
     const t = this.tsFromRow(r);
     return {
       id: r.id as string,
-      requirementId: r.requirement_id as string,
+      requirementId: ((r.requirement_id as string) || (r.requirementId as string)),
       title: (r.title as string) || undefined,
       background: (r.background as string) || '',
       objectives: (r.objectives as string) || '',
       flowchart: (r.flowchart as string) || undefined,
-      featureList: (r.feature_list as IFeature[]) || [],
-      nonFunctional: (r.non_functional as string) || '',
+      featureList: ((r.feature_list as IFeature[]) || (r.featureList as IFeature[]) || []),
+      nonFunctional: (r.non_functional as string) || (r.nonFunctional as string) || '',
       status: r.status as IPrdRow['status'],
       version: Number(r.version),
       author: (r.author as string) || undefined,
@@ -992,6 +1511,169 @@ export class RdService implements OnModuleInit {
     };
   }
 
+  private rowToPipelineRun(r: Record<string, unknown>): IPipelineRunRow {
+    const t = this.tsFromRow(r);
+    return {
+      id: String(r.id || ''),
+      pipelineTaskId: (r.pipeline_task_id as string) || (r.pipelineTaskId as string) || undefined,
+      requirementId: String(r.requirement_id || r.requirementId || ''),
+      status: (r.status as PipelineRunStatus) || 'queued',
+      triggerMode:
+        ((r.trigger_mode as IPipelineRunRow['triggerMode']) ||
+          (r.triggerMode as IPipelineRunRow['triggerMode']) ||
+          'manual'),
+      contextSnapshot: this.parseJsonObject(r.context_snapshot ?? r.contextSnapshot),
+      startedAt: r.started_at || r.startedAt ? this.toIso(r.started_at ?? r.startedAt) : undefined,
+      finishedAt: r.finished_at || r.finishedAt ? this.toIso(r.finished_at ?? r.finishedAt) : undefined,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+      createdBy: (r.created_by as string) || (r.createdBy as string) || undefined,
+      updatedBy: (r.updated_by as string) || (r.updatedBy as string) || undefined,
+    };
+  }
+
+  private rowToPipelineStepRun(r: Record<string, unknown>): IPipelineStepRunRow {
+    const t = this.tsFromRow(r);
+    return {
+      id: String(r.id || ''),
+      pipelineRunId: String(r.pipeline_run_id || r.pipelineRunId || ''),
+      stepKey: String(r.step_key || r.stepKey || ''),
+      name: String(r.name || ''),
+      status: (r.status as PipelineStepRunStatus) || 'queued',
+      orderIndex: Number(r.order_index ?? r.orderIndex ?? 0),
+      inputRef: (r.input_ref as string) || (r.inputRef as string) || undefined,
+      outputRef: (r.output_ref as string) || (r.outputRef as string) || undefined,
+      errorCode: (r.error_code as string) || (r.errorCode as string) || undefined,
+      errorMessage: (r.error_message as string) || (r.errorMessage as string) || undefined,
+      startedAt: r.started_at || r.startedAt ? this.toIso(r.started_at ?? r.startedAt) : undefined,
+      finishedAt: r.finished_at || r.finishedAt ? this.toIso(r.finished_at ?? r.finishedAt) : undefined,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+    };
+  }
+
+  private rowToAgentSession(r: Record<string, unknown>): IAgentSessionRow {
+    const t = this.tsFromRow(r);
+    return {
+      id: String(r.id || ''),
+      pipelineRunId: (r.pipeline_run_id as string) || (r.pipelineRunId as string) || undefined,
+      requirementId: String(r.requirement_id || r.requirementId || ''),
+      specId: (r.spec_id as string) || (r.specId as string) || undefined,
+      contextPackId: (r.context_pack_id as string) || (r.contextPackId as string) || undefined,
+      title: String(r.title || ''),
+      status: (r.status as AgentSessionStatus) || 'draft',
+      runtimeAdapter:
+        ((r.runtime_adapter as IAgentSessionRow['runtimeAdapter']) ||
+          (r.runtimeAdapter as IAgentSessionRow['runtimeAdapter']) ||
+          'custom'),
+      model: (r.model as string) || undefined,
+      baseBranch: (r.base_branch as string) || (r.baseBranch as string) || undefined,
+      agentBranch: (r.agent_branch as string) || (r.agentBranch as string) || undefined,
+      planMarkdown: (r.plan_markdown as string) || (r.planMarkdown as string) || undefined,
+      riskLevel: (r.risk_level as AgentRiskLevel) || (r.riskLevel as AgentRiskLevel) || 'medium',
+      metadata: this.parseJsonObject(r.metadata),
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+      createdBy: (r.created_by as string) || (r.createdBy as string) || undefined,
+      updatedBy: (r.updated_by as string) || (r.updatedBy as string) || undefined,
+    };
+  }
+
+  private rowToAgentTask(r: Record<string, unknown>): IAgentTaskRow {
+    const t = this.tsFromRow(r);
+    return {
+      id: String(r.id || ''),
+      sessionId: String(r.session_id || r.sessionId || ''),
+      pipelineStepRunId:
+        (r.pipeline_step_run_id as string) || (r.pipelineStepRunId as string) || undefined,
+      parentTaskId: (r.parent_task_id as string) || (r.parentTaskId as string) || undefined,
+      role: (r.role as AgentTaskRole) || 'coder',
+      title: String(r.title || ''),
+      instructions: String(r.instructions || ''),
+      status: (r.status as AgentTaskStatus) || 'queued',
+      orderIndex: Number(r.order_index ?? r.orderIndex ?? 0),
+      locked: Boolean(r.locked ?? false),
+      requiresApproval: Boolean(r.requires_approval ?? r.requiresApproval ?? false),
+      metadata: this.parseJsonObject(r.metadata),
+      startedAt: r.started_at || r.startedAt ? this.toIso(r.started_at ?? r.startedAt) : undefined,
+      finishedAt: r.finished_at || r.finishedAt ? this.toIso(r.finished_at ?? r.finishedAt) : undefined,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+    };
+  }
+
+  private rowToAgentToolCall(r: Record<string, unknown>): IAgentToolCallRow {
+    const t = this.tsFromRow(r);
+    return {
+      id: String(r.id || ''),
+      sessionId: String(r.session_id || r.sessionId || ''),
+      taskId: (r.task_id as string) || (r.taskId as string) || undefined,
+      workspaceId: (r.workspace_id as string) || (r.workspaceId as string) || undefined,
+      toolName: String(r.tool_name || r.toolName || ''),
+      toolCategory:
+        ((r.tool_category as IAgentToolCallRow['toolCategory']) ||
+          (r.toolCategory as IAgentToolCallRow['toolCategory']) ||
+          'other'),
+      status: (r.status as AgentToolCallStatus) || 'pending',
+      approvalStatus:
+        ((r.approval_status as AgentToolApprovalStatus) ||
+          (r.approvalStatus as AgentToolApprovalStatus) ||
+          'not_required'),
+      riskLevel: (r.risk_level as AgentRiskLevel) || (r.riskLevel as AgentRiskLevel) || 'low',
+      inputSummary: String(r.input_summary || r.inputSummary || ''),
+      outputSummary: (r.output_summary as string) || (r.outputSummary as string) || undefined,
+      command: (r.command as string) || undefined,
+      exitCode: r.exit_code != null || r.exitCode != null ? Number(r.exit_code ?? r.exitCode) : undefined,
+      durationMs:
+        r.duration_ms != null || r.durationMs != null ? Number(r.duration_ms ?? r.durationMs) : undefined,
+      metadata: this.parseJsonObject(r.metadata),
+      startedAt: r.started_at || r.startedAt ? this.toIso(r.started_at ?? r.startedAt) : undefined,
+      finishedAt: r.finished_at || r.finishedAt ? this.toIso(r.finished_at ?? r.finishedAt) : undefined,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+    };
+  }
+
+  private rowToAgentWorkspace(r: Record<string, unknown>): IAgentWorkspaceRow {
+    const t = this.tsFromRow(r);
+    return {
+      id: String(r.id || ''),
+      sessionId: String(r.session_id || r.sessionId || ''),
+      pipelineRunId: (r.pipeline_run_id as string) || (r.pipelineRunId as string) || undefined,
+      kind: (r.kind as AgentWorkspaceKind) || 'worktree',
+      status: (r.status as AgentWorkspaceStatus) || 'provisioning',
+      repoUrl: String(r.repo_url || r.repoUrl || ''),
+      baseBranch: String(r.base_branch || r.baseBranch || ''),
+      agentBranch: String(r.agent_branch || r.agentBranch || ''),
+      worktreePath: (r.worktree_path as string) || (r.worktreePath as string) || undefined,
+      baseCommit: (r.base_commit as string) || (r.baseCommit as string) || undefined,
+      headCommit: (r.head_commit as string) || (r.headCommit as string) || undefined,
+      lockOwnerTaskId:
+        (r.lock_owner_task_id as string) || (r.lockOwnerTaskId as string) || undefined,
+      isWriteLocked: Boolean(r.is_write_locked ?? r.isWriteLocked ?? false),
+      metadata: this.parseJsonObject(r.metadata),
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+      cleanedAt: r.cleaned_at || r.cleanedAt ? this.toIso(r.cleaned_at ?? r.cleanedAt) : undefined,
+    };
+  }
+
+  private rowToContextPack(r: Record<string, unknown>): IContextPackRow {
+    return {
+      id: String(r.id || ''),
+      requirementId: String(r.requirement_id || r.requirementId || ''),
+      prdId: (r.prd_id as string) || (r.prdId as string) || undefined,
+      specId: (r.spec_id as string) || (r.specId as string) || undefined,
+      pipelineRunId: (r.pipeline_run_id as string) || (r.pipelineRunId as string) || undefined,
+      version: Number(r.version ?? 1),
+      checksum: String(r.checksum || ''),
+      manifest: this.parseJsonObject(r.manifest) as unknown as IContextPackManifest,
+      content: this.parseJsonObject(r.content) as Record<string, IContextPackFile>,
+      createdAt: this.toIso(r.created_at ?? r.createdAt),
+      createdBy: (r.created_by as string) || (r.createdBy as string) || undefined,
+    };
+  }
+
   private rowToSpec(r: Record<string, unknown>): ISpecRow {
     const t = this.tsFromRow(r);
     const fs = (r.functional_spec as ISpecRow['functionalSpec']) || {
@@ -1006,13 +1688,13 @@ export class RdService implements OnModuleInit {
     };
     return {
       id: r.id as string,
-      prdId: r.prd_id as string,
-      fsMarkdown: (r.fs_markdown as string) || undefined,
-      tsMarkdown: (r.ts_markdown as string) || undefined,
-      cpMarkdown: (r.cp_markdown as string) || undefined,
-      functionalSpec: fs,
-      technicalSpec: tsSpec,
-      machineReadableJson: (r.machine_readable_json as string) || '',
+      prdId: ((r.prd_id as string) || (r.prdId as string)),
+      fsMarkdown: (r.fs_markdown as string) || (r.fsMarkdown as string) || undefined,
+      tsMarkdown: (r.ts_markdown as string) || (r.tsMarkdown as string) || undefined,
+      cpMarkdown: (r.cp_markdown as string) || (r.cpMarkdown as string) || undefined,
+      functionalSpec: (r.functionalSpec as ISpecRow['functionalSpec']) || fs,
+      technicalSpec: (r.technicalSpec as ISpecRow['technicalSpec']) || tsSpec,
+      machineReadableJson: (r.machine_readable_json as string) || (r.machineReadableJson as string) || '',
       status: r.status as ISpecRow['status'],
       reviews: (r.reviews as IReviewRecord[]) || [],
       createdAt: t.createdAt,
@@ -1144,6 +1826,16 @@ export class RdService implements OnModuleInit {
     return rows[0] ? this.rowToRequirement(rows[0]) : null;
   }
 
+  async listRequirementFlowEvents(requirementId: string): Promise<IRequirementFlowEventRow[]> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_requirement_flow_events
+      WHERE requirement_id = ${requirementId}
+      ORDER BY created_at ASC;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows.map((row) => this.rowToRequirementFlowEvent(row));
+  }
+
   async upsertRequirement(body: Partial<IRequirementRow> & { id: string }): Promise<IRequirementRow> {
     const existing = await this.getRequirement(body.id);
     const now = new Date().toISOString();
@@ -1214,6 +1906,10 @@ export class RdService implements OnModuleInit {
           createdBy: body.createdBy ?? body.updatedBy ?? body.submitter ?? null,
           updatedBy: body.updatedBy ?? body.createdBy ?? body.submitter ?? null,
         };
+    const statusChanged = existing ? existing.status !== merged.status : true;
+    if (statusChanged) {
+      this.assertRequirementStatusTransition(existing?.status ?? null, merged.status);
+    }
 
     await this.db.execute(sql`
       INSERT INTO rd_requirements (
@@ -1269,7 +1965,69 @@ export class RdService implements OnModuleInit {
         updated_by = EXCLUDED.updated_by,
         updated_at = EXCLUDED.updated_at;
     `);
+    if (statusChanged) {
+      await this.recordRequirementFlowEvent({
+        requirementId: merged.id,
+        fromStatus: existing?.status ?? null,
+        toStatus: merged.status,
+        operator: merged.updatedBy ?? merged.createdBy ?? merged.submitter ?? null,
+        comment: existing
+          ? `需求状态从${REQUIREMENT_STATUS_LABELS[existing.status]}流转到${REQUIREMENT_STATUS_LABELS[merged.status]}`
+          : '提交初始需求',
+        createdAt: existing ? merged.updatedAt : merged.createdAt,
+      });
+    }
     return (await this.getRequirement(merged.id))!;
+  }
+
+  private assertRequirementStatusTransition(
+    fromStatus: RequirementStatus | null,
+    toStatus: RequirementStatus
+  ): void {
+    if (!fromStatus) {
+      if (toStatus !== 'backlog') {
+        throw new BadRequestException('新需求必须从需求池创建');
+      }
+      return;
+    }
+    const allowed = REQUIREMENT_STATUS_TRANSITIONS[fromStatus] ?? [];
+    if (!allowed.includes(toStatus)) {
+      const fromLabel = REQUIREMENT_STATUS_LABELS[fromStatus] ?? fromStatus;
+      const toLabel = REQUIREMENT_STATUS_LABELS[toStatus] ?? toStatus;
+      throw new BadRequestException(
+        `非法需求状态流转：${fromLabel} -> ${toLabel}`
+      );
+    }
+  }
+
+  private async recordRequirementFlowEvent(input: {
+    requirementId: string;
+    fromStatus?: RequirementStatus | null;
+    toStatus: RequirementStatus;
+    operator?: string | null;
+    comment?: string | null;
+    createdAt?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    const id = `rfe_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const action = input.fromStatus
+      ? `${REQUIREMENT_STATUS_LABELS[input.fromStatus]} -> ${REQUIREMENT_STATUS_LABELS[input.toStatus]}`
+      : '需求创建';
+    await this.db.execute(sql`
+      INSERT INTO rd_requirement_flow_events (
+        id, requirement_id, from_status, to_status, action, operator, comment, metadata, created_at
+      ) VALUES (
+        ${id},
+        ${input.requirementId},
+        ${input.fromStatus ?? null},
+        ${input.toStatus},
+        ${action},
+        ${input.operator ?? null},
+        ${input.comment ?? null},
+        ${JSON.stringify(input.metadata ?? {})}::jsonb,
+        ${input.createdAt ?? new Date().toISOString()}::timestamptz
+      );
+    `);
   }
 
   /** 用户是否拥有指定访问角色（含多角色与历史单列回退） */
@@ -1474,6 +2232,95 @@ export class RdService implements OnModuleInit {
     ].join('\n');
   }
 
+  private renderRequirementMarkdown(requirement: IRequirementRow): string {
+    return [
+      `# Requirement - ${requirement.title || requirement.id}`,
+      '',
+      `- Requirement ID: ${requirement.id}`,
+      `- Status: ${requirement.status}`,
+      `- Priority: ${requirement.priority}`,
+      `- Expected Date: ${requirement.expectedDate}`,
+      `- Submitter: ${requirement.submitterName || requirement.submitter}`,
+      `- Product: ${requirement.product || '未指定'}`,
+      `- Updated At: ${requirement.updatedAt}`,
+      '',
+      '## 描述',
+      requirement.description || '',
+      '',
+      '## 角色与领取',
+      `- PM: ${requirement.pm || '未领取'}`,
+      `- TM: ${requirement.tm || '未领取'}`,
+      `- Bounty Points: ${requirement.bountyPoints}`,
+      '',
+    ].join('\n');
+  }
+
+  private renderOrgSpecMarkdown(config: unknown): string {
+    const orgSpec = this.parseJsonObject(config);
+    const orgName = String(orgSpec.orgName || '默认组织');
+    const version = Number(orgSpec.version ?? 1);
+    const defaultLanguage = String(orgSpec.defaultLanguage || 'typescript');
+    const languages = this.parseJsonObject(orgSpec.languages);
+    const sections = Object.values(languages)
+      .filter((language): language is Record<string, unknown> => {
+        if (!language || typeof language !== 'object' || Array.isArray(language)) return false;
+        return (language as Record<string, unknown>).enabled !== false;
+      })
+      .map((language) => {
+        const displayName = String(language.displayName || language.language || 'Unknown');
+        const renderList = (title: string, value: unknown) => {
+          const items = Array.isArray(value) ? value : [];
+          return [`### ${title}`, ...(items.length ? items.map((item) => `- ${String(item)}`) : ['- 暂无'])].join('\n');
+        };
+        return [
+          `## ${displayName}`,
+          renderList('Style Guide', language.styleGuide),
+          renderList('Must Follow', language.mustFollow),
+          renderList('Forbidden', language.forbidden),
+          renderList('Toolchain', language.toolchain),
+          renderList('Testing', language.testing),
+        ].join('\n\n');
+      })
+      .join('\n\n');
+    return [
+      `# Organization Coding Spec - ${orgName}`,
+      '',
+      `- Version: ${version}`,
+      `- Default Language: ${defaultLanguage}`,
+      '',
+      sections || '暂无启用语言规范',
+      '',
+    ].join('\n');
+  }
+
+  private renderRepoSummaryMarkdown(input: {
+    pipelineRun?: IPipelineRunRow | null;
+    requirement: IRequirementRow;
+    prd?: IPrdRow | null;
+    spec?: ISpecRow | null;
+  }): string {
+    const meta = input.pipelineRun?.contextSnapshot || {};
+    const lines = [
+      '# Repository Summary',
+      '',
+      `- Requirement ID: ${input.requirement.id}`,
+      `- Pipeline Run ID: ${input.pipelineRun?.id || '未创建'}`,
+      `- PRD ID: ${input.prd?.id || '未绑定'}`,
+      `- Spec ID: ${input.spec?.id || '未绑定'}`,
+      `- Trigger Mode: ${input.pipelineRun?.triggerMode || 'manual'}`,
+    ];
+    const gitUrl = meta.gitUrl || meta.repoUrl || meta.repositoryUrl;
+    const branch = meta.branch || meta.baseBranch || meta.targetBranch;
+    if (gitUrl) lines.push(`- Repository URL: ${String(gitUrl)}`);
+    if (branch) lines.push(`- Base Branch: ${String(branch)}`);
+    lines.push('', '## Context Snapshot', '```json', JSON.stringify(meta, null, 2), '```', '');
+    return lines.join('\n');
+  }
+
+  private hashText(value: string): string {
+    return createHash('sha256').update(value).digest('hex');
+  }
+
   async buildPipelineDocsExport(requirementId: string): Promise<IPipelineDocsExportItem[]> {
     const requirement = await this.getRequirement(requirementId);
     if (!requirement) {
@@ -1514,6 +2361,149 @@ export class RdService implements OnModuleInit {
         content: cpContent,
       },
     ];
+  }
+
+  async listContextPacks(requirementId?: string): Promise<IContextPackRow[]> {
+    const result = requirementId
+      ? await this.db.execute(sql`
+          SELECT * FROM rd_context_packs
+          WHERE requirement_id = ${requirementId}
+          ORDER BY version DESC;
+        `)
+      : await this.db.execute(sql`
+          SELECT * FROM rd_context_packs ORDER BY created_at DESC;
+        `);
+    return this.rowsFromExecute(result).map((row) => this.rowToContextPack(row));
+  }
+
+  async getContextPack(id: string): Promise<IContextPackRow | null> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_context_packs WHERE id = ${id} LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows[0] ? this.rowToContextPack(rows[0]) : null;
+  }
+
+  private async nextContextPackVersion(requirementId: string): Promise<number> {
+    const result = await this.db.execute(sql`
+      SELECT COALESCE(MAX(version), 0) AS max_version
+      FROM rd_context_packs
+      WHERE requirement_id = ${requirementId};
+    `);
+    const row = this.rowsFromExecute<{ max_version?: unknown; maxVersion?: unknown }>(result)[0];
+    return Number(row?.max_version ?? row?.maxVersion ?? 0) + 1;
+  }
+
+  async createContextPack(body: {
+    id?: string;
+    requirementId: string;
+    prdId?: string | null;
+    specId?: string | null;
+    pipelineRunId?: string | null;
+    createdBy?: string | null;
+  }): Promise<IContextPackRow> {
+    const requirement = await this.getRequirement(body.requirementId);
+    if (!requirement) {
+      throw new NotFoundException('需求不存在');
+    }
+    const prd = body.prdId
+      ? await this.getPrd(body.prdId)
+      : await this.getPrdByRequirementId(body.requirementId);
+    if (!prd) {
+      throw new NotFoundException('未找到该需求对应的 PRD');
+    }
+    if (prd.requirementId !== body.requirementId) {
+      throw new BadRequestException('ContextPack 的 PRD 与需求不一致');
+    }
+    const spec = body.specId ? await this.getSpec(body.specId) : await this.getSpecByPrdId(prd.id);
+    if (!spec) {
+      throw new NotFoundException('未找到该需求对应的规格说明');
+    }
+    if (spec.prdId !== prd.id) {
+      throw new BadRequestException('ContextPack 的 Spec 与 PRD 不一致');
+    }
+    let pipelineRun: IPipelineRunRow | null = null;
+    if (body.pipelineRunId) {
+      pipelineRun = await this.getPipelineRun(body.pipelineRunId);
+      if (!pipelineRun) {
+        throw new NotFoundException('PipelineRun 不存在');
+      }
+      if (pipelineRun.requirementId !== body.requirementId) {
+        throw new BadRequestException('ContextPack 的 PipelineRun 与需求不一致');
+      }
+    }
+    const orgSpec = (await this.getOrgSpecConfig()) ?? createDefaultOrgSpecConfig();
+    const fsContent =
+      spec.fsMarkdown?.trim() ||
+      JSON.stringify(
+        {
+          functionalSpec: spec.functionalSpec,
+          machineReadableJson: spec.machineReadableJson,
+        },
+        null,
+        2,
+      );
+    const tsContent =
+      spec.tsMarkdown?.trim() || JSON.stringify({ technicalSpec: spec.technicalSpec }, null, 2);
+    const cpContent =
+      spec.cpMarkdown?.trim() ||
+      '# Implementation Plan\n\n> 当前规格尚未生成 CP，请先补齐编程计划后再执行 Agent 编码。\n';
+    const files: IContextPackFile[] = [
+      { path: 'context/requirement.md', kind: 'markdown', content: this.renderRequirementMarkdown(requirement) },
+      { path: 'context/prd.md', kind: 'markdown', content: this.renderPrdMarkdown(prd) },
+      { path: 'context/fs.json', kind: 'json', content: fsContent },
+      { path: 'context/ts.json', kind: 'json', content: tsContent },
+      { path: 'context/cp.md', kind: 'markdown', content: cpContent },
+      { path: 'context/org-spec.md', kind: 'markdown', content: this.renderOrgSpecMarkdown(orgSpec) },
+      {
+        path: 'context/repo-summary.md',
+        kind: 'markdown',
+        content: this.renderRepoSummaryMarkdown({ pipelineRun, requirement, prd, spec }),
+      },
+    ];
+    const generatedAt = new Date().toISOString();
+    const manifest: IContextPackManifest = {
+      requirementId: requirement.id,
+      prdId: prd.id,
+      specId: spec.id,
+      pipelineRunId: pipelineRun?.id || body.pipelineRunId || null,
+      generatedAt,
+      sources: {
+        requirementUpdatedAt: requirement.updatedAt,
+        prdUpdatedAt: prd.updatedAt,
+        specUpdatedAt: spec.updatedAt,
+        orgSpecVersion: Number(this.parseJsonObject(orgSpec).version ?? 1),
+      },
+      files: files.map((file) => ({
+        path: file.path,
+        kind: file.kind,
+        bytes: Buffer.byteLength(file.content),
+        sha256: this.hashText(file.content),
+      })),
+    };
+    const content = Object.fromEntries(files.map((file) => [file.path, file]));
+    const checksum = this.hashText(JSON.stringify({ manifest, content }));
+    const version = await this.nextContextPackVersion(requirement.id);
+    const id = body.id?.trim() || `ctx_${requirement.id}_${version}`;
+    await this.db.execute(sql`
+      INSERT INTO rd_context_packs (
+        id, requirement_id, prd_id, spec_id, pipeline_run_id, version, checksum,
+        manifest, content, created_by, created_at
+      ) VALUES (
+        ${id},
+        ${requirement.id},
+        ${prd.id},
+        ${spec.id},
+        ${pipelineRun?.id ?? body.pipelineRunId ?? null},
+        ${version},
+        ${checksum},
+        ${JSON.stringify(manifest)}::jsonb,
+        ${JSON.stringify(content)}::jsonb,
+        ${body.createdBy ?? null},
+        ${generatedAt}::timestamptz
+      );
+    `);
+    return (await this.getContextPack(id))!;
   }
 
   async upsertPrd(body: Partial<IPrdRow> & { id: string; requirementId: string }): Promise<IPrdRow> {
@@ -2044,17 +3034,1234 @@ export class RdService implements OnModuleInit {
     `);
     if (!existing) {
       const actor = merged.updatedBy ?? merged.createdBy ?? null;
-      await this.upsertRequirement({
-        id: merged.requirementId,
-        status: 'ai_developing',
-        updatedBy: actor ?? undefined,
-      });
+      await this.advanceRequirementToAiDeveloping(merged.requirementId, actor);
     }
     return (await this.getPipelineTask(merged.id))!;
   }
 
+  private async advanceRequirementToAiDeveloping(
+    requirementId: string,
+    actor?: string | null
+  ): Promise<void> {
+    const requirement = await this.getRequirement(requirementId);
+    if (!requirement || requirement.status === 'ai_developing') return;
+    const statusPath: RequirementStatus[] = [
+      'backlog',
+      'prd_writing',
+      'spec_defining',
+      'ai_developing',
+    ];
+    const currentIndex = statusPath.indexOf(requirement.status);
+    const targetIndex = statusPath.indexOf('ai_developing');
+    if (currentIndex === -1 || currentIndex > targetIndex) {
+      await this.upsertRequirement({
+        id: requirementId,
+        status: 'ai_developing',
+        updatedBy: actor ?? undefined,
+      });
+      return;
+    }
+
+    for (const nextStatus of statusPath.slice(currentIndex + 1, targetIndex + 1)) {
+      await this.upsertRequirement({
+        id: requirementId,
+        status: nextStatus,
+        updatedBy: actor ?? undefined,
+      });
+    }
+  }
+
   async deletePipelineTask(id: string): Promise<void> {
     await this.db.execute(sql`DELETE FROM rd_pipeline_tasks WHERE id = ${id};`);
+  }
+
+  async listPipelineRuns(requirementId?: string): Promise<IPipelineRunRow[]> {
+    const result = requirementId
+      ? await this.db.execute(sql`
+          SELECT * FROM rd_pipeline_runs
+          WHERE requirement_id = ${requirementId}
+          ORDER BY created_at DESC;
+        `)
+      : await this.db.execute(sql`
+          SELECT * FROM rd_pipeline_runs ORDER BY created_at DESC;
+        `);
+    const rows = this.rowsFromExecute(result);
+    return rows.map((row) => this.rowToPipelineRun(row));
+  }
+
+  async getPipelineRun(id: string): Promise<IPipelineRunRow | null> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_pipeline_runs WHERE id = ${id} LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows[0] ? this.rowToPipelineRun(rows[0]) : null;
+  }
+
+  async createPipelineRun(
+    body: Partial<IPipelineRunRow> & { id?: string; requirementId: string }
+  ): Promise<IPipelineRunRow> {
+    const requirement = await this.getRequirement(body.requirementId);
+    if (!requirement) {
+      throw new BadRequestException('关联需求不存在或已删除');
+    }
+    const now = new Date().toISOString();
+    const id = body.id?.trim() || `prun_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const status = body.status || 'queued';
+    await this.db.execute(sql`
+      INSERT INTO rd_pipeline_runs (
+        id, pipeline_task_id, requirement_id, status, trigger_mode, context_snapshot,
+        started_at, finished_at, created_by, updated_by, created_at, updated_at
+      ) VALUES (
+        ${id},
+        ${body.pipelineTaskId ?? null},
+        ${body.requirementId},
+        ${status},
+        ${body.triggerMode || 'manual'},
+        ${JSON.stringify(body.contextSnapshot ?? {})}::jsonb,
+        ${body.startedAt ?? null}::timestamptz,
+        ${body.finishedAt ?? null}::timestamptz,
+        ${body.createdBy ?? body.updatedBy ?? null},
+        ${body.updatedBy ?? body.createdBy ?? null},
+        ${body.createdAt ?? now}::timestamptz,
+        ${body.updatedAt ?? now}::timestamptz
+      );
+    `);
+    return (await this.getPipelineRun(id))!;
+  }
+
+  async listPipelineStepRuns(pipelineRunId: string): Promise<IPipelineStepRunRow[]> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_pipeline_step_runs
+      WHERE pipeline_run_id = ${pipelineRunId}
+      ORDER BY order_index ASC, created_at ASC;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows.map((row) => this.rowToPipelineStepRun(row));
+  }
+
+  async upsertPipelineStepRun(
+    body: Partial<IPipelineStepRunRow> & {
+      id?: string;
+      pipelineRunId: string;
+      stepKey: string;
+      name: string;
+    }
+  ): Promise<IPipelineStepRunRow> {
+    const run = await this.getPipelineRun(body.pipelineRunId);
+    if (!run) {
+      throw new BadRequestException('关联 PipelineRun 不存在或已删除');
+    }
+    const now = new Date().toISOString();
+    const id = body.id?.trim() || `pstep_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const status = body.status || 'queued';
+    await this.db.execute(sql`
+      INSERT INTO rd_pipeline_step_runs (
+        id, pipeline_run_id, step_key, name, status, order_index,
+        input_ref, output_ref, error_code, error_message,
+        started_at, finished_at, created_at, updated_at
+      ) VALUES (
+        ${id},
+        ${body.pipelineRunId},
+        ${body.stepKey},
+        ${body.name},
+        ${status},
+        ${body.orderIndex ?? 0},
+        ${body.inputRef ?? null},
+        ${body.outputRef ?? null},
+        ${body.errorCode ?? null},
+        ${body.errorMessage ?? null},
+        ${body.startedAt ?? null}::timestamptz,
+        ${body.finishedAt ?? null}::timestamptz,
+        ${body.createdAt ?? now}::timestamptz,
+        ${body.updatedAt ?? now}::timestamptz
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        step_key = EXCLUDED.step_key,
+        name = EXCLUDED.name,
+        status = EXCLUDED.status,
+        order_index = EXCLUDED.order_index,
+        input_ref = EXCLUDED.input_ref,
+        output_ref = EXCLUDED.output_ref,
+        error_code = EXCLUDED.error_code,
+        error_message = EXCLUDED.error_message,
+        started_at = EXCLUDED.started_at,
+        finished_at = EXCLUDED.finished_at,
+        updated_at = EXCLUDED.updated_at;
+    `);
+    const rows = await this.listPipelineStepRuns(body.pipelineRunId);
+    return rows.find((row) => row.id === id)!;
+  }
+
+  async listAgentSessions(filters?: {
+    pipelineRunId?: string;
+    requirementId?: string;
+  }): Promise<IAgentSessionRow[]> {
+    let result: unknown;
+    if (filters?.pipelineRunId) {
+      result = await this.db.execute(sql`
+        SELECT * FROM rd_agent_sessions
+        WHERE pipeline_run_id = ${filters.pipelineRunId}
+        ORDER BY created_at DESC;
+      `);
+    } else if (filters?.requirementId) {
+      result = await this.db.execute(sql`
+        SELECT * FROM rd_agent_sessions
+        WHERE requirement_id = ${filters.requirementId}
+        ORDER BY created_at DESC;
+      `);
+    } else {
+      result = await this.db.execute(sql`
+        SELECT * FROM rd_agent_sessions ORDER BY created_at DESC;
+      `);
+    }
+    return this.rowsFromExecute(result).map((row) => this.rowToAgentSession(row));
+  }
+
+  async getAgentSession(id: string): Promise<IAgentSessionRow | null> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_agent_sessions WHERE id = ${id} LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows[0] ? this.rowToAgentSession(rows[0]) : null;
+  }
+
+  async createAgentSession(
+    body: Partial<IAgentSessionRow> & { id?: string; requirementId: string; title: string }
+  ): Promise<IAgentSessionRow> {
+    const requirement = await this.getRequirement(body.requirementId);
+    if (!requirement) {
+      throw new BadRequestException('关联需求不存在或已删除');
+    }
+    if (body.pipelineRunId) {
+      const run = await this.getPipelineRun(body.pipelineRunId);
+      if (!run) {
+        throw new BadRequestException('关联 PipelineRun 不存在或已删除');
+      }
+      if (run.requirementId !== body.requirementId) {
+        throw new BadRequestException('AgentSession 与 PipelineRun 的需求不一致');
+      }
+    }
+    const now = new Date().toISOString();
+    const id = body.id?.trim() || `asess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    await this.db.execute(sql`
+      INSERT INTO rd_agent_sessions (
+        id, pipeline_run_id, requirement_id, spec_id, context_pack_id, title, status,
+        runtime_adapter, model, base_branch, agent_branch, plan_markdown, risk_level,
+        metadata, created_by, updated_by, created_at, updated_at
+      ) VALUES (
+        ${id},
+        ${body.pipelineRunId ?? null},
+        ${body.requirementId},
+        ${body.specId ?? null},
+        ${body.contextPackId ?? null},
+        ${body.title},
+        ${body.status || 'draft'},
+        ${body.runtimeAdapter || 'custom'},
+        ${body.model ?? null},
+        ${body.baseBranch ?? null},
+        ${body.agentBranch ?? null},
+        ${body.planMarkdown ?? null},
+        ${body.riskLevel || 'medium'},
+        ${JSON.stringify(body.metadata ?? {})}::jsonb,
+        ${body.createdBy ?? body.updatedBy ?? null},
+        ${body.updatedBy ?? body.createdBy ?? null},
+        ${body.createdAt ?? now}::timestamptz,
+        ${body.updatedAt ?? now}::timestamptz
+      );
+    `);
+    return (await this.getAgentSession(id))!;
+  }
+
+  async listAgentTasks(sessionId: string): Promise<IAgentTaskRow[]> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_agent_tasks
+      WHERE session_id = ${sessionId}
+      ORDER BY order_index ASC, created_at ASC;
+    `);
+    return this.rowsFromExecute(result).map((row) => this.rowToAgentTask(row));
+  }
+
+  async upsertAgentTask(
+    body: Partial<IAgentTaskRow> & { id?: string; sessionId: string; role: AgentTaskRole; title: string }
+  ): Promise<IAgentTaskRow> {
+    const session = await this.getAgentSession(body.sessionId);
+    if (!session) {
+      throw new BadRequestException('关联 AgentSession 不存在或已删除');
+    }
+    const now = new Date().toISOString();
+    const id = body.id?.trim() || `atask_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    await this.db.execute(sql`
+      INSERT INTO rd_agent_tasks (
+        id, session_id, pipeline_step_run_id, parent_task_id, role, title, instructions,
+        status, order_index, locked, requires_approval, metadata, started_at, finished_at,
+        created_at, updated_at
+      ) VALUES (
+        ${id},
+        ${body.sessionId},
+        ${body.pipelineStepRunId ?? null},
+        ${body.parentTaskId ?? null},
+        ${body.role},
+        ${body.title},
+        ${body.instructions ?? ''},
+        ${body.status || 'queued'},
+        ${body.orderIndex ?? 0},
+        ${body.locked ?? false},
+        ${body.requiresApproval ?? false},
+        ${JSON.stringify(body.metadata ?? {})}::jsonb,
+        ${body.startedAt ?? null}::timestamptz,
+        ${body.finishedAt ?? null}::timestamptz,
+        ${body.createdAt ?? now}::timestamptz,
+        ${body.updatedAt ?? now}::timestamptz
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        pipeline_step_run_id = EXCLUDED.pipeline_step_run_id,
+        parent_task_id = EXCLUDED.parent_task_id,
+        role = EXCLUDED.role,
+        title = EXCLUDED.title,
+        instructions = EXCLUDED.instructions,
+        status = EXCLUDED.status,
+        order_index = EXCLUDED.order_index,
+        locked = EXCLUDED.locked,
+        requires_approval = EXCLUDED.requires_approval,
+        metadata = EXCLUDED.metadata,
+        started_at = EXCLUDED.started_at,
+        finished_at = EXCLUDED.finished_at,
+        updated_at = EXCLUDED.updated_at;
+    `);
+    const rows = await this.listAgentTasks(body.sessionId);
+    return rows.find((row) => row.id === id)!;
+  }
+
+  async listAgentToolCalls(filters: { sessionId: string; taskId?: string }): Promise<IAgentToolCallRow[]> {
+    const result = filters.taskId
+      ? await this.db.execute(sql`
+          SELECT * FROM rd_agent_tool_calls
+          WHERE session_id = ${filters.sessionId} AND task_id = ${filters.taskId}
+          ORDER BY created_at ASC;
+        `)
+      : await this.db.execute(sql`
+          SELECT * FROM rd_agent_tool_calls
+          WHERE session_id = ${filters.sessionId}
+          ORDER BY created_at ASC;
+        `);
+    return this.rowsFromExecute(result).map((row) => this.rowToAgentToolCall(row));
+  }
+
+  async upsertAgentToolCall(
+    body: Partial<IAgentToolCallRow> & { id?: string; sessionId: string; toolName: string }
+  ): Promise<IAgentToolCallRow> {
+    const session = await this.getAgentSession(body.sessionId);
+    if (!session) {
+      throw new BadRequestException('关联 AgentSession 不存在或已删除');
+    }
+    const now = new Date().toISOString();
+    const id = body.id?.trim() || `atool_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    await this.db.execute(sql`
+      INSERT INTO rd_agent_tool_calls (
+        id, session_id, task_id, workspace_id, tool_name, tool_category, status,
+        approval_status, risk_level, input_summary, output_summary, command, exit_code,
+        duration_ms, metadata, started_at, finished_at, created_at, updated_at
+      ) VALUES (
+        ${id},
+        ${body.sessionId},
+        ${body.taskId ?? null},
+        ${body.workspaceId ?? null},
+        ${body.toolName},
+        ${body.toolCategory || 'other'},
+        ${body.status || 'pending'},
+        ${body.approvalStatus || 'not_required'},
+        ${body.riskLevel || 'low'},
+        ${body.inputSummary ?? ''},
+        ${body.outputSummary ?? null},
+        ${body.command ?? null},
+        ${body.exitCode ?? null},
+        ${body.durationMs ?? null},
+        ${JSON.stringify(body.metadata ?? {})}::jsonb,
+        ${body.startedAt ?? null}::timestamptz,
+        ${body.finishedAt ?? null}::timestamptz,
+        ${body.createdAt ?? now}::timestamptz,
+        ${body.updatedAt ?? now}::timestamptz
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        task_id = EXCLUDED.task_id,
+        workspace_id = EXCLUDED.workspace_id,
+        tool_name = EXCLUDED.tool_name,
+        tool_category = EXCLUDED.tool_category,
+        status = EXCLUDED.status,
+        approval_status = EXCLUDED.approval_status,
+        risk_level = EXCLUDED.risk_level,
+        input_summary = EXCLUDED.input_summary,
+        output_summary = EXCLUDED.output_summary,
+        command = EXCLUDED.command,
+        exit_code = EXCLUDED.exit_code,
+        duration_ms = EXCLUDED.duration_ms,
+        metadata = EXCLUDED.metadata,
+        started_at = EXCLUDED.started_at,
+        finished_at = EXCLUDED.finished_at,
+        updated_at = EXCLUDED.updated_at;
+    `);
+    const rows = await this.listAgentToolCalls({ sessionId: body.sessionId });
+    return rows.find((row) => row.id === id)!;
+  }
+
+  async getAgentToolCall(id: string): Promise<IAgentToolCallRow | null> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_agent_tool_calls WHERE id = ${id} LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows[0] ? this.rowToAgentToolCall(rows[0]) : null;
+  }
+
+  async prepareAgentToolCall(
+    body: Partial<IAgentToolCallRow> & {
+      id?: string;
+      sessionId: string;
+      toolName: string;
+      toolCategory: IAgentToolCallRow['toolCategory'];
+      timeoutMs?: number | null;
+    }
+  ): Promise<IAgentToolCallRow> {
+    const policy = prepareToolCallPolicy({
+      toolName: body.toolName,
+      toolCategory: body.toolCategory,
+      command: body.command,
+      requestedRiskLevel: body.riskLevel,
+      requestedApprovalStatus: body.approvalStatus,
+      timeoutMs: body.timeoutMs,
+    });
+    return this.upsertAgentToolCall({
+      ...body,
+      status: policy.status,
+      approvalStatus: policy.approvalStatus,
+      riskLevel: policy.riskLevel,
+      metadata: {
+        ...(body.metadata || {}),
+        timeoutMs: policy.timeoutMs,
+        policyReason: policy.reason,
+      },
+    });
+  }
+
+  async approveAgentToolCall(
+    id: string,
+    body: { approved: boolean; approver?: string | null; reason?: string | null }
+  ): Promise<IAgentToolCallRow> {
+    const current = await this.getAgentToolCall(id);
+    if (!current) {
+      throw new NotFoundException('AgentToolCall 不存在');
+    }
+    const approvalStatus: AgentToolApprovalStatus = body.approved ? 'approved' : 'rejected';
+    const status: AgentToolCallStatus = body.approved ? 'pending' : 'cancelled';
+    return this.upsertAgentToolCall({
+      ...current,
+      approvalStatus,
+      status,
+      metadata: {
+        ...current.metadata,
+        approval: {
+          approver: body.approver ?? null,
+          reason: body.reason ?? null,
+          decidedAt: new Date().toISOString(),
+        },
+      },
+    });
+  }
+
+  async startAgentToolCall(id: string): Promise<IAgentToolCallRow> {
+    const current = await this.getAgentToolCall(id);
+    if (!current) {
+      throw new NotFoundException('AgentToolCall 不存在');
+    }
+    try {
+      assertToolCallCanStart({
+        status: current.status,
+        approvalStatus: current.approvalStatus,
+      });
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : String(error));
+    }
+    return this.upsertAgentToolCall({
+      ...current,
+      status: 'running',
+      startedAt: current.startedAt || new Date().toISOString(),
+    });
+  }
+
+  async finishAgentToolCall(
+    id: string,
+    body: {
+      exitCode?: number | null;
+      outputSummary?: string | null;
+      errorMessage?: string | null;
+      durationMs?: number | null;
+      status?: AgentToolCallStatus | null;
+    }
+  ): Promise<IAgentToolCallRow> {
+    const current = await this.getAgentToolCall(id);
+    if (!current) {
+      throw new NotFoundException('AgentToolCall 不存在');
+    }
+    const exitCode = body.exitCode ?? 0;
+    const status: AgentToolCallStatus = body.status || (exitCode === 0 ? 'succeeded' : 'failed');
+    return this.upsertAgentToolCall({
+      ...current,
+      status,
+      exitCode,
+      outputSummary: body.outputSummary ?? current.outputSummary,
+      durationMs: body.durationMs ?? current.durationMs,
+      finishedAt: new Date().toISOString(),
+      metadata: {
+        ...current.metadata,
+        errorMessage: body.errorMessage ?? null,
+      },
+    });
+  }
+
+  private async persistAgentExecutionOutput(
+    current: IAgentToolCallRow,
+    output: { stdout: string; stderr: string; lastEventType?: AgentExecutionEventType }
+  ): Promise<IAgentToolCallRow> {
+    return this.upsertAgentToolCall({
+      ...current,
+      metadata: {
+        ...this.parseJsonObject(current.metadata),
+        stdout: output.stdout.slice(-20000),
+        stderr: output.stderr.slice(-20000),
+        lastEventType: output.lastEventType ?? null,
+        lastOutputAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  async cancelAgentToolCallExecution(id: string): Promise<IAgentToolCallRow> {
+    const execution = this.runningExecutions.get(id);
+    const current = await this.getAgentToolCall(id);
+    if (!current) {
+      throw new NotFoundException('AgentToolCall 不存在');
+    }
+    const now = Date.now();
+    if (execution) {
+      execution.cancelled = true;
+      if (!execution.child.killed) {
+        execution.child.kill('SIGTERM');
+      }
+      return this.upsertAgentToolCall({
+        ...current,
+        status: 'cancelled',
+        durationMs: current.durationMs ?? now - execution.startedAt,
+        finishedAt: current.finishedAt || new Date().toISOString(),
+        metadata: {
+          ...this.parseJsonObject(current.metadata),
+          executorCancelled: true,
+          cancelledAt: new Date().toISOString(),
+          stdout: execution.stdout.slice(-20000),
+          stderr: execution.stderr.slice(-20000),
+        },
+      });
+    }
+    if (current.status !== 'running') {
+      throw new BadRequestException('当前工具调用未处于运行中');
+    }
+    return this.upsertAgentToolCall({
+      ...current,
+      status: 'cancelled',
+      finishedAt: current.finishedAt || new Date().toISOString(),
+      metadata: {
+        ...this.parseJsonObject(current.metadata),
+        executorCancelled: true,
+        cancelledAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  private buildCodexExecCommand(input: {
+    prompt: string;
+    workspacePath: string;
+    model?: string | null;
+  }): { command: string; args: string[] } {
+    const codexBin = String(process.env.CODEX_CLI_BIN || 'codex').trim() || 'codex';
+    const args = [
+      'exec',
+      '--cd',
+      input.workspacePath,
+      '--sandbox',
+      'workspace-write',
+      '--ask-for-approval',
+      'never',
+    ];
+    const model = input.model?.trim() || process.env.CODEX_CLI_MODEL?.trim();
+    if (model) {
+      args.push('--model', model);
+    }
+    args.push(input.prompt);
+    return { command: codexBin, args };
+  }
+
+  private runTextCommand(command: string, args: string[], cwd: string): Promise<ICommandTextResult> {
+    return new Promise((resolve) => {
+      const child = spawn(command, args, {
+        cwd,
+        env: process.env,
+        shell: false,
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString('utf8');
+      });
+      child.stderr?.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString('utf8');
+      });
+      child.on('error', (error) => {
+        resolve({
+          exitCode: 1,
+          stdout,
+          stderr: stderr || (error instanceof Error ? error.message : String(error)),
+        });
+      });
+      child.on('close', (code) => {
+        resolve({ exitCode: code, stdout, stderr });
+      });
+    });
+  }
+
+  private parseGitNameStatus(output: string): Array<{ path: string; changeType: 'add' | 'modify' | 'delete' }> {
+    return output
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [statusRaw, ...pathParts] = line.split(/\s+/);
+        const path = pathParts.at(-1)?.trim() || '';
+        if (!path) return null;
+        const status = statusRaw.charAt(0).toUpperCase();
+        const changeType = status === 'A' ? 'add' : status === 'D' ? 'delete' : 'modify';
+        return { path, changeType };
+      })
+      .filter((item): item is { path: string; changeType: 'add' | 'modify' | 'delete' } => Boolean(item));
+  }
+
+  private extractTestCommandsFromOutput(output: string): string[] {
+    const commands = new Set<string>();
+    const patterns = [
+      /\b(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:test|test:[A-Za-z0-9_.:-]+|ci:check|type:check(?::[A-Za-z0-9_.:-]+)?|lint(?::[A-Za-z0-9_.:-]+)?)(?:[^\n\r]*)?/i,
+      /\bnpx\s+(?:jest|vitest|playwright)(?:[^\n\r]*)?/i,
+      /\b(?:jest|vitest|pytest)(?:[^\n\r]*)?/i,
+    ];
+    for (const line of output.split(/\r?\n/)) {
+      for (const pattern of patterns) {
+        const match = line.match(pattern);
+        if (match?.[0]) {
+          const command = match[0].replace(/[`'"，。；;]+$/g, '').trim();
+          if (command) {
+            commands.add(command.slice(0, 300));
+          }
+        }
+      }
+    }
+    return Array.from(commands);
+  }
+
+  private async collectAgentWorkspaceReviewSummary(
+    workspacePath: string,
+    executionOutput = ''
+  ): Promise<IAgentWorkspaceReviewSummary> {
+    const [nameStatus, diffStat, statusShort] = await Promise.all([
+      this.runTextCommand('git', ['diff', '--name-status'], workspacePath),
+      this.runTextCommand('git', ['diff', '--stat', '--compact-summary'], workspacePath),
+      this.runTextCommand('git', ['status', '--short'], workspacePath),
+    ]);
+    const errorMessage = [nameStatus, diffStat, statusShort]
+      .filter((result) => result.exitCode !== 0)
+      .map((result) => result.stderr.trim())
+      .filter(Boolean)
+      .join('\n');
+    return {
+      changedFiles: this.parseGitNameStatus(nameStatus.stdout),
+      diffNameStatus: nameStatus.stdout.slice(-12000),
+      diffStat: diffStat.stdout.slice(-12000),
+      statusShort: statusShort.stdout.slice(-12000),
+      detectedTestCommands: this.extractTestCommandsFromOutput(executionOutput),
+      errorMessage: errorMessage || undefined,
+    };
+  }
+
+  private async ensureAgentWorkspaceExecutable(workspace: IAgentWorkspaceRow, workspacePath: string): Promise<string | null> {
+    if (workspace.status !== 'ready') {
+      return `AgentWorkspace 尚未就绪：当前状态 ${workspace.status}。请先完成 git.clone_cache / git.fetch / git.worktree_add 生命周期工具调用，并标记 workspace ready`;
+    }
+    try {
+      const info = await stat(workspacePath);
+      if (!info.isDirectory()) {
+        return `AgentWorkspace 路径不是目录：${workspacePath}`;
+      }
+    } catch {
+      return `AgentWorkspace 路径不存在：${workspacePath}。请先执行 workspace 生命周期 git 工具调用`;
+    }
+    return null;
+  }
+
+  async *runAgentToolCallStream(
+    id: string,
+    body?: { prompt?: string | null; model?: string | null }
+  ): AsyncGenerator<IAgentExecutionEvent> {
+    const current = await this.startAgentToolCall(id);
+    const workspaceId = current.workspaceId?.trim();
+    if (!workspaceId) {
+      const message = 'Codex 执行需要绑定 AgentWorkspace';
+      const failed = await this.finishAgentToolCall(id, { exitCode: 1, errorMessage: message });
+      yield { type: 'error', toolCallId: id, status: failed.status, message, toolCall: failed };
+      return;
+    }
+    const workspace = await this.getAgentWorkspace(workspaceId);
+    const workspacePath = workspace?.worktreePath?.trim();
+    if (!workspace || !workspacePath) {
+      const message = 'AgentWorkspace 尚未准备 worktreePath';
+      const failed = await this.finishAgentToolCall(id, { exitCode: 1, errorMessage: message });
+      yield { type: 'error', toolCallId: id, status: failed.status, message, toolCall: failed };
+      return;
+    }
+    const workspaceExecutableError = await this.ensureAgentWorkspaceExecutable(workspace, workspacePath);
+    if (workspaceExecutableError) {
+      const failed = await this.finishAgentToolCall(id, {
+        exitCode: 1,
+        errorMessage: workspaceExecutableError,
+        outputSummary: workspaceExecutableError,
+      });
+      yield {
+        type: 'error',
+        toolCallId: id,
+        status: failed.status,
+        message: workspaceExecutableError,
+        toolCall: failed,
+      };
+      return;
+    }
+
+    const startedAt = Date.now();
+    const metadata = this.parseJsonObject(current.metadata);
+    const prompt = String(body?.prompt || metadata.prompt || current.inputSummary || '').trim();
+    if (!prompt) {
+      const message = 'Codex 执行缺少 prompt';
+      const failed = await this.finishAgentToolCall(id, { exitCode: 1, errorMessage: message });
+      yield { type: 'error', toolCallId: id, status: failed.status, message, toolCall: failed };
+      return;
+    }
+    const command = this.buildCodexExecCommand({ prompt, workspacePath, model: body?.model ?? current.metadata.model as string | null });
+    const started = await this.upsertAgentToolCall({
+      ...current,
+      status: 'running',
+      command: [command.command, ...command.args].join(' '),
+      startedAt: current.startedAt || new Date(startedAt).toISOString(),
+      metadata: {
+        ...metadata,
+        executor: 'codex_cli',
+        prompt,
+        cwd: workspacePath,
+        stdout: '',
+        stderr: '',
+        spawnVerified: false,
+      },
+    });
+    yield { type: 'started', toolCallId: id, status: 'running', toolCall: started };
+
+    let stdout = '';
+    let stderr = '';
+    let latestToolCall = started;
+    const child = spawn(command.command, command.args, {
+      cwd: workspacePath,
+      env: process.env,
+      shell: false,
+    });
+    const spawnedAt = new Date().toISOString();
+    latestToolCall = await this.upsertAgentToolCall({
+      ...started,
+      metadata: {
+        ...this.parseJsonObject(started.metadata),
+        pid: child.pid ?? null,
+        spawnedAt,
+        codexCommand: [command.command, ...command.args].join(' '),
+        spawnVerified: Boolean(child.pid),
+      },
+    });
+    yield {
+      type: 'spawned',
+      toolCallId: id,
+      status: 'running',
+      pid: child.pid ?? null,
+      cwd: workspacePath,
+      command: [command.command, ...command.args].join(' '),
+      timestamp: spawnedAt,
+      toolCall: latestToolCall,
+    };
+    const execution: IAgentExecutionProcess = {
+      child,
+      startedAt,
+      stdout: '',
+      stderr: '',
+      cancelled: false,
+    };
+    this.runningExecutions.set(id, execution);
+
+    const queue: IAgentExecutionEvent[] = [];
+    let settled = false;
+    let exitCode: number | null = null;
+    let errorMessage: string | undefined;
+    let firstOutputAt: string | null = null;
+    const waiters: Array<() => void> = [];
+    const notify = () => {
+      const waiter = waiters.shift();
+      waiter?.();
+    };
+    const push = (event: IAgentExecutionEvent) => {
+      queue.push(event);
+      notify();
+    };
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf8');
+      firstOutputAt = firstOutputAt || new Date().toISOString();
+      stdout += text;
+      execution.stdout = stdout;
+      push({
+        type: 'stdout',
+        toolCallId: id,
+        chunk: text,
+        status: 'running',
+        stdoutBytes: Buffer.byteLength(stdout),
+        stderrBytes: Buffer.byteLength(stderr),
+        timestamp: new Date().toISOString(),
+      });
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf8');
+      firstOutputAt = firstOutputAt || new Date().toISOString();
+      stderr += text;
+      execution.stderr = stderr;
+      push({
+        type: 'stderr',
+        toolCallId: id,
+        chunk: text,
+        status: 'running',
+        stdoutBytes: Buffer.byteLength(stdout),
+        stderrBytes: Buffer.byteLength(stderr),
+        timestamp: new Date().toISOString(),
+      });
+    });
+    child.on('error', (error) => {
+      errorMessage = error instanceof Error ? error.message : String(error);
+      exitCode = 1;
+      settled = true;
+      notify();
+    });
+    child.on('close', (code) => {
+      exitCode = code ?? 0;
+      settled = true;
+      notify();
+    });
+
+    const heartbeat = setInterval(() => {
+      if (settled) return;
+      push({
+        type: 'heartbeat',
+        toolCallId: id,
+        status: 'running',
+        durationMs: Date.now() - startedAt,
+        stdoutBytes: Buffer.byteLength(stdout),
+        stderrBytes: Buffer.byteLength(stderr),
+        timestamp: new Date().toISOString(),
+      });
+    }, 1000);
+
+    while (!settled || queue.length > 0) {
+      const event = queue.shift();
+      if (event) {
+        latestToolCall = await this.persistAgentExecutionOutput(latestToolCall, {
+          stdout,
+          stderr,
+          lastEventType: event.type,
+        });
+        yield event;
+        continue;
+      }
+      await new Promise<void>((resolve) => waiters.push(resolve));
+    }
+    clearInterval(heartbeat);
+
+    const durationMs = Date.now() - startedAt;
+    const outputSummary = stdout.slice(-4000) || stderr.slice(-4000) || errorMessage || null;
+    const wasCancelled = execution.cancelled;
+    const reviewSummary = await this.collectAgentWorkspaceReviewSummary(workspacePath, `${stdout}\n${stderr}`);
+    const finished = await this.finishAgentToolCall(id, {
+      exitCode: wasCancelled ? 130 : exitCode,
+      durationMs,
+      outputSummary: wasCancelled ? outputSummary || 'Codex 执行已取消' : outputSummary,
+      errorMessage: wasCancelled ? 'Codex 执行已取消' : errorMessage,
+      status: wasCancelled ? 'cancelled' : null,
+    });
+    const mergedMetadata = {
+      ...this.parseJsonObject(finished.metadata),
+      executor: 'codex_cli',
+      prompt,
+      cwd: workspacePath,
+      stdout: stdout.slice(-20000),
+      stderr: stderr.slice(-20000),
+      executorCancelled: wasCancelled,
+      firstOutputAt,
+      changedFiles: reviewSummary.changedFiles,
+      diffNameStatus: reviewSummary.diffNameStatus,
+      diffStat: reviewSummary.diffStat,
+      statusShort: reviewSummary.statusShort,
+      detectedTestCommands: reviewSummary.detectedTestCommands,
+      diffReviewError: reviewSummary.errorMessage ?? null,
+      finishedAt: new Date().toISOString(),
+    };
+    const finalToolCall = await this.upsertAgentToolCall({
+      ...finished,
+      metadata: mergedMetadata,
+    });
+    yield {
+      type: 'finished',
+      toolCallId: id,
+      status: finalToolCall.status,
+      exitCode: wasCancelled ? 130 : exitCode,
+      durationMs,
+      changedFilesCount: reviewSummary.changedFiles.length,
+      stdoutBytes: Buffer.byteLength(stdout),
+      stderrBytes: Buffer.byteLength(stderr),
+      timestamp: new Date().toISOString(),
+      toolCall: finalToolCall,
+    };
+    this.runningExecutions.delete(id);
+  }
+
+  async listAgentWorkspaces(sessionId: string): Promise<IAgentWorkspaceRow[]> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_agent_workspaces
+      WHERE session_id = ${sessionId}
+      ORDER BY created_at DESC;
+    `);
+    return this.rowsFromExecute(result).map((row) => this.rowToAgentWorkspace(row));
+  }
+
+  async getAgentWorkspace(id: string): Promise<IAgentWorkspaceRow | null> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_agent_workspaces WHERE id = ${id} LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows[0] ? this.rowToAgentWorkspace(rows[0]) : null;
+  }
+
+  async upsertAgentWorkspace(
+    body: Partial<IAgentWorkspaceRow> & {
+      id?: string;
+      sessionId: string;
+      repoUrl: string;
+      baseBranch: string;
+      agentBranch: string;
+    }
+  ): Promise<IAgentWorkspaceRow> {
+    const session = await this.getAgentSession(body.sessionId);
+    if (!session) {
+      throw new BadRequestException('关联 AgentSession 不存在或已删除');
+    }
+    const now = new Date().toISOString();
+    const id = body.id?.trim() || `awork_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    await this.db.execute(sql`
+      INSERT INTO rd_agent_workspaces (
+        id, session_id, pipeline_run_id, kind, status, repo_url, base_branch, agent_branch,
+        worktree_path, base_commit, head_commit, lock_owner_task_id, is_write_locked,
+        metadata, created_at, updated_at, cleaned_at
+      ) VALUES (
+        ${id},
+        ${body.sessionId},
+        ${body.pipelineRunId ?? session.pipelineRunId ?? null},
+        ${body.kind || 'worktree'},
+        ${body.status || 'provisioning'},
+        ${body.repoUrl},
+        ${body.baseBranch},
+        ${body.agentBranch},
+        ${body.worktreePath ?? null},
+        ${body.baseCommit ?? null},
+        ${body.headCommit ?? null},
+        ${body.lockOwnerTaskId ?? null},
+        ${body.isWriteLocked ?? false},
+        ${JSON.stringify(body.metadata ?? {})}::jsonb,
+        ${body.createdAt ?? now}::timestamptz,
+        ${body.updatedAt ?? now}::timestamptz,
+        ${body.cleanedAt ?? null}::timestamptz
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        pipeline_run_id = EXCLUDED.pipeline_run_id,
+        kind = EXCLUDED.kind,
+        status = EXCLUDED.status,
+        repo_url = EXCLUDED.repo_url,
+        base_branch = EXCLUDED.base_branch,
+        agent_branch = EXCLUDED.agent_branch,
+        worktree_path = EXCLUDED.worktree_path,
+        base_commit = EXCLUDED.base_commit,
+        head_commit = EXCLUDED.head_commit,
+        lock_owner_task_id = EXCLUDED.lock_owner_task_id,
+        is_write_locked = EXCLUDED.is_write_locked,
+        metadata = EXCLUDED.metadata,
+        updated_at = EXCLUDED.updated_at,
+        cleaned_at = EXCLUDED.cleaned_at;
+    `);
+    const rows = await this.listAgentWorkspaces(body.sessionId);
+    return rows.find((row) => row.id === id)!;
+  }
+
+  private async recordWorkspaceToolCall(input: {
+    sessionId: string;
+    workspaceId: string;
+    command: IWorkspaceLifecycleCommand;
+  }): Promise<IAgentToolCallRow> {
+    return this.upsertAgentToolCall({
+      id: `wtool_${input.workspaceId}_${input.command.orderIndex}_${input.command.key}`,
+      sessionId: input.sessionId,
+      workspaceId: input.workspaceId,
+      toolName: input.command.toolName,
+      toolCategory: input.command.toolCategory,
+      status: 'pending',
+      approvalStatus: input.command.riskLevel === 'high' ? 'pending' : 'not_required',
+      riskLevel: input.command.riskLevel,
+      inputSummary: input.command.summary,
+      command: input.command.command,
+      metadata: {
+        args: input.command.args,
+        workspaceCommandKey: input.command.key,
+        orderIndex: input.command.orderIndex,
+        cleanup: Boolean(input.command.cleanup),
+      },
+    });
+  }
+
+  private workspaceLifecycleCommandsFromMetadata(workspace: IAgentWorkspaceRow): IWorkspaceLifecycleCommand[] {
+    const metadata = this.parseJsonObject(workspace.metadata);
+    const rawPlan = metadata.lifecyclePlan;
+    if (!Array.isArray(rawPlan)) return [];
+    return rawPlan
+      .reduce<IWorkspaceLifecycleCommand[]>((commands, item) => {
+        const row = this.parseJsonObject(item);
+        const command = String(row.command || '').trim();
+        const args = Array.isArray(row.args) ? row.args.map((arg) => String(arg)) : [];
+        if (!command || args.length === 0) return commands;
+        commands.push({
+          key: row.key as IWorkspaceLifecycleCommand['key'],
+          toolName: String(row.toolName || ''),
+          toolCategory: (row.toolCategory as IWorkspaceLifecycleCommand['toolCategory']) || 'git',
+          summary: String(row.summary || ''),
+          command,
+          args,
+          riskLevel: (row.riskLevel as IWorkspaceLifecycleCommand['riskLevel']) || 'low',
+          orderIndex: Number(row.orderIndex ?? 0),
+          cleanup: Boolean(row.cleanup),
+        });
+        return commands;
+      }, [])
+      .sort((a, b) => a.orderIndex - b.orderIndex);
+  }
+
+  async executeAgentWorkspaceLifecycle(workspaceId: string): Promise<IAgentWorkspaceProvisionResult> {
+    const workspace = await this.getAgentWorkspace(workspaceId);
+    if (!workspace) {
+      throw new NotFoundException('AgentWorkspace 不存在');
+    }
+    const commands = this.workspaceLifecycleCommandsFromMetadata(workspace).filter((command) => !command.cleanup);
+    if (!commands.length) {
+      throw new BadRequestException('Workspace 缺少 lifecyclePlan');
+    }
+    const toolCalls: IAgentToolCallRow[] = [];
+    let failed = false;
+    for (const command of commands) {
+      const toolCallId = `wtool_${workspaceId}_${command.orderIndex}_${command.key}`;
+      const startedAt = Date.now();
+      const existing = await this.getAgentToolCall(toolCallId);
+      const started = await this.upsertAgentToolCall({
+        ...(existing || {
+          id: toolCallId,
+          sessionId: workspace.sessionId,
+          workspaceId,
+          toolName: command.toolName,
+          toolCategory: command.toolCategory,
+          riskLevel: command.riskLevel,
+          approvalStatus: command.riskLevel === 'high' ? 'pending' : 'not_required',
+          inputSummary: command.summary,
+          command: command.command,
+          metadata: {},
+        }),
+        status: 'running',
+        startedAt: existing?.startedAt || new Date(startedAt).toISOString(),
+        metadata: {
+          ...this.parseJsonObject(existing?.metadata),
+          args: command.args,
+          workspaceCommandKey: command.key,
+          orderIndex: command.orderIndex,
+          executedAt: new Date().toISOString(),
+        },
+      });
+      const result = await this.runTextCommand(command.args[0], command.args.slice(1), process.cwd());
+      const durationMs = Date.now() - startedAt;
+      const finished = await this.upsertAgentToolCall({
+        ...started,
+        status: result.exitCode === 0 ? 'succeeded' : 'failed',
+        exitCode: result.exitCode,
+        durationMs,
+        outputSummary: (result.stdout || result.stderr).slice(-4000),
+        finishedAt: new Date().toISOString(),
+        metadata: {
+          ...this.parseJsonObject(started.metadata),
+          stdout: result.stdout.slice(-20000),
+          stderr: result.stderr.slice(-20000),
+        },
+      });
+      toolCalls.push(finished);
+      if (result.exitCode !== 0) {
+        failed = true;
+        break;
+      }
+    }
+    const updatedWorkspace = failed
+      ? await this.upsertAgentWorkspace({ ...workspace, status: 'failed' })
+      : await this.markAgentWorkspaceReady(workspaceId);
+    return {
+      workspace: updatedWorkspace,
+      plan: {
+        repoUrl: workspace.repoUrl,
+        baseBranch: workspace.baseBranch,
+        agentBranch: workspace.agentBranch,
+        workspaceRoot: String(this.parseJsonObject(workspace.metadata).workspaceRoot || ''),
+        cachePath: String(this.parseJsonObject(workspace.metadata).cachePath || ''),
+        worktreePath: workspace.worktreePath || '',
+        commands,
+      },
+      toolCalls,
+    };
+  }
+
+  async provisionAgentWorkspace(body: {
+    sessionId: string;
+    repoUrl: string;
+    baseBranch?: string | null;
+    agentBranch?: string | null;
+    workspaceRoot?: string | null;
+    kind?: AgentWorkspaceKind;
+    createdBy?: string | null;
+  }): Promise<IAgentWorkspaceProvisionResult> {
+    const session = await this.getAgentSession(body.sessionId);
+    if (!session) {
+      throw new BadRequestException('关联 AgentSession 不存在或已删除');
+    }
+    const id = `awork_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const plan = buildAgentWorkspaceLifecyclePlan({
+      workspaceId: id,
+      sessionId: body.sessionId,
+      requirementId: session.requirementId,
+      pipelineRunId: session.pipelineRunId,
+      repoUrl: body.repoUrl,
+      baseBranch: body.baseBranch || session.baseBranch,
+      agentBranch: body.agentBranch || session.agentBranch,
+      workspaceRoot: body.workspaceRoot,
+      kind: body.kind || 'worktree',
+    });
+    const workspace = await this.upsertAgentWorkspace({
+      id,
+      sessionId: body.sessionId,
+      pipelineRunId: session.pipelineRunId,
+      kind: body.kind || 'worktree',
+      status: 'provisioning',
+      repoUrl: plan.repoUrl,
+      baseBranch: plan.baseBranch,
+      agentBranch: plan.agentBranch,
+      worktreePath: plan.worktreePath,
+      isWriteLocked: false,
+      metadata: {
+        workspaceRoot: plan.workspaceRoot,
+        cachePath: plan.cachePath,
+        lifecyclePlan: plan.commands.map((command) => ({
+          key: command.key,
+          toolName: command.toolName,
+          toolCategory: command.toolCategory,
+          summary: command.summary,
+          command: command.command,
+          args: command.args,
+          orderIndex: command.orderIndex,
+          riskLevel: command.riskLevel,
+          cleanup: Boolean(command.cleanup),
+        })),
+        createdBy: body.createdBy ?? null,
+      },
+    });
+    const toolCalls: IAgentToolCallRow[] = [];
+    for (const command of plan.commands) {
+      toolCalls.push(await this.recordWorkspaceToolCall({ sessionId: body.sessionId, workspaceId: id, command }));
+    }
+    return { workspace, plan, toolCalls };
+  }
+
+  async markAgentWorkspaceReady(
+    workspaceId: string,
+    body?: { baseCommit?: string | null; headCommit?: string | null; lockOwnerTaskId?: string | null }
+  ): Promise<IAgentWorkspaceRow> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_agent_workspaces WHERE id = ${workspaceId} LIMIT 1;
+    `);
+    const current = this.rowsFromExecute(result)[0];
+    if (!current) {
+      throw new NotFoundException('AgentWorkspace 不存在');
+    }
+    const workspace = this.rowToAgentWorkspace(current);
+    return this.upsertAgentWorkspace({
+      ...workspace,
+      status: 'ready',
+      baseCommit: body?.baseCommit ?? workspace.baseCommit,
+      headCommit: body?.headCommit ?? workspace.headCommit,
+      lockOwnerTaskId: body?.lockOwnerTaskId ?? workspace.lockOwnerTaskId,
+      isWriteLocked: Boolean(body?.lockOwnerTaskId ?? workspace.lockOwnerTaskId),
+    });
+  }
+
+  async cleanupAgentWorkspace(workspaceId: string): Promise<IAgentWorkspaceProvisionResult> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_agent_workspaces WHERE id = ${workspaceId} LIMIT 1;
+    `);
+    const current = this.rowsFromExecute(result)[0];
+    if (!current) {
+      throw new NotFoundException('AgentWorkspace 不存在');
+    }
+    const workspace = this.rowToAgentWorkspace(current);
+    const cachePath = String(this.parseJsonObject(workspace.metadata).cachePath || '').trim();
+    if (!cachePath || !workspace.worktreePath) {
+      throw new BadRequestException('Workspace 缺少 cleanup 所需路径信息');
+    }
+    const command = buildAgentWorkspaceCleanupCommand({
+      cachePath,
+      worktreePath: workspace.worktreePath,
+    });
+    const toolCall = await this.recordWorkspaceToolCall({
+      sessionId: workspace.sessionId,
+      workspaceId,
+      command,
+    });
+    const cleaned = await this.upsertAgentWorkspace({
+      ...workspace,
+      status: 'archived',
+      isWriteLocked: false,
+      cleanedAt: new Date().toISOString(),
+    });
+    return {
+      workspace: cleaned,
+      plan: {
+        repoUrl: cleaned.repoUrl,
+        baseBranch: cleaned.baseBranch,
+        agentBranch: cleaned.agentBranch,
+        workspaceRoot: String(this.parseJsonObject(cleaned.metadata).workspaceRoot || ''),
+        cachePath,
+        worktreePath: cleaned.worktreePath || '',
+        commands: [command],
+      },
+      toolCalls: [toolCall],
+    };
   }
 
   async listProducts(): Promise<IProductRow[]> {

@@ -28,6 +28,7 @@ function builtInPermissionSetByRoleId(roleId: string): Set<string> | null {
       'page.pipeline',
       'page.acceptance',
       'page.products',
+      'action.ai.invoke',
     ]);
   }
   if (roleId === 'role_pm') {
@@ -39,6 +40,7 @@ function builtInPermissionSetByRoleId(roleId: string): Set<string> | null {
       'page.acceptance',
       'page.products',
       'page.org_spec',
+      'action.ai.invoke',
     ]);
   }
   if (roleId === 'role_tm') {
@@ -52,6 +54,7 @@ function builtInPermissionSetByRoleId(roleId: string): Set<string> | null {
       'page.products',
       'page.org_spec',
       'page.plugins',
+      'action.ai.invoke',
     ]);
   }
   return null;

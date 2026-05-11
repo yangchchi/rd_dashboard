@@ -1,3 +1,7 @@
+jest.mock('../../web/src/lib/ai-skills', () => ({
+  clearAiSkillCache: jest.fn(),
+}));
+
 import { getAuthActionErrorMessage } from '../../web/src/lib/auth-api';
 
 describe('getAuthActionErrorMessage', () => {
