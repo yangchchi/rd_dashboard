@@ -6,10 +6,12 @@ import type {
   IAgentToolCall,
   IAgentWorkspace,
   IAgentWorkspaceProvisionResult,
+  IAgentWorkspaceSourceTreeResponse,
   IBountyTask,
   IContextPack,
   IOrganizationSpecConfig,
   IPipelineCommitStore,
+  IPipelineCodeReviewRecord,
   IPipelineLogEntry,
   IPipelineMeta,
   IPipelineQualityMetrics,
@@ -572,6 +574,21 @@ export const rdApi = {
     return mapAgentSession(raw);
   },
 
+  async patchAgentSessionMetadata(
+    id: string,
+    patch: Record<string, unknown>,
+    updatedBy?: string | null,
+  ): Promise<IAgentSession> {
+    const raw = await json<Record<string, unknown>>(
+      `/agent-sessions/${encodeURIComponent(id)}/metadata`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ patch, updatedBy: updatedBy ?? null }),
+      },
+    );
+    return mapAgentSession(raw);
+  },
+
   async listAgentTasks(sessionId: string): Promise<IAgentTask[]> {
     const rows = await json<Record<string, unknown>[]>(
       `/agent-sessions/${encodeURIComponent(sessionId)}/tasks`
@@ -783,6 +800,32 @@ export const rdApi = {
     return mapAgentWorkspaceProvisionResult(raw);
   },
 
+  async listAgentWorkspaceSourceTree(workspaceId: string): Promise<IAgentWorkspaceSourceTreeResponse> {
+    return json<IAgentWorkspaceSourceTreeResponse>(
+      `/agent-workspaces/${encodeURIComponent(workspaceId)}/source-tree`,
+    );
+  },
+
+  async getAgentWorkspaceSourceFile(
+    workspaceId: string,
+    relativePath: string,
+  ): Promise<{ path: string; content: string; truncated: boolean }> {
+    const q = `?path=${encodeURIComponent(relativePath)}`;
+    return json<{ path: string; content: string; truncated: boolean }>(
+      `/agent-workspaces/${encodeURIComponent(workspaceId)}/source-file${q}`,
+    );
+  },
+
+  async commitAndPushAgentWorkspace(
+    workspaceId: string,
+    body?: { commitMessage?: string | null; gitPat?: string | null; gitUsername?: string | null },
+  ): Promise<{ committed: boolean; pushed: boolean; branch: string; commitHash: string | null; log: string[] }> {
+    return json(`/agent-workspaces/${encodeURIComponent(workspaceId)}/git-commit-push`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    });
+  },
+
   async listContextPacks(requirementId?: string): Promise<IContextPack[]> {
     const query = requirementId ? `?requirementId=${encodeURIComponent(requirementId)}` : '';
     const rows = await json<Record<string, unknown>[]>(`/context-packs${query}`);
@@ -940,6 +983,9 @@ function mapPipelineTask(row: Record<string, unknown>): IPipelineTask {
   const qualityMetrics =
     (row.qualityMetrics as IPipelineQualityMetrics | undefined) ||
     (row.quality_metrics as IPipelineQualityMetrics | undefined);
+  const codeReviewHistoryRaw =
+    (row.codeReviewHistory as IPipelineCodeReviewRecord[] | undefined) ||
+    (row.code_review_history as IPipelineCodeReviewRecord[] | undefined);
   const pipelineMeta =
     (row.pipelineMeta as IPipelineMeta) || (row.pipeline_meta as IPipelineMeta) || {};
   const commitStore =
@@ -957,6 +1003,7 @@ function mapPipelineTask(row: Record<string, unknown>): IPipelineTask {
     logs,
     testReport,
     qualityMetrics,
+    codeReviewHistory: Array.isArray(codeReviewHistoryRaw) ? codeReviewHistoryRaw : undefined,
     pipelineMeta,
     commitStore,
     createdAt: (row.createdAt as string) || (row.created_at as string),

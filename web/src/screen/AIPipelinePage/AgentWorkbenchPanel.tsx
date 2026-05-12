@@ -1,14 +1,20 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
+  ArrowUp,
   Bot,
   CheckCircle2,
   ChevronRight,
   FileText,
+  History,
   Loader2,
+  MessageSquarePlus,
+  ScrollText,
+  Sparkles,
   Square,
   Terminal,
+  User,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -17,13 +23,23 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Streamdown } from '@/components/ui/streamdown';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   useAgentSessionsList,
   useAgentTasks,
@@ -35,19 +51,29 @@ import {
   useCreateContextPack,
   useCreatePipelineRun,
   useExecuteAgentWorkspaceLifecycle,
+  usePatchAgentSessionMetadata,
   usePipelineRunsList,
   usePrepareAgentToolCall,
   useProvisionAgentWorkspace,
   useRunAgentToolCallWithCodex,
   useUpsertAgentTask,
 } from '@/lib/rd-hooks';
-import type { IAgentExecutionEvent, IAgentSession, IAgentToolCall, IAgentWorkspace, IPipelineTask } from '@/lib/rd-types';
+import type {
+  IAgentExecutionEvent,
+  IAgentSession,
+  IAgentToolCall,
+  IAgentWorkspace,
+  IPipelineTask,
+} from '@/lib/rd-types';
 import { logger } from '@/lib/logger';
 import { buildAgentDiffReviewSummary } from '@/lib/agent-review-utils';
 import { fillAiSkillPromptTemplate } from '@/lib/ai-skill-engine';
 import { AGENT_WORKBENCH_PLAN_SKILL_ID, getAiSkill } from '@/lib/ai-skills';
-import { canStartAgentToolCall, shouldCreateAgentToolCallRetry } from '@/lib/pipeline-page-utils';
 import { cn } from '@/lib/utils';
+
+/** 编码对话内助手气泡的 Markdown 排版（流式与非流式共用） */
+const AGENT_CHAT_MARKDOWN_CLASS =
+  'prose prose-sm dark:prose-invert max-w-none w-full min-w-0 break-words text-foreground prose-p:leading-relaxed prose-li:my-0.5 prose-headings:scroll-mt-4 prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:whitespace-pre prose-pre:break-normal prose-pre:bg-slate-950 prose-pre:text-slate-100 prose-pre:ring-1 prose-pre:ring-slate-800/80 prose-code:rounded-md prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:text-foreground prose-code:before:content-none prose-code:after:content-none';
 
 interface IAgentWorkbenchPanelProps {
   task: IPipelineTask;
@@ -96,21 +122,258 @@ function pickWorkspaceForSession(workspaces: IAgentWorkspace[]): IAgentWorkspace
   return [...open].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
 }
 
+type IAgentChatRole = 'assistant' | 'user';
+
+interface IAgentChatMessage {
+  id: string;
+  role: IAgentChatRole;
+  content: string;
+  createdAt: string;
+  variant?: 'plan' | 'codex';
+  streaming?: boolean;
+  /** Codex 本轮结束时的耗时（ms），用于气泡顶栏展示 */
+  durationMs?: number | null;
+  exitCode?: number | null;
+}
+
+function newChatMessageId(): string {
+  return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+const MAX_PRIOR_ASSISTANT_CHARS = 3200;
+
+/** 与 rd.service Codex 后缀逻辑对齐：以此开头的 prompt 走「简短问答」短后缀，避免强编码授权刷屏 */
+const CODEX_CHAT_ONLY_MARKER = '【本轮为简短问答，非编码任务】';
+
+/** 判断是否为闲聊 / 身份类短问句，避免把整份 Plan + 超长历史塞进 Codex */
+function isLikelyConversationalCodexTurn(text: string): boolean {
+  const t = text.trim();
+  if (!t || t.length > 200) return false;
+  if (
+    /[[\]{}`]|\.tsx?\b|\.vue\b|\.py\b|\.go\b|npm |yarn |pnpm |git |docker|k8s|PRD|FS\/TS|eslint|jest|curl |swagger/i.test(
+      t,
+    )
+  ) {
+    return false;
+  }
+  /** 明确的迭代 / 需求表述 → 一律走完整编码上下文（避免「增加 XX 功能」被误判为简短问答） */
+  if (
+    /实现|开发|修改|重构|部署|联调|分支|commit|merge|类型检查|单元测试|验收|bug|fix|feature|组件|页面|路由|接口|数据库|增加|添加|新增|删除|移除|去掉|补充|完善|调整|优化|修复|升级|迭代|对接|集成|导入|导出|需求|模块|菜单|CRUD|权限|角色|报表|字典|故事点/i.test(
+      t,
+    )
+  ) {
+    return false;
+  }
+  if (
+    /部门管理功能|用户管理功能|权限管理|角色管理|菜单管理|组织管理|员工管理|数据字典|工作流|审批流/i.test(t)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function truncateText(s: string, max: number): string {
+  const t = s.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max)}\n\n…（已截断）`;
+}
+
+function formatDurationShort(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  if (ms < 1000) return '<1s';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rs = s % 60;
+  return rs ? `${m}m ${rs}s` : `${m}m`;
+}
+
+/** 已完成的「用户 → Agent」轮次，用于构造下一轮 Codex 的上下文（不含当前正在输入的一轮） */
+function extractCompletedPriorTurns(messages: IAgentChatMessage[]): { user: string; assistant: string }[] {
+  const prior: { user: string; assistant: string }[] = [];
+  let i = 1;
+  while (i < messages.length) {
+    const cur = messages[i];
+    if (cur.role === 'user') {
+      const next = messages[i + 1];
+      if (next?.role === 'assistant' && next.variant === 'codex' && !next.streaming) {
+        prior.push({ user: cur.content, assistant: next.content });
+        i += 2;
+        continue;
+      }
+      break;
+    }
+    if (cur.role === 'assistant' && cur.variant === 'codex' && !cur.streaming) {
+      i += 1;
+      continue;
+    }
+    break;
+  }
+  return prior;
+}
+
+/** 每条用户消息单独一轮 Codex：Plan + 历史节选 + 本轮指令（或由步骤 3 触发的无新指令延续） */
+function buildSingleTurnCodexPrompt(
+  planMarkdown: string,
+  instructionThisTurn: string | null,
+  priorTurns: { user: string; assistant: string }[],
+  fallbackInstruction: string,
+): string {
+  if (instructionThisTurn?.trim() && isLikelyConversationalCodexTurn(instructionThisTurn)) {
+    return [
+      CODEX_CHAT_ONLY_MARKER,
+      '',
+      `用户：${instructionThisTurn.trim()}`,
+      '',
+      '请用简短中文直接回答。不要复述 Plan，不要复述「系统」类授权说明，不要粘贴此前多轮对话全文。',
+    ].join('\n');
+  }
+
+  const plan = planMarkdown.trim() || fallbackInstruction.trim();
+  let body = plan;
+  if (priorTurns.length > 0) {
+    body += '\n\n---\n【此前对话（节选；每轮 Codex 独立执行）】\n';
+    priorTurns.forEach((t, idx) => {
+      body += `\n### 第 ${idx + 1} 轮\n用户：\n${t.user}\n\nAgent 输出节选：\n${truncateText(t.assistant, MAX_PRIOR_ASSISTANT_CHARS)}\n`;
+    });
+  }
+  if (instructionThisTurn?.trim()) {
+    body += `\n\n---\n【本轮请执行的指令】\n${instructionThisTurn.trim()}`;
+  } else {
+    body +=
+      '\n\n---\n【本轮】请严格依据上述 Plan 与 Context 在仓库内完成实现、自测或必要的类型检查（本回合由「开始编码」触发）。';
+  }
+  return body;
+}
+
+function pickReusablePendingCodex(
+  rows: IAgentToolCall[],
+  workspaceId: string,
+): IAgentToolCall | undefined {
+  const list = rows.filter(
+    (tc) =>
+      tc.toolName === 'codex.exec' &&
+      tc.workspaceId === workspaceId &&
+      (tc.status === 'pending' || tc.status === 'awaiting_approval'),
+  );
+  if (!list.length) return undefined;
+  return [...list].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[0];
+}
+
+/** Agent 工作台对话持久化字段（写入 rd_agent_sessions.metadata） */
+const WORKBENCH_CHAT_META_KEY = 'workbenchChatMessages';
+
+function serializeWorkbenchChat(messages: IAgentChatMessage[]): Record<string, unknown>[] {
+  return messages.map((m) => ({
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    createdAt: m.createdAt,
+    variant: m.variant,
+    streaming: false,
+    durationMs: m.durationMs ?? undefined,
+    exitCode: m.exitCode ?? undefined,
+  }));
+}
+
+function parsePersistedWorkbenchChat(meta: unknown): IAgentChatMessage[] | null {
+  if (!Array.isArray(meta)) return null;
+  const out: IAgentChatMessage[] = [];
+  for (const row of meta) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    const id = typeof r.id === 'string' ? r.id : '';
+    const role = r.role === 'user' || r.role === 'assistant' ? r.role : null;
+    const content = typeof r.content === 'string' ? r.content : '';
+    const createdAt = typeof r.createdAt === 'string' ? r.createdAt : new Date().toISOString();
+    if (!id || !role) continue;
+    const variant = r.variant === 'plan' || r.variant === 'codex' ? r.variant : undefined;
+    const durationMs =
+      typeof r.durationMs === 'number' && Number.isFinite(r.durationMs) ? r.durationMs : undefined;
+    const exitCode =
+      typeof r.exitCode === 'number' && Number.isFinite(r.exitCode) ? r.exitCode : undefined;
+    out.push({ id, role, content, createdAt, variant, streaming: false, durationMs, exitCode });
+  }
+  return out.length ? out : null;
+}
+
+function hydrateChatMessagesForSession(session: IAgentSession): IAgentChatMessage[] {
+  const planBody = session.planMarkdown?.trim() || '（暂无 plan，请完成步骤 1 生成编码提示词）';
+  const planId = `plan-${session.id}`;
+  const raw = session.metadata?.[WORKBENCH_CHAT_META_KEY];
+  const persisted = parsePersistedWorkbenchChat(raw);
+  if (persisted?.length) {
+    const first = persisted[0];
+    if (first.variant === 'plan' && first.role === 'assistant') {
+      return [
+        { ...first, content: planBody, streaming: false },
+        ...persisted.slice(1).map((m) => ({ ...m, streaming: false })),
+      ];
+    }
+    return [
+      {
+        id: planId,
+        role: 'assistant',
+        content: planBody,
+        createdAt: session.createdAt,
+        variant: 'plan',
+      },
+      ...persisted.map((m) => ({ ...m, streaming: false })),
+    ];
+  }
+  return [
+    {
+      id: planId,
+      role: 'assistant',
+      content: planBody,
+      createdAt: session.createdAt,
+      variant: 'plan',
+    },
+  ];
+}
+
+function formatAgentSessionPickLabel(session: IAgentSession): string {
+  const t = session.createdAt?.slice(0, 16)?.replace('T', ' ') ?? '';
+  const tail = session.pipelineRunId ? ' · 流水线' : '';
+  return `${session.title || session.id}${tail} · ${t}`;
+}
+
 export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanelProps) {
   const [instruction, setInstruction] = useState(
-    '请根据 PRD、功能规格(FS)、技术规格(TS) 与实现计划完成编码与验证。',
+    '请根据 PRD、功能规格(FS)、技术规格(TS) 与编码计划（CP）完成编码与验证。',
   );
   const [codingTool, setCodingTool] = useState<ICodingToolChoice>('codex_cli');
   const [runtimeOutput, setRuntimeOutput] = useState('');
   const [runtimeState, setRuntimeState] = useState<ICodexRuntimeState>(initialCodexRuntimeState);
+  const [chatMessages, setChatMessages] = useState<IAgentChatMessage[]>([]);
+  const [chatDraft, setChatDraft] = useState('');
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const logsPreRef = useRef<HTMLPreElement | null>(null);
+  const [, bumpStreamingClock] = useReducer((x: number) => x + 1, 0);
+  const skipNextChatPersistRef = useRef(false);
+  const hydratedChatSessionIdRef = useRef<string | null>(null);
 
   const { data: runs = [] } = usePipelineRunsList(task.requirementId);
   const latestRun = latestByTime(runs);
   const { data: sessions = [] } = useAgentSessionsList({ requirementId: task.requirementId });
-  const activeSession = useMemo<IAgentSession | undefined>(
+  const pipelineLinkedSession = useMemo<IAgentSession | undefined>(
     () => sessions.find((session) => session.pipelineRunId === latestRun?.id) || latestByTime(sessions),
     [latestRun?.id, sessions],
   );
+  const [historySessionId, setHistorySessionId] = useState<string | null>(null);
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [logsDialogOpen, setLogsDialogOpen] = useState(false);
+  const [workbenchSetupTab, setWorkbenchSetupTab] = useState<'thread' | 'workspace' | 'tool'>('thread');
+
+  useEffect(() => {
+    setHistorySessionId(null);
+  }, [latestRun?.id]);
+
+  const activeSession = useMemo<IAgentSession | undefined>(() => {
+    const id = historySessionId ?? pipelineLinkedSession?.id;
+    if (!id) return undefined;
+    return sessions.find((s) => s.id === id) ?? pipelineLinkedSession;
+  }, [sessions, historySessionId, pipelineLinkedSession]);
   const { data: tasks = [] } = useAgentTasks(activeSession?.id);
   const { data: toolCalls = [] } = useAgentToolCalls(activeSession?.id, undefined, {
     pollWhileCodexRunningMs: 2500,
@@ -128,6 +391,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   const approveToolCall = useApproveAgentToolCall();
   const runCodexToolCall = useRunAgentToolCallWithCodex();
   const cancelCodexExecution = useCancelAgentToolCallExecution();
+  const patchSessionMetadata = usePatchAgentSessionMetadata();
 
   const isBusy =
     createPipelineRun.isPending ||
@@ -139,19 +403,34 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     prepareToolCall.isPending ||
     approveToolCall.isPending;
 
-  const codexToolCall = useMemo<IAgentToolCall | undefined>(
-    () => [...toolCalls].reverse().find((toolCall) => toolCall.toolName === 'codex.exec'),
+  const latestCodexToolCall = useMemo(
+    () =>
+      [...toolCalls]
+        .filter((tc) => tc.toolName === 'codex.exec')
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0],
     [toolCalls],
   );
-  const isCodexRunning = runCodexToolCall.isPending || codexToolCall?.status === 'running';
-  const codexCanStart = canStartAgentToolCall(codexToolCall?.status, codexToolCall?.approvalStatus);
-  const codexNeedsRetry = shouldCreateAgentToolCallRetry(codexToolCall?.status);
-  const codexWorkspace = useMemo(
-    () => workspaces.find((workspace) => workspace.id === codexToolCall?.workspaceId),
-    [codexToolCall?.workspaceId, workspaces],
+  const runningCodexToolCall = useMemo(
+    () => toolCalls.find((tc) => tc.toolName === 'codex.exec' && tc.status === 'running'),
+    [toolCalls],
+  );
+  const isCodexRunning =
+    Boolean(runningCodexToolCall) || runCodexToolCall.isPending || prepareToolCall.isPending;
+
+  useEffect(() => {
+    const busy = Boolean(runningCodexToolCall) || runCodexToolCall.isPending;
+    if (!busy) return;
+    const id = window.setInterval(() => bumpStreamingClock(), 1000);
+    return () => window.clearInterval(id);
+  }, [runningCodexToolCall, runCodexToolCall.isPending]);
+
+  const readyWorkspace = useMemo(
+    () => workspaces.find((w) => w.status === 'ready' && Boolean(w.worktreePath?.trim())),
+    [workspaces],
   );
   const primaryWorkspace = useMemo(() => pickWorkspaceForSession(workspaces), [workspaces]);
-  const isCodexWorkspaceReady = codexWorkspace?.status === 'ready' && Boolean(codexWorkspace.worktreePath);
+  const isCodexWorkspaceReady = Boolean(readyWorkspace);
+  const displayWorkspace = readyWorkspace ?? primaryWorkspace;
 
   const step1Done = Boolean(activeSession);
   const step2Done = isCodexWorkspaceReady;
@@ -164,14 +443,86 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     setRuntimeOutput((prev) => `${prev}${prev && !prev.endsWith('\n') ? '\n' : ''}${line}\n`);
   };
 
-  const codexServerSyncKey = codexToolCall
-    ? `${codexToolCall.id}:${codexToolCall.status}:${String(codexToolCall.metadata?.lastOutputAt ?? '')}:${String(codexToolCall.metadata?.executorLogPath ?? '')}:${String(codexToolCall.updatedAt ?? '')}`
+  const handleChatAppendUser = () => {
+    const text = chatDraft.trim();
+    if (!text || !activeSession) return;
+    setChatMessages((prev) => [
+      ...prev,
+      { id: newChatMessageId(), role: 'user', content: text, createdAt: new Date().toISOString() },
+    ]);
+    setChatDraft('');
+  };
+
+  const codexServerSyncKey = latestCodexToolCall
+    ? `${latestCodexToolCall.id}:${latestCodexToolCall.status}:${String(latestCodexToolCall.metadata?.lastOutputAt ?? '')}:${String(latestCodexToolCall.metadata?.executorLogPath ?? '')}:${String(latestCodexToolCall.updatedAt ?? '')}`
     : '';
+
+  /** 切换会话时从服务端 metadata 恢复对话（妙搭式历史） */
+  useEffect(() => {
+    if (!activeSession?.id) {
+      setChatMessages([]);
+      hydratedChatSessionIdRef.current = null;
+      return;
+    }
+    skipNextChatPersistRef.current = true;
+    setChatMessages(hydrateChatMessagesForSession(activeSession));
+    hydratedChatSessionIdRef.current = activeSession.id;
+    const rid = requestAnimationFrame(() => {
+      skipNextChatPersistRef.current = false;
+    });
+    return () => cancelAnimationFrame(rid);
+  }, [activeSession?.id]);
+
+  /** 同一会话内 Plan 文案随服务端更新 */
+  useEffect(() => {
+    if (!activeSession?.id) return;
+    const planBody = activeSession.planMarkdown?.trim() || '（暂无 plan，请完成步骤 1 生成编码提示词）';
+    const planId = `plan-${activeSession.id}`;
+    setChatMessages((prev) => {
+      if (!prev.length || prev[0]?.variant !== 'plan') return prev;
+      if (prev[0].content === planBody) return prev;
+      if (prev[0].id !== planId && prev[0].variant === 'plan') {
+        return [{ ...prev[0], id: planId, content: planBody }, ...prev.slice(1)];
+      }
+      return [{ ...prev[0], content: planBody }, ...prev.slice(1)];
+    });
+  }, [activeSession?.id, activeSession?.planMarkdown]);
+
+  /** 对话持久化（防抖写入会话 metadata） */
+  useEffect(() => {
+    if (!activeSession?.id || skipNextChatPersistRef.current) return;
+    if (hydratedChatSessionIdRef.current !== activeSession.id) return;
+    if (!chatMessages.length) return;
+    const sid = activeSession.id;
+    const payload = serializeWorkbenchChat(chatMessages);
+    const handle = window.setTimeout(() => {
+      if (skipNextChatPersistRef.current) return;
+      patchSessionMetadata.mutate({
+        id: sid,
+        patch: { [WORKBENCH_CHAT_META_KEY]: payload },
+        updatedBy: operatorName ?? null,
+      });
+    }, 650);
+    return () => window.clearTimeout(handle);
+    // patchSessionMetadata 引用稳定，不参与依赖以免多余触发
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutate 来自 React Query，语义稳定
+  }, [chatMessages, activeSession?.id, operatorName]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ block: 'end', behavior: 'auto' });
+  }, [chatMessages, bumpStreamingClock]);
+
+  useEffect(() => {
+    if (!logsDialogOpen) return;
+    const el = logsPreRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [logsDialogOpen, runtimeOutput]);
 
   useEffect(() => {
     if (runCodexToolCall.isPending) return;
-    if (!codexToolCall || codexToolCall.toolName !== 'codex.exec') return;
-    const m = codexToolCall.metadata;
+    if (!latestCodexToolCall || latestCodexToolCall.toolName !== 'codex.exec') return;
+    const m = latestCodexToolCall.metadata;
     const logPath = typeof m.executorLogPath === 'string' ? m.executorLogPath : '';
     const stdout = typeof m.stdout === 'string' ? m.stdout : '';
     const stderr = typeof m.stderr === 'string' ? m.stderr : '';
@@ -180,14 +531,14 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       logPath
         ? `【服务端完整日志文件】${logPath}\n（全文落盘；数据库仅保留末尾约 20KB 摘要。离开页面后请用该文件或下方摘要排查。）\n`
         : '',
-      codexToolCall.status === 'running'
+      latestCodexToolCall.status === 'running'
         ? '【执行状态】running：Codex 可能仍在服务端执行；本页每 2.5s 拉取一次数据库中的输出摘要。\n'
-        : `【执行状态】${codexToolCall.status} exit=${codexToolCall.exitCode ?? '—'}\n`,
+        : `【执行状态】${latestCodexToolCall.status} exit=${latestCodexToolCall.exitCode ?? '—'}\n`,
       '---\n',
     ].join('');
     const body = [stdout, stderr ? `\n--- stderr（尾部） ---\n${stderr}` : ''].join('');
     setRuntimeOutput(`${header}${body}`);
-  }, [codexServerSyncKey, runCodexToolCall.isPending]);
+  }, [codexServerSyncKey, runCodexToolCall.isPending, latestCodexToolCall]);
 
   const handleCreateThread = async () => {
     try {
@@ -398,55 +749,146 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     }
   };
 
-  const handleRunCoding = async () => {
+  /** 每轮独立 Codex：复用尚未执行的 pending 行，否则新建 tool call；stdout 流式写入对话气泡与底部输出流 */
+  const executeCodexRound = async (opts: { appendUserFromDraft: boolean }) => {
     if (codingTool !== 'codex_cli') {
       toast.message('该编码工具尚未接入', { description: '请暂时选择 Codex CLI' });
       return;
     }
-    if (!activeSession || !codexToolCall) {
-      toast.error('请先完成步骤 1 与 2');
+    if (!activeSession) {
+      toast.error('请先完成步骤 1');
       return;
     }
-    if (!isCodexWorkspaceReady) {
+    if (!readyWorkspace?.id) {
       toast.error('Workspace 未就绪，请先完成步骤 2');
       return;
     }
-    appendLog('[步骤3] 启动编码工具…');
-    setRuntimeOutput((prev) => `${prev}\n`);
+    const workspaceId = readyWorkspace.id;
+    const plan = activeSession.planMarkdown || '';
+    const userText = opts.appendUserFromDraft ? chatDraft.trim() : '';
+    if (opts.appendUserFromDraft && !userText) {
+      toast.error('请输入本轮编码指令');
+      return;
+    }
+
+    const snapshotForPrior: IAgentChatMessage[] =
+      opts.appendUserFromDraft && userText
+        ? [
+            ...chatMessages,
+            {
+              id: newChatMessageId(),
+              role: 'user',
+              content: userText,
+              createdAt: new Date().toISOString(),
+            },
+          ]
+        : [...chatMessages];
+    const priorTurns = extractCompletedPriorTurns(snapshotForPrior);
+    const executionPrompt = buildSingleTurnCodexPrompt(
+      plan,
+      opts.appendUserFromDraft ? userText : null,
+      priorTurns,
+      instruction,
+    ).trim();
+    if (!executionPrompt) {
+      toast.error('提示词为空：请完成步骤 1');
+      return;
+    }
+
+    const replyAssistantId = newChatMessageId();
+    const assistantBubble: IAgentChatMessage = {
+      id: replyAssistantId,
+      role: 'assistant',
+      content: '',
+      createdAt: new Date().toISOString(),
+      variant: 'codex',
+      streaming: true,
+    };
+    setChatMessages(() => [...snapshotForPrior, assistantBubble]);
+    if (opts.appendUserFromDraft) setChatDraft('');
+
+    appendLog('[Codex] 启动本轮执行…');
+    setRuntimeOutput((prev) => `${prev}\n--- 新轮次 ---\n`);
     setRuntimeState({
       ...initialCodexRuntimeState,
       phase: 'starting',
-      toolCallId: codexToolCall.id,
+      toolCallId: undefined,
       startedAt: new Date().toISOString(),
     });
+
+    const bumpAssistant = (chunk: string) => {
+      if (!chunk) return;
+      setChatMessages((prev) =>
+        prev.map((m) => (m.id === replyAssistantId ? { ...m, content: m.content + chunk } : m)),
+      );
+      setRuntimeOutput((prev) => `${prev}${chunk}`);
+    };
+
+    const assistantClosedRef = { current: false };
+    const closeAssistantOnce = (
+      tail: string,
+      markRuntimeError: boolean,
+      meta?: { durationMs?: number | null; exitCode?: number | null },
+    ) => {
+      if (assistantClosedRef.current) return;
+      assistantClosedRef.current = true;
+      setChatMessages((prev) =>
+        prev.map((m) =>
+          m.id === replyAssistantId
+            ? {
+                ...m,
+                streaming: false,
+                content: `${m.content}${tail}`,
+                ...(meta
+                  ? {
+                      durationMs: meta.durationMs ?? undefined,
+                      exitCode: meta.exitCode ?? undefined,
+                    }
+                  : {}),
+              }
+            : m,
+        ),
+      );
+      if (markRuntimeError) {
+        setRuntimeState((prev) => ({
+          ...prev,
+          phase: 'error',
+          lastEventAt: new Date().toISOString(),
+        }));
+      }
+    };
+
+    let runnableToolCall: IAgentToolCall;
     try {
-      let runnableToolCall = codexToolCall;
-      if (!codexCanStart) {
-        if (!codexNeedsRetry) {
-          toast.error(`当前工具调用状态为 ${codexToolCall.status}，暂不能启动`);
+      const pending = pickReusablePendingCodex(toolCalls, workspaceId);
+      if (pending) {
+        if (pending.approvalStatus === 'pending') {
+          toast.error('请先在工作台批准待审的 Codex 工具调用');
+          closeAssistantOnce('\n\n【已取消】存在待审批工具调用。', false);
           return;
         }
+        runnableToolCall = pending;
+      } else {
         runnableToolCall = await prepareToolCall.mutateAsync({
           sessionId: activeSession.id,
-          workspaceId: codexToolCall.workspaceId,
+          workspaceId,
           toolName: 'codex.exec',
           toolCategory: 'ai',
-          inputSummary: '重试：在隔离 workspace 中执行编码任务',
-          command: codexToolCall.command || 'codex exec --cd <workspace> --sandbox workspace-write <prompt>',
-          metadata: {
-            ...codexToolCall.metadata,
-            retryOfToolCallId: codexToolCall.id,
-            retryCreatedAt: new Date().toISOString(),
-            prompt: activeSession.planMarkdown || instruction,
-          },
+          inputSummary: 'Codex — 对话中一轮',
+          command: 'codex exec --cd <workspace> --sandbox workspace-write <prompt>',
+          metadata: { prompt: executionPrompt, chatReplyId: replyAssistantId },
         });
-        setRuntimeState((prev) => ({ ...prev, toolCallId: runnableToolCall.id }));
-        appendLog(`[步骤3] 已创建重试工具调用 ${runnableToolCall.id}`);
       }
+
+      setRuntimeState((prev) => ({
+        ...prev,
+        toolCallId: runnableToolCall.id,
+      }));
+
       await runCodexToolCall.mutateAsync({
         id: runnableToolCall.id,
         sessionId: activeSession.id,
-        prompt: activeSession.planMarkdown || instruction,
+        prompt: executionPrompt,
         onEvent: (event: IAgentExecutionEvent) => {
           if (event.type === 'started') {
             setRuntimeState((prev) => ({
@@ -456,7 +898,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               status: event.status || prev.status,
               lastEventAt: new Date().toISOString(),
             }));
-            appendLog('[步骤4] Codex 已启动');
+            appendLog('[Codex] 已启动');
           }
           if (event.type === 'spawned') {
             setRuntimeState((prev) => ({
@@ -469,7 +911,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               status: event.status || prev.status,
               lastEventAt: event.timestamp || new Date().toISOString(),
             }));
-            appendLog(`[步骤4] 子进程 pid=${event.pid ?? '?'} cwd=${event.cwd || '-'}`);
+            appendLog(`[Codex] pid=${event.pid ?? '?'} cwd=${event.cwd || '-'}`);
           }
           if (event.type === 'stdout' && event.chunk) {
             setRuntimeState((prev) => ({
@@ -481,7 +923,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               stderrBytes: event.stderrBytes ?? prev.stderrBytes,
               lastEventAt: event.timestamp || new Date().toISOString(),
             }));
-            setRuntimeOutput((prev) => `${prev}${event.chunk}`);
+            bumpAssistant(event.chunk);
           }
           if (event.type === 'stderr' && event.chunk) {
             setRuntimeState((prev) => ({
@@ -516,7 +958,8 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               message: event.message || '执行失败',
               lastEventAt: event.timestamp || new Date().toISOString(),
             }));
-            appendLog(`[步骤4][错误] ${event.message || '执行失败'}`);
+            appendLog(`[Codex][错误] ${event.message || '执行失败'}`);
+            closeAssistantOnce(`\n\n【错误】${event.message || '执行失败'}`, true);
           }
           if (event.type === 'finished') {
             setRuntimeState((prev) => ({
@@ -532,32 +975,47 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               lastEventAt: event.timestamp || new Date().toISOString(),
             }));
             appendLog(
-              `[步骤4] 结束 exit=${event.exitCode ?? '?'} 耗时=${event.durationMs ?? 0}ms 变更文件≈${event.changedFilesCount ?? 0}`,
+              `[Codex] 结束 exit=${event.exitCode ?? '?'} 耗时=${event.durationMs ?? 0}ms 变更文件≈${event.changedFilesCount ?? 0}`,
+            );
+            closeAssistantOnce(
+              `\n\n---\nexit=${event.exitCode ?? '—'} · ${event.durationMs ?? 0}ms · 变更≈${event.changedFilesCount ?? 0}`,
+              false,
+              { durationMs: event.durationMs ?? null, exitCode: event.exitCode ?? null },
             );
           }
         },
       });
-      toast.success('编码任务已结束');
+      toast.success('本轮编码已结束');
     } catch (error) {
+      const msg = error instanceof Error ? error.message : '编码任务失败';
       setRuntimeState((prev) => ({
         ...prev,
         phase: 'error',
-        message: error instanceof Error ? error.message : '编码任务失败',
+        message: msg,
         lastEventAt: new Date().toISOString(),
       }));
+      closeAssistantOnce(`\n\n【异常】${msg}`, true);
       logger.error('编码任务失败', error);
-      toast.error(error instanceof Error ? error.message : '编码任务失败');
+      toast.error(msg);
     }
   };
 
+  const handleRunCoding = async () => {
+    await executeCodexRound({ appendUserFromDraft: false });
+  };
+
+  const handleChatSendAndExecute = async () => {
+    await executeCodexRound({ appendUserFromDraft: true });
+  };
+
   const handleCancelCodex = async () => {
-    if (!activeSession || !codexToolCall) return;
+    if (!activeSession || !runningCodexToolCall) return;
     try {
       await cancelCodexExecution.mutateAsync({
-        id: codexToolCall.id,
+        id: runningCodexToolCall.id,
         sessionId: activeSession.id,
       });
-      appendLog('[步骤4] 已请求停止编码进程');
+      appendLog('[Codex] 已请求停止当前进程');
       toast.success('已请求停止');
     } catch (error) {
       logger.error('停止失败', error);
@@ -568,201 +1026,586 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   const runtimePlaceholder =
     '日志：步骤 2 的 Workspace 命令与步骤 3/4 的编码输出将显示在此处。';
 
+  const codexStreamingElapsedMs = useMemo(() => {
+    const busy = Boolean(runningCodexToolCall) || runCodexToolCall.isPending;
+    if (!busy || !runtimeState.startedAt) return 0;
+    return Math.max(0, Date.now() - Date.parse(runtimeState.startedAt));
+  }, [runningCodexToolCall, runCodexToolCall.isPending, runtimeState.startedAt, bumpStreamingClock]);
+
+  const canComposerRunCodex =
+    step2Done &&
+    Boolean(readyWorkspace) &&
+    !isCodexRunning &&
+    codingTool === 'codex_cli' &&
+    !runCodexToolCall.isPending;
+
   const stepper = (
-    <ol className="space-y-6">
-      <li
-        className={cn(
-          'rounded-lg border border-border bg-card p-4 shadow-sm',
-          'border-l-[3px] border-l-primary',
-        )}
+    <div className="space-y-6">
+      <Tabs
+        value={workbenchSetupTab}
+        onValueChange={(v) => setWorkbenchSetupTab(v as 'thread' | 'workspace' | 'tool')}
+        className="w-full gap-4"
       >
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2 mb-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-              1
-            </span>
-            创建 Agent Thread（生成提示词）
-          </div>
-          {step1Done ? (
-            <Badge variant="outline" className="border-green-500/30 bg-green-500/10 text-green-700">
-              <CheckCircle2 className="mr-1 size-3" />
-              已完成
-            </Badge>
-          ) : null}
-        </div>
-        <p className="text-xs text-muted-foreground mb-3 flex items-start gap-1.5">
-          <FileText className="size-3.5 shrink-0 mt-0.5 text-primary" />
-          系统会根据流水线关联需求打包 ContextPack（含 PRD、FS/TS 等），再结合下方指令生成可执行的编码提示词。
-        </p>
-        <Textarea
-          value={instruction}
-          onChange={(event) => setInstruction(event.target.value)}
-          className="min-h-[100px] text-sm"
-          placeholder="用自然语言描述要实现什么、验收标准或约束…"
-        />
-        <Button className="mt-3" onClick={handleCreateThread} disabled={isBusy}>
-          {createAgentSession.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Bot className="mr-2 size-4" />}
-          创建任务并生成提示词
-        </Button>
-      </li>
-
-      <li
-        className={cn(
-          'rounded-lg border border-border bg-card p-4 shadow-sm',
-          'border-l-[3px] border-l-primary',
-        )}
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2 mb-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-              2
-            </span>
-            准备 Workspace（仓库 + 文档上下文）
-          </div>
-          {step2Done ? (
-            <Badge variant="outline" className="border-green-500/30 bg-green-500/10 text-green-700">
-              <CheckCircle2 className="mr-1 size-3" />
-              已就绪
-            </Badge>
-          ) : null}
-        </div>
-        <p className="text-xs text-muted-foreground mb-3">
-          一键完成：确认提示词 → 登记隔离目录 → 克隆/拉取代码仓库，并把 ContextPack 落到 Workspace 侧供编码工具读取。
-        </p>
-        <Button variant="secondary" onClick={handlePrepareWorkspace} disabled={!step1Done || isBusy}>
-          {executeWorkspaceLifecycle.isPending || provisionWorkspace.isPending ? (
-            <Loader2 className="mr-2 size-4 animate-spin" />
-          ) : (
-            <ChevronRight className="mr-2 size-4" />
-          )}
-          准备 Workspace
-        </Button>
-        {primaryWorkspace ? (
-          <div className="mt-3 rounded-md border bg-muted/20 px-3 py-2 font-mono text-xs text-muted-foreground break-all">
-            <span className="font-sans font-medium text-foreground">当前目录：</span>
-            {primaryWorkspace.worktreePath || primaryWorkspace.repoUrl} · {primaryWorkspace.status}
-          </div>
-        ) : null}
-      </li>
-
-      <li
-        className={cn(
-          'rounded-lg border border-border bg-card p-4 shadow-sm',
-          'border-l-[3px] border-l-primary',
-        )}
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2 mb-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-              3
-            </span>
-            调用编码工具
-          </div>
-        </div>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <div className="flex-1 space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">编码工具</label>
-            <Select
-              value={codingTool}
-              onValueChange={(v) => setCodingTool(v as ICodingToolChoice)}
-            >
-              <SelectTrigger className="w-full sm:max-w-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {CODING_TOOL_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.id} value={opt.id} disabled={!opt.enabled}>
-                    {opt.label} — {opt.description}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={handleRunCoding}
-              disabled={!step2Done || !codexToolCall || isCodexRunning || codingTool !== 'codex_cli'}
-            >
-              {runCodexToolCall.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Terminal className="mr-2 size-4" />}
-              开始编码
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleCancelCodex}
-              disabled={!codexToolCall || !isCodexRunning || cancelCodexExecution.isPending}
-            >
-              {cancelCodexExecution.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Square className="mr-2 size-4" />}
-              停止
+        <TabsList className="grid h-auto w-full grid-cols-3 gap-1 rounded-xl bg-muted/35 p-1.5 ring-1 ring-border/25">
+          <TabsTrigger
+            value="thread"
+            className="flex flex-col items-center gap-1 px-2 py-2 text-center text-[11px] leading-tight sm:flex-row sm:text-sm"
+          >
+            <span className="line-clamp-2">创建 Agent Thread</span>
+            {step1Done ? <CheckCircle2 className="size-3.5 shrink-0 text-green-600" /> : null}
+          </TabsTrigger>
+          <TabsTrigger
+            value="workspace"
+            className="flex flex-col items-center gap-1 px-2 py-2 text-center text-[11px] leading-tight sm:flex-row sm:text-sm"
+          >
+            <span className="line-clamp-2">准备 Workspace</span>
+            {step2Done ? <CheckCircle2 className="size-3.5 shrink-0 text-green-600" /> : null}
+          </TabsTrigger>
+          <TabsTrigger
+            value="tool"
+            className="flex flex-col items-center gap-1 px-2 py-2 text-center text-[11px] leading-tight sm:flex-row sm:text-sm"
+          >
+            <span className="line-clamp-2">调用编码工具</span>
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="thread" className="mt-0 outline-none">
+          <div
+            className={cn(
+              'rounded-xl bg-muted/25 p-4 shadow-none',
+              'border-l-[3px] border-l-primary',
+            )}
+          >
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 pb-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                  1
+                </span>
+                创建 Agent Thread（生成提示词）
+              </div>
+              {step1Done ? (
+                <Badge variant="outline" className="border-green-500/30 bg-green-500/10 text-green-700">
+                  <CheckCircle2 className="mr-1 size-3" />
+                  已完成
+                </Badge>
+              ) : null}
+            </div>
+            <p className="mb-3 flex items-start gap-1.5 text-xs text-muted-foreground">
+              <FileText className="mt-0.5 size-3.5 shrink-0 text-primary" />
+              系统会根据流水线关联需求打包 ContextPack（含 PRD、FS/TS 等），再结合下方指令生成可执行的编码提示词。
+            </p>
+            <Textarea
+              value={instruction}
+              onChange={(event) => setInstruction(event.target.value)}
+              className="min-h-[100px] text-sm"
+              placeholder="用自然语言描述要实现什么、验收标准或约束…"
+            />
+            <Button className="mt-3" onClick={handleCreateThread} disabled={isBusy}>
+              {createAgentSession.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Bot className="mr-2 size-4" />}
+              创建任务并生成提示词
             </Button>
           </div>
-        </div>
-      </li>
+        </TabsContent>
+        <TabsContent value="workspace" className="mt-0 outline-none">
+          <div
+            className={cn(
+              'rounded-xl bg-muted/25 p-4 shadow-none',
+              'border-l-[3px] border-l-primary',
+            )}
+          >
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 pb-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                  2
+                </span>
+                准备 Workspace（仓库 + 文档上下文）
+              </div>
+              {step2Done ? (
+                <Badge variant="outline" className="border-green-500/30 bg-green-500/10 text-green-700">
+                  <CheckCircle2 className="mr-1 size-3" />
+                  已就绪
+                </Badge>
+              ) : null}
+            </div>
+            <p className="text-xs text-muted-foreground mb-3">
+              一键完成：确认提示词 → 登记隔离目录 → 克隆/拉取代码仓库，并把 ContextPack 落到 Workspace 侧供编码工具读取。
+            </p>
+            <Button variant="secondary" onClick={handlePrepareWorkspace} disabled={!step1Done || isBusy}>
+              {executeWorkspaceLifecycle.isPending || provisionWorkspace.isPending ? (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              ) : (
+                <ChevronRight className="mr-2 size-4" />
+              )}
+              准备 Workspace
+            </Button>
+            {displayWorkspace ? (
+              <div className="mt-3 rounded-lg bg-background/70 px-3 py-2.5 font-mono text-xs text-muted-foreground break-all ring-1 ring-border/20">
+                <span className="font-sans font-medium text-foreground">当前目录：</span>
+                {displayWorkspace.worktreePath || displayWorkspace.repoUrl} · {displayWorkspace.status}
+              </div>
+            ) : null}
+          </div>
+        </TabsContent>
+        <TabsContent value="tool" className="mt-0 outline-none">
+          <div
+            className={cn(
+              'rounded-xl bg-muted/25 p-4 shadow-none',
+              'border-l-[3px] border-l-primary',
+            )}
+          >
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 pb-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                  3
+                </span>
+                调用编码工具
+              </div>
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="flex-1 space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">编码工具</label>
+                <Select
+                  value={codingTool}
+                  onValueChange={(v) => setCodingTool(v as ICodingToolChoice)}
+                >
+                  <SelectTrigger className="w-full sm:max-w-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CODING_TOOL_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.id} value={opt.id} disabled={!opt.enabled}>
+                        {opt.label} — {opt.description}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => void handleRunCoding()}
+                  disabled={!step2Done || !readyWorkspace || isCodexRunning || codingTool !== 'codex_cli'}
+                >
+                  {runCodexToolCall.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Terminal className="mr-2 size-4" />}
+                  开始编码
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleCancelCodex}
+                  disabled={!runningCodexToolCall || !isCodexRunning || cancelCodexExecution.isPending}
+                >
+                  {cancelCodexExecution.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Square className="mr-2 size-4" />}
+                  停止
+                </Button>
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
 
-      <li
+      <div
         className={cn(
-          'rounded-lg border border-border bg-card p-4 shadow-sm',
-          'border-l-[3px] border-l-primary',
+          'rounded-xl bg-muted/30 p-4 shadow-none',
+          'border-l-[3px] border-l-indigo-500/70',
         )}
       >
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2 mb-3">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 pb-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-500/10 text-xs font-bold text-indigo-700 dark:text-indigo-300">
               4
             </span>
             实时反馈
           </div>
-          <Badge variant={runtimeState.phase === 'error' ? 'destructive' : 'outline'}>{runtimeState.phase}</Badge>
+          <div className="flex shrink-0 items-center gap-1">
+            {!activeSession ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="relative size-8 shrink-0 text-muted-foreground hover:text-foreground"
+                title="输出日志"
+                aria-label="打开输出日志"
+                onClick={() => setLogsDialogOpen(true)}
+              >
+                <ScrollText className="size-4" />
+                {runtimeOutput.trim() || isCodexRunning ? (
+                  <span
+                    className="absolute right-1 top-1 size-1.5 rounded-full bg-primary"
+                    aria-hidden
+                  />
+                ) : null}
+              </Button>
+            ) : null}
+            <Badge variant={runtimeState.phase === 'error' ? 'destructive' : 'outline'}>{runtimeState.phase}</Badge>
+          </div>
         </div>
-        {(runCodexToolCall.isPending || codexToolCall?.status === 'running') && (
+        {(runCodexToolCall.isPending || Boolean(runningCodexToolCall)) && (
           <Alert variant="warning" className="mb-3">
             <Terminal className="size-4" />
             <AlertTitle>编码任务与连接状态</AlertTitle>
             <AlertDescription>
               {runCodexToolCall.isPending
-                ? '本页正通过流式连接接收输出；离开页面会断开该连接（服务端 Codex 多数情况下仍会继续跑完）。完整输出以步骤 4 顶部「服务端完整日志文件」为准。'
+                ? '本页正通过流式连接接收输出；离开页面会断开该连接（服务端 Codex 多数情况下仍会继续跑完）。完整输出请点击编码对话标题栏「输出日志」图标在弹窗中查看（含服务端日志路径）。'
                 : '工具调用状态为 running：Codex 可能仍在服务端执行；本页每 2.5s 拉取数据库中的输出摘要。也可登录运行后端的主机查看日志文件。'}
             </AlertDescription>
           </Alert>
         )}
-        <div className="mb-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-          <div className="rounded-md border border-border px-2 py-1.5">
-            <div className="text-muted-foreground">PID</div>
-            <div className="font-mono">{runtimeState.pid ?? '—'}</div>
+        <div className="mb-4 grid grid-cols-2 gap-3 rounded-xl bg-background/60 px-3 py-3 text-xs ring-1 ring-border/20 sm:grid-cols-4">
+          <div className="min-w-0 rounded-lg bg-muted/40 px-2.5 py-2">
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">PID</div>
+            <div className="mt-0.5 font-mono text-sm text-foreground">{runtimeState.pid ?? '—'}</div>
           </div>
-          <div className="rounded-md border border-border px-2 py-1.5">
-            <div className="text-muted-foreground">Exit</div>
-            <div className="font-mono">{runtimeState.exitCode ?? '—'}</div>
+          <div className="min-w-0 rounded-lg bg-muted/40 px-2.5 py-2">
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Exit</div>
+            <div className="mt-0.5 font-mono text-sm text-foreground">{runtimeState.exitCode ?? '—'}</div>
           </div>
-          <div className="rounded-md border border-border px-2 py-1.5">
-            <div className="text-muted-foreground">耗时</div>
-            <div className="font-mono">{runtimeState.durationMs != null ? `${runtimeState.durationMs}ms` : '—'}</div>
+          <div className="min-w-0 rounded-lg bg-muted/40 px-2.5 py-2">
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">耗时</div>
+            <div className="mt-0.5 font-mono text-sm text-foreground">
+              {runtimeState.durationMs != null ? `${runtimeState.durationMs}ms` : '—'}
+            </div>
           </div>
-          <div className="rounded-md border border-border px-2 py-1.5">
-            <div className="text-muted-foreground">变更文件</div>
-            <div className="font-mono">{reviewSummary.files.length || runtimeState.changedFilesCount}</div>
+          <div className="min-w-0 rounded-lg bg-muted/40 px-2.5 py-2">
+            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">变更文件</div>
+            <div className="mt-0.5 font-mono text-sm text-foreground">
+              {reviewSummary.files.length || runtimeState.changedFilesCount}
+            </div>
           </div>
         </div>
         {activeSession ? (
-          <details className="mb-3 rounded-md border border-border text-sm">
-            <summary className="cursor-pointer select-none px-3 py-2 font-medium text-foreground bg-muted/30">
-              查看生成的提示词（plan）
-            </summary>
-            <div className="max-h-40 overflow-auto whitespace-pre-wrap border-t border-border p-3 text-xs leading-relaxed text-muted-foreground">
-              {activeSession.planMarkdown || '（空）'}
+          <>
+          <div className="mb-3 flex min-h-0 min-w-0 max-h-[min(92vh,800px)] flex-col overflow-hidden rounded-xl bg-card/80 text-sm ring-1 ring-border/25">
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 bg-muted/45 px-3 py-2.5">
+              <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                {runCodexToolCall.isPending || Boolean(runningCodexToolCall) ? (
+                  <>
+                    <Sparkles className="size-3.5 shrink-0 text-purple-600 animate-pulse" />
+                    <span>工作中…</span>
+                  </>
+                ) : (
+                  <>
+                    <Bot className="size-3.5 shrink-0 text-primary" />
+                    <span>编码对话</span>
+                  </>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                {sessions.length > 0 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
+                    title="会话历史"
+                    aria-label="打开会话历史"
+                    onClick={() => setHistoryDialogOpen(true)}
+                  >
+                    <History className="size-4" />
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="relative size-8 shrink-0 text-muted-foreground hover:text-foreground"
+                  title="输出日志"
+                  aria-label="打开输出日志"
+                  onClick={() => setLogsDialogOpen(true)}
+                >
+                  <ScrollText className="size-4" />
+                  {runtimeOutput.trim() || isCodexRunning ? (
+                    <span
+                      className="absolute right-1 top-1 size-1.5 rounded-full bg-primary"
+                      aria-hidden
+                    />
+                  ) : null}
+                </Button>
+                <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
+                  持久化 · 每轮 Codex · 流式
+                </Badge>
+              </div>
             </div>
-          </details>
-        ) : null}
-        {tasks.length > 0 ? (
-          <div className="mb-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-            {tasks.map((t) => (
-              <span key={t.id} className="rounded-full border border-border px-2 py-0.5">
-                {t.title}: {t.status}
-              </span>
-            ))}
+            {historySessionId &&
+            pipelineLinkedSession &&
+            historySessionId !== pipelineLinkedSession.id ? (
+              <Alert className="mx-3 mt-2 shrink-0 rounded-md border-amber-500/40 bg-amber-500/5 py-2">
+                <History className="size-3.5 text-amber-700" />
+                <AlertTitle className="text-xs text-amber-900">查看历史会话</AlertTitle>
+                <AlertDescription className="text-xs leading-relaxed text-amber-950/80">
+                  对话内容已从服务端加载；Workspace / Codex 绑定当前所选会话。返回最新流水线请点击标题栏历史图标，在弹窗中选择带「当前流水线」的会话。
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-indigo-500/[0.03]">
+              <div className="min-h-[min(200px,35vh)] flex-1 overflow-y-auto overflow-x-hidden overscroll-contain scroll-smooth">
+                <div className="space-y-4 p-3 pb-4 sm:p-4">
+                  {chatMessages.map((m) =>
+                    m.role === 'assistant' ? (
+                      <div key={m.id} className="flex w-full min-w-0 gap-2.5">
+                        <div
+                          className={cn(
+                            'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/70 text-primary shadow-sm',
+                            m.variant === 'codex' && m.streaming
+                              ? 'bg-purple-500/15 text-purple-700'
+                              : '',
+                          )}
+                        >
+                          {m.variant === 'codex' && m.streaming ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <Bot className="size-4" />
+                          )}
+                        </div>
+                        <div className="min-w-0 w-full flex-1">
+                          <div
+                            className={cn(
+                              'rounded-2xl rounded-tl-md px-3 py-2.5 text-left shadow-sm ring-1 ring-black/[0.04] dark:ring-white/[0.06]',
+                              m.variant === 'plan'
+                                ? 'bg-indigo-500/[0.08]'
+                                : 'bg-background/90',
+                            )}
+                          >
+                            {m.variant === 'plan' ? (
+                              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                <FileText className="size-3.5 shrink-0 text-indigo-600" />
+                                Plan · 编码基准
+                              </div>
+                            ) : null}
+                            {m.variant === 'codex' && m.streaming ? (
+                              <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-medium text-foreground/80">
+                                  <Sparkles className="size-3 text-purple-600" />
+                                  生成中 · {formatDurationShort(codexStreamingElapsedMs)}
+                                </span>
+                              </div>
+                            ) : null}
+                            {m.variant === 'codex' && !m.streaming && m.durationMs != null ? (
+                              <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px]">
+                                <span
+                                  className={cn(
+                                    'font-medium',
+                                    m.exitCode === 0
+                                      ? 'text-green-700'
+                                      : m.exitCode != null
+                                        ? 'text-red-700'
+                                        : 'text-muted-foreground',
+                                  )}
+                                >
+                                  {m.exitCode === 0
+                                    ? '已成功结束'
+                                    : m.exitCode != null
+                                      ? '进程异常结束（非成功）'
+                                      : '已结束'}
+                                  {' · '}
+                                  {formatDurationShort(m.durationMs)}
+                                </span>
+                                {m.exitCode != null ? (
+                                  <span
+                                    className={cn(
+                                      'rounded-md px-1.5 py-0.5 font-mono text-[10px]',
+                                      m.exitCode === 0
+                                        ? 'bg-green-500/15 text-green-800'
+                                        : 'bg-red-500/15 text-red-800',
+                                    )}
+                                  >
+                                    exit {m.exitCode}
+                                  </span>
+                                ) : null}
+                              </div>
+                            ) : null}
+                            {m.variant === 'codex' && m.streaming ? (
+                              <div className="min-w-0 space-y-2">
+                                {m.content.trim() ? (
+                                  <div className="max-h-[min(400px,50vh)] min-h-0 overflow-y-auto overflow-x-auto rounded-lg px-0.5 py-1">
+                                    <Streamdown className={AGENT_CHAT_MARKDOWN_CLASS}>{m.content}</Streamdown>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">等待 Codex 流式输出…</span>
+                                )}
+                              </div>
+                            ) : m.content.trim() ? (
+                              <div className="min-w-0 max-w-full overflow-x-auto overflow-y-visible">
+                                <Streamdown className={AGENT_CHAT_MARKDOWN_CLASS}>{m.content}</Streamdown>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">（空）</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={m.id} className="flex w-full min-w-0 justify-end gap-2.5">
+                        <div className="min-w-0 max-w-[min(100%,85%)] rounded-2xl rounded-br-md bg-primary/[0.06] px-3 py-2.5 text-left text-sm leading-relaxed text-foreground shadow-sm ring-1 ring-primary/10 whitespace-pre-wrap break-words">
+                          {m.content}
+                        </div>
+                        <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/70 text-muted-foreground shadow-sm">
+                          <User className="size-4" />
+                        </div>
+                      </div>
+                    ),
+                  )}
+                  <div ref={chatEndRef} className="h-px shrink-0" aria-hidden />
+                </div>
+              </div>
+            </div>
+            <div className="shrink-0 border-t border-border/40 bg-muted/25 shadow-[0_-6px_20px_-10px_rgba(15,23,42,0.08)]">
+              <p className="bg-muted/30 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                对话持久化到当前会话；时钟图标切换历史，
+                <span className="font-medium text-foreground"> 文档图标 </span>
+                查看完整输出日志。
+                <span className="font-medium text-foreground"> Enter </span>
+                发送并执行（Workspace 就绪时），
+                <span className="font-medium text-foreground"> Shift+Enter </span>
+                换行；左侧「仅对话」只写入气泡。
+              </p>
+              <div className="p-2 sm:p-3">
+                <div className="overflow-hidden rounded-xl bg-background/90 ring-1 ring-border/25 shadow-sm">
+                  <Textarea
+                    value={chatDraft}
+                    onChange={(e) => setChatDraft(e.target.value)}
+                    placeholder="描述后续变更或验收反馈…"
+                    disabled={!step1Done}
+                    className="min-h-[72px] resize-none border-0 bg-transparent px-3 py-2.5 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' || e.shiftKey) return;
+                      if (!chatDraft.trim() || !step1Done) return;
+                      if (!canComposerRunCodex) return;
+                      e.preventDefault();
+                      void handleChatSendAndExecute();
+                    }}
+                  />
+                  <div className="flex items-center justify-between gap-2 border-t border-border/30 bg-muted/25 px-2 py-1.5">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
+                          onClick={handleChatAppendUser}
+                          disabled={!step1Done || !chatDraft.trim()}
+                        >
+                          <MessageSquarePlus className="size-4 shrink-0" />
+                          <span className="hidden text-xs sm:inline">仅对话</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-[240px]">
+                        写入对话队列，稍后在步骤 3 执行 Codex
+                      </TooltipContent>
+                    </Tooltip>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="hidden font-mono text-[10px] font-normal text-muted-foreground sm:inline-flex">
+                        Codex CLI
+                      </Badge>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            size="icon"
+                            className={cn(
+                              'size-9 shrink-0 rounded-full shadow-sm',
+                              canComposerRunCodex && chatDraft.trim()
+                                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                                : '',
+                            )}
+                            disabled={!canComposerRunCodex || !chatDraft.trim()}
+                            onClick={() => void handleChatSendAndExecute()}
+                            aria-label="发送并执行 Codex"
+                          >
+                            {runCodexToolCall.isPending ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <ArrowUp className="size-4" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">发送并执行本轮 Codex</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {tasks.length > 0 ? (
+                <div className="flex flex-wrap gap-2 border-t border-border/30 px-3 py-2 text-xs text-muted-foreground">
+                  {tasks.map((t) => (
+                    <span key={t.id} className="rounded-full bg-muted/50 px-2.5 py-0.5 ring-1 ring-border/15">
+                      {t.title}: {t.status}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
+          <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
+            <DialogContent className="flex max-h-[min(520px,75vh)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+              <DialogHeader className="border-b border-border px-6 py-4 text-left">
+                <DialogTitle>会话历史</DialogTitle>
+                <DialogDescription className="text-xs leading-relaxed">
+                  选择一项加载已保存的对话。标记为「当前流水线」的是当前研发流水线绑定的会话。
+                </DialogDescription>
+              </DialogHeader>
+              <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+                <ul className="space-y-1">
+                  {[...sessions]
+                    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+                    .map((s) => {
+                      const isCurrentPipeline = pipelineLinkedSession?.id === s.id;
+                      const isActiveView = activeSession?.id === s.id;
+                      return (
+                        <li key={s.id}>
+                          <button
+                            type="button"
+                            className={cn(
+                              'w-full rounded-md border border-transparent px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
+                              isActiveView && 'border-primary/30 bg-primary/10',
+                            )}
+                            onClick={() => {
+                              if (isCurrentPipeline) {
+                                setHistorySessionId(null);
+                              } else {
+                                setHistorySessionId(s.id);
+                              }
+                              setHistoryDialogOpen(false);
+                            }}
+                          >
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="min-w-0 flex-1 break-words font-medium leading-snug">
+                                {formatAgentSessionPickLabel(s)}
+                              </span>
+                              {isCurrentPipeline ? (
+                                <Badge variant="outline" className="shrink-0 text-[10px] font-normal">
+                                  当前流水线
+                                </Badge>
+                              ) : null}
+                            </div>
+                          </button>
+                        </li>
+                      );
+                    })}
+                </ul>
+              </div>
+            </DialogContent>
+          </Dialog>
+          </>
         ) : null}
+        <Dialog open={logsDialogOpen} onOpenChange={setLogsDialogOpen}>
+          <DialogContent className="flex max-h-[min(560px,80vh)] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+            <DialogHeader className="border-b border-border px-6 py-4 text-left">
+              <DialogTitle>输出日志</DialogTitle>
+              <DialogDescription className="text-xs leading-relaxed">
+                完整 stdout / stderr 摘要与服务端日志路径。流式内容已同步到上方对话气泡。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="min-h-0 flex-1 overflow-hidden border-t border-slate-800 bg-slate-950">
+              <pre
+                ref={logsPreRef}
+                className="max-h-[min(420px,60vh)] min-h-[200px] overflow-auto whitespace-pre-wrap px-4 py-3 font-mono text-xs leading-relaxed text-slate-100"
+              >
+                {runtimeOutput.trim() || runtimePlaceholder}
+              </pre>
+            </div>
+          </DialogContent>
+        </Dialog>
         {pendingApprovals.length > 0 ? (
-          <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+          <div className="mb-3 rounded-xl bg-amber-500/[0.07] p-3 text-sm ring-1 ring-amber-500/20">
             <div className="mb-2 font-medium text-amber-800">有待审批的工具调用</div>
             <ul className="space-y-2">
               {pendingApprovals.map((tc) => (
@@ -776,40 +1619,25 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
             </ul>
           </div>
         ) : null}
-        <div className="rounded-lg border border-border bg-slate-950 p-3">
-          <div className="mb-2 text-xs font-medium text-slate-400">输出流</div>
-          <pre className="max-h-[min(360px,50vh)] overflow-auto whitespace-pre-wrap font-mono text-xs leading-5 text-slate-100">
-            {runtimeOutput.trim() || runtimePlaceholder}
-          </pre>
-        </div>
         {runtimeState.message ? (
           <p className="mt-2 text-xs text-red-600">{runtimeState.message}</p>
         ) : null}
-      </li>
-    </ol>
+      </div>
+    </div>
   );
 
   return (
-    <Card className="border-border shadow-sm">
-      <CardHeader className="pb-2">
+    <Card className="border-0 shadow-md shadow-black/[0.04] ring-1 ring-border/30">
+      <CardHeader className="border-b border-border/40 bg-muted/20 pb-3">
         <CardTitle className="text-lg flex items-center gap-2">
           <Bot className="size-5 text-primary" />
           Agent 工作台
         </CardTitle>
-        <CardDescription className="text-sm leading-relaxed max-w-[720px]">
-          参考{' '}
-          <a
-            href="https://miaoda.feishu.cn/home"
-            target="_blank"
-            rel="noreferrer"
-            className="text-primary underline-offset-4 hover:underline"
-          >
-            飞书妙搭
-          </a>
-          ：在网页下达指令，由 ContextPack 携带 PRD / FS / TS 等文档，与仓库一起在 Workspace 中交给编码工具执行，并在步骤 4 查看实时输出。
+        <CardDescription className="text-sm leading-relaxed max-w-none">
+          调用AI工具完成编码任务。
         </CardDescription>
       </CardHeader>
-      <CardContent>{stepper}</CardContent>
+      <CardContent className="pt-2">{stepper}</CardContent>
     </Card>
   );
 }

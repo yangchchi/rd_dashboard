@@ -316,17 +316,9 @@ const DashboardPage: React.FC = () => {
               <LayoutDashboard className="w-6 h-6 text-primary" />
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight text-foreground">仪表板</h1>
+              <h1 className="text-xl font-bold tracking-tight text-foreground">智研看板</h1>
               <p className="text-sm text-muted-foreground">
-                需求阶段分布（看板已移至{' '}
-                <button
-                  type="button"
-                  className="font-medium text-primary underline-offset-4 hover:underline"
-                  onClick={() => router.push('/requirements')}
-                >
-                  需求列表
-                </button>
-                ）
+                研发效能监控与分析
               </p>
             </div>
           </div>

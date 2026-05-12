@@ -66,7 +66,7 @@
 
 | ID | 状态 | 优先级 | 任务 | 验收标准 | 依赖 |
 | --- | --- | --- | --- | --- | --- |
-| O-018 | DONE | P2 | 仪表板增加提效/质量/成本指标 | 展示吞吐、周期、测试通过率、AI 调用成本等核心指标 | O-012/O-015 |
+| O-018 | DONE | P2 | 智研看板增加提效/质量/成本指标 | 展示吞吐、周期、测试通过率、AI 调用成本等核心指标 | O-012/O-015 |
 
 ## 最近执行记录
 
@@ -81,7 +81,7 @@
 - DONE O-012：新增需求状态机、`rd_requirement_flow_events` 迁移/启动兼容 DDL、流转事件查询接口与详情页真实时间线；非法状态跳转在服务端拒绝。
 - DONE O-013：新增共享 Spec Machine-Readable 校验器；服务端提交规格审核前强校验 FS/TS/CP；前端校验面板展示可定位字段错误。
 - DONE O-014：抽离 `AIPipelinePage` 纯工具逻辑到 `pipeline-page-utils`，页面减少约 67 行；新增工具单测并纳入 P0 门禁。
-- DONE O-017：新增可复用 `ConfirmActionDialog` / `PromptActionDialog`；流水线删除/重命名与需求看板删除不再使用原生 confirm/prompt。
+- DONE O-017：新增可复用 `ConfirmActionDialog` / `PromptActionDialog`；流水线删除/重命名与智研看板删除不再使用原生 confirm/prompt。
 - DONE O-015：新增 `rd_pipeline_runs` / `rd_pipeline_step_runs` 迁移、启动兼容 DDL、服务端 CRUD、前端 API/Hook 与 PipelineRun 聚焦单测，并纳入 P0 门禁。
 - DONE O-007：新增 `rd_agent_sessions` / `rd_agent_tasks` / `rd_agent_tool_calls` / `rd_agent_workspaces` 迁移、启动兼容 DDL、服务端最小接口、前端类型/API/Hook 与 Agent 账本聚焦单测，并纳入 P0 门禁。
 - DONE O-008：新增 `rd_context_packs` 迁移、启动兼容 DDL、版本化 ContextPack 生成/查询接口与前端 API/Hook；上下文包包含 requirement/prd/fs/ts/cp/org-spec/repo-summary 文件清单、manifest 与 checksum，并纳入 P0 门禁。
@@ -89,7 +89,7 @@
 - DONE O-010：新增 Tool Gateway 风险策略与 RD prepare/approval/start/finish 接口；高风险 shell/git/deploy 命令默认进入审批，工具调用记录超时、审批、状态、退出码与结果摘要；新增服务端与共享策略单测并纳入 P0 门禁。
 - DONE O-011：流水线详情新增 `AgentWorkbenchPanel`；支持创建 Agent Thread、生成 ContextPack、创建计划任务、批准计划后 provision workspace，并展示 Plan Board / Tool Timeline / Workspace 信息。
 - DONE O-016：Agent 工作台新增 Diff Review / 测试报告面板；从工具调用审计聚合变更文件、测试命令、失败项和风险提示，并支持写入人工批准记录；新增 review 汇总单测并纳入 P0 门禁。
-- DONE O-018：仪表板新增提效/质量/成本指标卡，展示自动化覆盖率、平均质量分、测试通过率与估算 AI 成本；新增指标计算工具与单测并纳入 P0 门禁。
+- DONE O-018：智研看板新增提效/质量/成本指标卡，展示自动化覆盖率、平均质量分、测试通过率与估算 AI 成本；新增指标计算工具与单测并纳入 P0 门禁。
 
 ## 每个任务完成后的反馈格式
 

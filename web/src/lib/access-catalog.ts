@@ -44,7 +44,7 @@ const g = (x: AccessPermissionGroup) => x;
 export const ACCESS_PERMISSION_LIST: AccessPermissionDef[] = [
   {
     id: 'page.dashboard',
-    label: '仪表板',
+    label: '智研看板',
     group: g('overview'),
     kind: 'route',
     menuKey: 'dashboard',

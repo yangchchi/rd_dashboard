@@ -17,7 +17,7 @@
 
 | 页面名称 | 文件名 | 路由 | 页面类型 | 入口来源 |
 |---------|-------|------|---------|---------|
-| 需求看板 | `DashboardPage.tsx` | `/` | 一级 | 导航 |
+| 智研看板 | `DashboardPage.tsx` | `/` | 一级 | 导航 |
 | 需求采集 | `RequirementInputPage.tsx` | `/requirements/new` | 一级 | 导航 |
 | 需求列表 | `RequirementsPage.tsx` | `/requirements` | 一级 | 导航 |
 | PRD管理 | `PRDPage.tsx` | `/prd` | 一级 | 导航 |
@@ -26,7 +26,7 @@
 | 规格编辑 | `SpecEditPage.tsx` | `/specification/:id/edit` | 二级 | 规格定义页 → 编辑按钮 |
 | 流水线 | `AIPipelinePage.tsx` | `/ai-pipeline` | 一级 | 导航 |
 | 验收中心 | `AcceptancePage.tsx` | `/acceptance` | 一级 | 导航 |
-| 需求详情 | `RequirementDetailPage.tsx` | `/requirements/:id` | 二级 | 需求看板/列表 → 卡片点击 |
+| 需求详情 | `RequirementDetailPage.tsx` | `/requirements/:id` | 二级 | 智研看板/列表 → 卡片点击 |
 
 ---
 
@@ -50,7 +50,7 @@
 
 | 导航文字 | 路由 | 图标 |
 |---------|------|------|
-| 需求看板 | `/` | LayoutDashboard |
+| 智研看板 | `/` | LayoutDashboard |
 | 需求采集 | `/requirements/new` | PlusCircle |
 | 需求列表 | `/requirements` | List |
 | PRD管理 | `/prd` | FileText |
@@ -62,7 +62,7 @@
 
 ## 功能列表
 
-- **页面**: 需求看板 (`DashboardPage.tsx`)
+- **页面**: 智研看板 (`DashboardPage.tsx`)
   - **页面目标**: 可视化展示需求在6个阶段的流转状态，提供全局视图
   - **功能点**:
     - **泳道视图**: 6列泳道布局（需求池→PRD编写中→规格定义→AI开发中→待验收→已发布），支持拖拽变更状态
@@ -152,8 +152,8 @@
 
 | 存储键名 | 数据说明 | 使用页面 |
 |---------|---------|---------|
-| `__global_rd_currentRequirement` | 当前选中的需求详情，类型为 `IRequirement` | 需求看板、需求详情、PRD编辑、规格编辑、验收中心 |
-| `__global_rd_requirementList` | 需求列表缓存，类型为 `IRequirement[]` | 需求看板、需求列表 |
+| `__global_rd_currentRequirement` | 当前选中的需求详情，类型为 `IRequirement` | 智研看板、需求详情、PRD编辑、规格编辑、验收中心 |
+| `__global_rd_requirementList` | 需求列表缓存，类型为 `IRequirement[]` | 智研看板、需求列表 |
 | `__global_rd_currentPRD` | 当前编辑的PRD内容，类型为 `IPRD` | PRD管理、PRD编辑 |
 | `__global_rd_currentSpec` | 当前编辑的规格说明书，类型为 `ISpecification` | 规格定义、流水线 |
 | `__global_rd_userRole` | 当前用户角色，类型为 `'stakeholder' \| 'pm' \| 'tm'` | 全局（控制功能权限和可见性） |
@@ -361,7 +361,7 @@ interface IInteraction {
 
 | 层级 | 尺寸 | 字重 | 行高 | 用途 |
 |-----|-----|-----|-----|-----|
-| Page Title | `text-2xl` (24px) | `font-semibold` (600) | `leading-tight` | 页面标题（需求看板、PRD管理等） |
+| Page Title | `text-2xl` (24px) | `font-semibold` (600) | `leading-tight` | 页面标题（智研看板、PRD管理等） |
 | Section Title | `text-lg` (18px) | `font-semibold` (600) | `leading-7` | 区块标题（泳道名称、表单分组） |
 | Card Title | `text-base` (16px) | `font-medium` (500) | `leading-6` | 卡片标题（需求标题、PRD名称） |
 | Body | `text-sm` (14px) | `font-normal` (400) | `leading-relaxed` | 正文、描述、PRD内容 |
@@ -383,7 +383,7 @@ interface IInteraction {
 
 | 导航文字 | 路由 | 图标 | 角色可见性 |
 |---------|------|-----|-----------|
-| 需求看板 | `/` | LayoutDashboard | 全部 |
+| 智研看板 | `/` | LayoutDashboard | 全部 |
 | 需求采集 | `/requirements/new` | PlusCircle | Stakeholder, PM |
 | 需求列表 | `/requirements` | List | 全部 |
 | PRD管理 | `/prd` | FileText | PM, TM |
@@ -412,7 +412,7 @@ interface IInteraction {
 
 | 页面 | 布局模式 | 特殊配置 |
 |-----|---------|---------|
-| DashboardPage (需求看板) | 全宽流式 | 6列泳道，水平滚动，卡片固定宽度 `w-72` |
+| DashboardPage (智研看板) | 全宽流式 | 6列泳道，水平滚动，卡片固定宽度 `w-72` |
 | RequirementInputPage (需求采集) | 居中窄栏 | `max-w-2xl`，分节表单，渐进式展示 |
 | RequirementsPage (需求列表) | 全宽表格 | 可横向滚动表格，固定操作列 |
 | PRDEditPage (PRD编辑) | 双栏自适应 | 左侧编辑区 `flex-1`，右侧AI助手 `w-80`（可选） |

@@ -9,8 +9,9 @@ import {
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createWriteStream, type WriteStream } from 'node:fs';
-import { mkdir, rm, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { extname, join, relative, resolve, sep } from 'node:path';
 import { finished as waitStreamFinished } from 'node:stream/promises';
 import { DRIZZLE_DATABASE } from '../../database/database.constants';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
@@ -250,6 +251,13 @@ export interface IPipelineQualityMetrics {
   testPassRate: number;
 }
 
+export interface IPipelineCodeReviewRecord {
+  id: string;
+  createdAt: string;
+  summaryMarkdown: string;
+  qualityMetrics: IPipelineQualityMetrics;
+}
+
 export interface IPipelinePublishedDocument {
   path: string;
   kind: 'prd' | 'fs' | 'ts';
@@ -301,6 +309,7 @@ export interface IPipelineTaskRow {
   logs: IPipelineLogEntry[];
   testReport?: IPipelineTestReport | null;
   qualityMetrics?: IPipelineQualityMetrics | null;
+  codeReviewHistory?: IPipelineCodeReviewRecord[] | null;
   pipelineMeta: IPipelineMeta;
   commitStore?: IPipelineCommitStore | null;
   createdAt: string;
@@ -627,6 +636,13 @@ export interface IAiSkillConfig {
   tools?: unknown[];
   promptTemplate: string;
   updatedAt: string;
+}
+
+export interface IAgentWorkspaceSourceTreeNodeJson {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  children?: IAgentWorkspaceSourceTreeNodeJson[];
 }
 
 @Injectable()
@@ -976,6 +992,9 @@ export class RdService implements OnModuleInit {
     `);
     await this.db.execute(sql`
       ALTER TABLE rd_pipeline_tasks ADD COLUMN IF NOT EXISTS updated_by TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_pipeline_tasks ADD COLUMN IF NOT EXISTS code_review_history JSONB NOT NULL DEFAULT '[]'::jsonb;
     `);
     await this.db.execute(sql`
       ALTER TABLE rd_products ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
@@ -1500,6 +1519,9 @@ export class RdService implements OnModuleInit {
     const testReport = (r.test_report as IPipelineTestReport | null) ?? (r.testReport as IPipelineTestReport | null);
     const qualityMetrics =
       (r.quality_metrics as IPipelineQualityMetrics | null) ?? (r.qualityMetrics as IPipelineQualityMetrics | null);
+    const codeReviewHistoryRaw =
+      (r.code_review_history as IPipelineCodeReviewRecord[] | null) ??
+      (r.codeReviewHistory as IPipelineCodeReviewRecord[] | null);
     const pipelineMeta =
       (r.pipeline_meta as IPipelineMeta) || (r.pipelineMeta as IPipelineMeta) || {};
     const commitStore =
@@ -1516,6 +1538,7 @@ export class RdService implements OnModuleInit {
       logs,
       testReport: testReport ?? undefined,
       qualityMetrics: qualityMetrics ?? undefined,
+      codeReviewHistory: Array.isArray(codeReviewHistoryRaw) ? codeReviewHistoryRaw : undefined,
       pipelineMeta,
       commitStore: commitStore ?? undefined,
       createdAt: t.createdAt,
@@ -2994,6 +3017,8 @@ export class RdService implements OnModuleInit {
           commitStore: body.commitStore !== undefined ? body.commitStore : existing.commitStore,
           testReport: body.testReport !== undefined ? body.testReport : existing.testReport,
           qualityMetrics: body.qualityMetrics !== undefined ? body.qualityMetrics : existing.qualityMetrics,
+          codeReviewHistory:
+            body.codeReviewHistory !== undefined ? body.codeReviewHistory : existing.codeReviewHistory ?? [],
           createdAt: existing.createdAt,
           updatedAt: now,
           createdBy: existing.createdBy ?? body.createdBy ?? null,
@@ -3011,6 +3036,7 @@ export class RdService implements OnModuleInit {
           logs: body.logs || [],
           testReport: body.testReport,
           qualityMetrics: body.qualityMetrics,
+          codeReviewHistory: body.codeReviewHistory ?? [],
           pipelineMeta: body.pipelineMeta || {},
           commitStore: body.commitStore,
           createdAt: body.createdAt || now,
@@ -3022,7 +3048,7 @@ export class RdService implements OnModuleInit {
       INSERT INTO rd_pipeline_tasks (
         id, requirement_id, requirement_title, status, progress, stage,
         start_time, estimated_end_time, logs, test_report, quality_metrics,
-        pipeline_meta, commit_store, created_by, updated_by, created_at, updated_at
+        code_review_history, pipeline_meta, commit_store, created_by, updated_by, created_at, updated_at
       ) VALUES (
         ${merged.id},
         ${merged.requirementId},
@@ -3035,6 +3061,7 @@ export class RdService implements OnModuleInit {
         ${JSON.stringify(merged.logs)}::jsonb,
         ${this.jsonbSql(merged.testReport ?? null)},
         ${this.jsonbSql(merged.qualityMetrics ?? null)},
+        ${JSON.stringify(merged.codeReviewHistory ?? [])}::jsonb,
         ${JSON.stringify(merged.pipelineMeta || {})}::jsonb,
         ${this.jsonbSql(merged.commitStore ?? null)},
         ${merged.createdBy ?? null},
@@ -3053,6 +3080,7 @@ export class RdService implements OnModuleInit {
         logs = EXCLUDED.logs,
         test_report = EXCLUDED.test_report,
         quality_metrics = EXCLUDED.quality_metrics,
+        code_review_history = EXCLUDED.code_review_history,
         pipeline_meta = EXCLUDED.pipeline_meta,
         commit_store = EXCLUDED.commit_store,
         updated_by = EXCLUDED.updated_by,
@@ -3294,6 +3322,28 @@ export class RdService implements OnModuleInit {
         ${body.createdAt ?? now}::timestamptz,
         ${body.updatedAt ?? now}::timestamptz
       );
+    `);
+    return (await this.getAgentSession(id))!;
+  }
+
+  /** 浅合并 metadata（用于工作台对话等客户端状态持久化） */
+  async patchAgentSessionMetadata(
+    id: string,
+    patch: Record<string, unknown>,
+    updatedBy?: string | null,
+  ): Promise<IAgentSessionRow> {
+    const current = await this.getAgentSession(id);
+    if (!current) {
+      throw new NotFoundException('AgentSession 不存在');
+    }
+    const merged = { ...current.metadata, ...patch };
+    const now = new Date().toISOString();
+    await this.db.execute(sql`
+      UPDATE rd_agent_sessions
+      SET metadata = ${JSON.stringify(merged)}::jsonb,
+          updated_at = ${now}::timestamptz,
+          updated_by = COALESCE(${updatedBy ?? null}, updated_by)
+      WHERE id = ${id};
     `);
     return (await this.getAgentSession(id))!;
   }
@@ -3622,10 +3672,19 @@ export class RdService implements OnModuleInit {
   }
 
   private runTextCommand(command: string, args: string[], cwd: string): Promise<ICommandTextResult> {
+    return this.runTextCommandWithEnv(command, args, cwd, process.env);
+  }
+
+  private runTextCommandWithEnv(
+    command: string,
+    args: string[],
+    cwd: string,
+    env: NodeJS.ProcessEnv,
+  ): Promise<ICommandTextResult> {
     return new Promise((resolve) => {
       const child = spawn(command, args, {
         cwd,
-        env: process.env,
+        env,
         shell: false,
       });
       let stdout = '';
@@ -3647,6 +3706,182 @@ export class RdService implements OnModuleInit {
         resolve({ exitCode: code, stdout, stderr });
       });
     });
+  }
+
+  private async createGitAskpassBundle(
+    gitPat: string,
+    gitUsername: string,
+  ): Promise<{ env: NodeJS.ProcessEnv; dispose: () => Promise<void> }> {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'rd-agent-git-'));
+    const askPassFile = join(tempRoot, 'git-askpass.sh');
+    const script = `#!/bin/sh
+case "$1" in
+  *sername*) printf '%s\n' "$RD_GIT_USERNAME" ;;
+  *assword*) printf '%s\n' "$RD_GIT_PAT" ;;
+  *) printf '\n' ;;
+esac
+`;
+    await writeFile(askPassFile, script, 'utf8');
+    await chmod(askPassFile, 0o700);
+    return {
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_ASKPASS: askPassFile,
+        RD_GIT_USERNAME: gitUsername.trim() || 'git',
+        RD_GIT_PAT: gitPat.trim(),
+      },
+      dispose: () => rm(tempRoot, { recursive: true, force: true }),
+    };
+  }
+
+  /**
+   * 在 Agent worktree 内执行 git add / commit / push，将当前分支推送到 origin 上对应 agent 分支。
+   * HTTPS 需 PAT：请求体传入，或配置环境变量 RD_AGENT_GIT_PUSH_PAT（及可选 RD_AGENT_GIT_PUSH_USERNAME）。
+   */
+  async commitAndPushAgentWorkspace(
+    workspaceId: string,
+    body?: {
+      commitMessage?: string | null;
+      gitPat?: string | null;
+      gitUsername?: string | null;
+    },
+  ): Promise<{
+    committed: boolean;
+    pushed: boolean;
+    branch: string;
+    commitHash: string | null;
+    log: string[];
+  }> {
+    const workspace = await this.getAgentWorkspace(workspaceId);
+    if (!workspace) {
+      throw new NotFoundException('AgentWorkspace 不存在');
+    }
+    if (workspace.status !== 'ready') {
+      throw new BadRequestException('Workspace 未处于 ready 状态，无法推送');
+    }
+    const worktreePath = workspace.worktreePath?.trim();
+    if (!worktreePath) {
+      throw new BadRequestException('缺少 worktreePath');
+    }
+    const rootAbs = resolve(worktreePath);
+    const st = await stat(rootAbs).catch(() => null);
+    if (!st?.isDirectory()) {
+      throw new BadRequestException('工作目录不存在');
+    }
+    const metaRoot = String(this.parseJsonObject(workspace.metadata).workspaceRoot || '')
+      .trim()
+      .replace(/\/+$/, '');
+    if (metaRoot) {
+      const rootNorm = rootAbs.endsWith(sep) ? rootAbs.slice(0, -1) : rootAbs;
+      const metaNorm = resolve(metaRoot);
+      if (rootNorm !== metaNorm && !rootNorm.startsWith(`${metaNorm}${sep}`)) {
+        throw new BadRequestException('工作目录不在该 Workspace 允许的根路径下');
+      }
+    }
+
+    const repoUrl = workspace.repoUrl.trim();
+    const isHttps = /^https:\/\//i.test(repoUrl);
+    const patFromBody = String(body?.gitPat || '').trim();
+    const patFromEnv = String(process.env.RD_AGENT_GIT_PUSH_PAT || '').trim();
+    const effectivePat = patFromBody || patFromEnv;
+    const effectiveUser =
+      String(body?.gitUsername || '').trim() ||
+      String(process.env.RD_AGENT_GIT_PUSH_USERNAME || '').trim() ||
+      'git';
+
+    let env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+    let disposeAskpass: (() => Promise<void>) | null = null;
+    if (isHttps) {
+      if (!effectivePat) {
+        throw new BadRequestException(
+          '远程为 HTTPS 时需提供 Personal Access Token：在弹窗中填写，或由运维配置环境变量 RD_AGENT_GIT_PUSH_PAT。',
+        );
+      }
+      const bundle = await this.createGitAskpassBundle(effectivePat, effectiveUser);
+      env = bundle.env;
+      disposeAskpass = bundle.dispose;
+    }
+
+    const log: string[] = [];
+    const agentBranch = workspace.agentBranch.trim();
+    if (!agentBranch) {
+      if (disposeAskpass) await disposeAskpass();
+      throw new BadRequestException('Workspace 缺少 agentBranch');
+    }
+
+    const msgRaw = String(body?.commitMessage || '').trim();
+    const commitMessage = (
+      msgRaw ||
+      `chore(agent): 推送 Agent 工作台变更 ${new Date().toISOString().slice(0, 19)}`
+    )
+      .replace(/\r?\n/g, ' ')
+      .slice(0, 500);
+
+    try {
+      const inside = await this.runTextCommandWithEnv('git', ['-C', rootAbs, 'rev-parse', '--is-inside-work-tree'], rootAbs, env);
+      log.push(`[git rev-parse] exit=${inside.exitCode}`);
+      if (inside.exitCode !== 0 || inside.stdout.trim() !== 'true') {
+        throw new BadRequestException(`不是有效的 Git 仓库：${inside.stderr || inside.stdout || 'rev-parse 失败'}`);
+      }
+
+      const add = await this.runTextCommandWithEnv('git', ['-C', rootAbs, 'add', '-A'], rootAbs, env);
+      log.push(`[git add -A] exit=${add.exitCode}`);
+      if (add.exitCode !== 0) {
+        throw new BadRequestException(`git add 失败：${add.stderr || add.stdout}`);
+      }
+
+      const diffCached = await this.runTextCommandWithEnv('git', ['-C', rootAbs, 'diff', '--cached', '--quiet'], rootAbs, env);
+      let committed = false;
+      if (diffCached.exitCode === 0) {
+        log.push('[git diff --cached] 无暂存变更，跳过 commit');
+      } else {
+        const commit = await this.runTextCommandWithEnv(
+          'git',
+          ['-C', rootAbs, 'commit', '-m', commitMessage],
+          rootAbs,
+          env,
+        );
+        log.push(`[git commit] exit=${commit.exitCode}`);
+        if (commit.exitCode !== 0) {
+          throw new BadRequestException(`git commit 失败：${commit.stderr || commit.stdout}`);
+        }
+        committed = true;
+      }
+
+      const push = await this.runTextCommandWithEnv(
+        'git',
+        ['-C', rootAbs, 'push', '-u', 'origin', `HEAD:refs/heads/${agentBranch}`],
+        rootAbs,
+        env,
+      );
+      log.push(`[git push] exit=${push.exitCode}`);
+      if (push.exitCode !== 0) {
+        throw new BadRequestException(`git push 失败：${push.stderr || push.stdout}`);
+      }
+
+      const head = await this.runTextCommandWithEnv('git', ['-C', rootAbs, 'rev-parse', 'HEAD'], rootAbs, env);
+      const commitHash = head.exitCode === 0 ? head.stdout.trim() || null : null;
+      if (commitHash) {
+        await this.markAgentWorkspaceReady(workspaceId, { headCommit: commitHash });
+      }
+
+      return {
+        committed,
+        pushed: true,
+        branch: agentBranch,
+        commitHash,
+        log,
+      };
+    } finally {
+      if (disposeAskpass) {
+        try {
+          await disposeAskpass();
+        } catch {
+          /* ignore */
+        }
+      }
+    }
   }
 
   private async pathLooksLikeGitRepo(absDir: string): Promise<boolean> {
@@ -3822,11 +4057,19 @@ export class RdService implements OnModuleInit {
       typeof wsMeta.docsRelativePath === 'string' && wsMeta.docsRelativePath.trim()
         ? wsMeta.docsRelativePath.trim()
         : 'docs/<会话目录>/';
+    /** 简短问答（工作台识别后）不再拼接长篇编码授权，避免模型复述刷屏 */
+    const chatOnlyLead = '【本轮为简短问答，非编码任务】';
+    const isChatOnlyRound = rawPrompt.startsWith(chatOnlyLead);
     /** 旧版 plan 含「等待 TM 批准」时，模型会只读分析后 exit=0 不落盘；注入硬性执行授权 */
-    const agentExecPostamble =
+    const agentExecCodingPostamble =
       '\n\n---\n【系统执行授权】当前为 RD Agent 已准备的 Git worktree（产品目录为代码生成根，可含 backend、frontend、Dockerfile 等），Workspace 与计划在网页侧已就绪。\n' +
       '你必须在本仓库内**实际改文件**（分支、实现、测试或类型检查至少其一），不得以「等待技术经理批准」结束且无变更。\n' +
-      `规格与 PRD 位于本 worktree 下 \`${docsPath}\`（相对仓库根；勿使用已废弃的 docs/ai-pipeline/），勿依赖不存在的 \`context/\` 路径。`;
+      `规格与 PRD 位于本 worktree 下 \`${docsPath}\`（相对仓库根；勿使用已废弃的 docs/ai-pipeline/），勿依赖不存在的 \`context/\` 路径。` +
+      '\n\n【回复约束】若用户本轮只是询问身份、所用模型或简短确认，请用一两句中文作答，勿复述上文 Plan 或本段授权全文。';
+    const agentExecChatOnlyPostamble =
+      '\n\n---\n【环境】当前在 RD Agent 准备的仓库 worktree 中执行 Codex CLI。\n' +
+      '【回复要求】仅用简短中文直接回答用户问题；禁止复述 Plan、禁止复述长篇系统说明、禁止罗列此前对话全文；除非用户明确要求改代码或执行命令，否则不要主动发起仓库修改。';
+    const agentExecPostamble = isChatOnlyRound ? agentExecChatOnlyPostamble : agentExecCodingPostamble;
     const prompt = `${rawPrompt}${agentExecPostamble}`;
     if (!rawPrompt) {
       const message = 'Codex 执行缺少 prompt';
@@ -4091,6 +4334,189 @@ export class RdService implements OnModuleInit {
     `);
     const rows = this.rowsFromExecute(result);
     return rows[0] ? this.rowToAgentWorkspace(rows[0]) : null;
+  }
+
+  /** 资源树中跳过的体积/缓存目录名 */
+  private readonly agentWorkspaceSourceSkipDirNames = new Set([
+    'node_modules',
+    '.git',
+    '.next',
+    'dist',
+    'build',
+    'coverage',
+    '__pycache__',
+    '.venv',
+    'venv',
+    '.turbo',
+    '.parcel-cache',
+    'out',
+    'target',
+  ]);
+
+  private readonly agentWorkspaceBinarySuffixes = new Set([
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.gif',
+    '.webp',
+    '.ico',
+    '.woff',
+    '.woff2',
+    '.ttf',
+    '.eot',
+    '.zip',
+    '.tar',
+    '.gz',
+    '.7z',
+    '.pdf',
+    '.exe',
+    '.dll',
+    '.so',
+    '.dylib',
+    '.mp4',
+    '.mov',
+    '.webm',
+    '.mp3',
+    '.wasm',
+    '.pyc',
+    '.bin',
+  ]);
+
+  private toPosixRelativePath(rootAbs: string, absPath: string): string {
+    return relative(rootAbs, absPath).split(sep).join('/');
+  }
+
+  private assertWorkspaceFileWithinRoot(rootAbs: string, requestedRel: string): string {
+    const rel = requestedRel.trim().replace(/\\/g, '/');
+    if (!rel || rel.includes('..')) {
+      throw new BadRequestException('非法文件路径');
+    }
+    const full = resolve(join(rootAbs, ...rel.split('/')));
+    const relCheck = relative(rootAbs, full);
+    if (relCheck.startsWith('..') || relCheck === '..') {
+      throw new BadRequestException('路径越界');
+    }
+    return full;
+  }
+
+  private async readAgentWorkspaceTreeNodes(
+    rootAbs: string,
+    dirAbs: string,
+    depth: number,
+    budget: { entries: number; cap: number; maxDepth: number; truncated: boolean },
+  ): Promise<IAgentWorkspaceSourceTreeNodeJson[]> {
+    if (depth > budget.maxDepth || budget.entries >= budget.cap) {
+      if (budget.entries >= budget.cap) {
+        budget.truncated = true;
+      }
+      return [];
+    }
+    const dirents = await readdir(dirAbs, { withFileTypes: true }).catch(() => [] as import('node:fs').Dirent[]);
+    const sorted = [...dirents].sort((a, b) => {
+      if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    const nodes: IAgentWorkspaceSourceTreeNodeJson[] = [];
+    for (const d of sorted) {
+      if (budget.entries >= budget.cap) {
+        budget.truncated = true;
+        break;
+      }
+      if (d.isSymbolicLink()) {
+        continue;
+      }
+      const abs = join(dirAbs, d.name);
+      if (d.isDirectory()) {
+        if (this.agentWorkspaceSourceSkipDirNames.has(d.name)) continue;
+        budget.entries += 1;
+        const children = await this.readAgentWorkspaceTreeNodes(rootAbs, abs, depth + 1, budget);
+        nodes.push({
+          name: d.name,
+          path: this.toPosixRelativePath(rootAbs, abs),
+          type: 'directory',
+          children,
+        });
+        continue;
+      }
+      if (d.isFile()) {
+        const ext = extname(d.name).toLowerCase();
+        if (this.agentWorkspaceBinarySuffixes.has(ext)) continue;
+        budget.entries += 1;
+        nodes.push({
+          name: d.name,
+          path: this.toPosixRelativePath(rootAbs, abs),
+          type: 'file',
+        });
+      }
+    }
+    return nodes;
+  }
+
+  async listAgentWorkspaceSourceTree(workspaceId: string): Promise<{
+    worktreePath: string;
+    nodes: IAgentWorkspaceSourceTreeNodeJson[];
+    truncated: boolean;
+  }> {
+    const workspace = await this.getAgentWorkspace(workspaceId);
+    if (!workspace) {
+      throw new NotFoundException('AgentWorkspace 不存在');
+    }
+    const worktreePath = workspace.worktreePath?.trim();
+    if (!worktreePath) {
+      throw new BadRequestException('Workspace 尚未就绪或缺少 worktreePath');
+    }
+    const rootAbs = resolve(worktreePath);
+    const st = await stat(rootAbs).catch(() => null);
+    if (!st?.isDirectory()) {
+      throw new BadRequestException('工作目录不存在或不可读');
+    }
+    const budget = { entries: 0, cap: 1500, maxDepth: 14, truncated: false };
+    const nodes = await this.readAgentWorkspaceTreeNodes(rootAbs, rootAbs, 0, budget);
+    return {
+      worktreePath: rootAbs,
+      nodes,
+      truncated: budget.truncated,
+    };
+  }
+
+  async getAgentWorkspaceSourceFile(
+    workspaceId: string,
+    relativePath: string,
+  ): Promise<{ path: string; content: string; truncated: boolean }> {
+    const workspace = await this.getAgentWorkspace(workspaceId);
+    if (!workspace) {
+      throw new NotFoundException('AgentWorkspace 不存在');
+    }
+    const worktreePath = workspace.worktreePath?.trim();
+    if (!worktreePath) {
+      throw new BadRequestException('Workspace 尚未就绪或缺少 worktreePath');
+    }
+    const rootAbs = resolve(worktreePath);
+    const fullPath = this.assertWorkspaceFileWithinRoot(rootAbs, relativePath);
+    const st = await stat(fullPath).catch(() => null);
+    if (!st?.isFile()) {
+      throw new NotFoundException('文件不存在');
+    }
+    const maxBytes = 1_000_000;
+    if (st.size > maxBytes) {
+      throw new BadRequestException('文件过大（>1MB），请在运行后端的主机本地查看');
+    }
+    const buf = await readFile(fullPath);
+    const nul = buf.indexOf(0);
+    if (nul !== -1) {
+      throw new BadRequestException('暂不支持在浏览器中预览二进制文件');
+    }
+    const maxChars = 400_000;
+    const text = buf.toString('utf8');
+    const truncated = text.length > maxChars;
+    const content = truncated
+      ? `${text.slice(0, maxChars)}\n\n…（正文已截断，请在本地打开完整文件）`
+      : text;
+    return {
+      path: this.toPosixRelativePath(rootAbs, fullPath),
+      content,
+      truncated,
+    };
   }
 
   async upsertAgentWorkspace(

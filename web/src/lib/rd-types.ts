@@ -308,6 +308,14 @@ export interface IPipelineQualityMetrics {
   testPassRate: number;
 }
 
+/** 单次「AI 代码审查」持久化记录（含当次解析出的质量指标快照） */
+export interface IPipelineCodeReviewRecord {
+  id: string;
+  createdAt: string;
+  summaryMarkdown: string;
+  qualityMetrics: IPipelineQualityMetrics;
+}
+
 /** 提交到 Git 的单个文档（用于在流水线页拼 Web 链接） */
 export interface IPipelinePublishedDocument {
   path: string;
@@ -362,6 +370,8 @@ export interface IPipelineTask {
   logs: IPipelineLogEntry[];
   testReport?: IPipelineTestReport;
   qualityMetrics?: IPipelineQualityMetrics;
+  /** 按时间顺序的审查历史，服务端持久化 */
+  codeReviewHistory?: IPipelineCodeReviewRecord[];
   pipelineMeta: IPipelineMeta;
   commitStore?: IPipelineCommitStore;
   createdAt?: string;
@@ -535,6 +545,19 @@ export interface IAgentWorkspace {
   createdAt: string;
   updatedAt: string;
   cleanedAt?: string | null;
+}
+
+export interface IAgentWorkspaceSourceTreeNode {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  children?: IAgentWorkspaceSourceTreeNode[];
+}
+
+export interface IAgentWorkspaceSourceTreeResponse {
+  worktreePath: string;
+  nodes: IAgentWorkspaceSourceTreeNode[];
+  truncated: boolean;
 }
 
 export interface IWorkspaceLifecycleCommand {

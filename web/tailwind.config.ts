@@ -2,8 +2,11 @@ import type { Config } from 'tailwindcss';
 import tailwindcssAnimate from 'tailwindcss-animate';
 
 const config: Config = {
-  /** 与 macOS / 系统设置一致：`dark:` 随 `prefers-color-scheme` 切换 */
-  darkMode: ['media'],
+  /**
+   * 必须与 `next-themes` 的 `attribute="class"` 一致：手动「夜间」会在 `<html>` 上加 `.dark`。
+   * 若仍用 `media`，`dark:` 变体只在系统偏好为暗色时生效，应用内切换主题不会触发。
+   */
+  darkMode: 'class',
   content: [
     './src/**/*.{js,ts,jsx,tsx,mdx}',
     './node_modules/streamdown/dist/**/*.js',

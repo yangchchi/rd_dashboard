@@ -31,7 +31,7 @@ import type { IUser } from '@/lib/rd-types';
 import { toast } from 'sonner';
 
 function roleIdsLabel(ids: string[], roles: AccessRoleRecord[]): string {
-  if (ids.length === 0) return '未分配（仅仪表板）';
+  if (ids.length === 0) return '未分配（仅智研看板）';
   return ids
     .map((id) => roles.find((r) => r.id === id)?.name ?? id)
     .join('、');

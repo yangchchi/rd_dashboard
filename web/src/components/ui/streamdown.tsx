@@ -165,7 +165,19 @@ const defaultComponents: NonNullable<
   img: ({ className, alt, ...props }) => (
     <img className={cn(className)} alt={alt ?? ''} {...omit(props, ['node'])} />
   ),
-  pre: ({ children }) => <div className="not-prose">{children}</div>,
+  /** 必须用真实 <pre> 并保留空白，否则 fenced code（目录树等）换行会被折叠成一行 */
+  pre: ({ className, children, ...props }) => (
+    <pre
+      className={cn(
+        'not-prose my-4 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-4 font-mono text-sm leading-relaxed text-slate-100 ring-1 ring-slate-800/80 [&_code]:rounded-none [&_code]:bg-transparent [&_code]:p-0 [&_code]:text-inherit',
+        className,
+      )}
+      data-streamdown="pre"
+      {...omit(props, ['node'])}
+    >
+      {children}
+    </pre>
+  ),
 };
 
 export function Streamdown({

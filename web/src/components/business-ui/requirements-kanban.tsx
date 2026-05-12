@@ -65,7 +65,7 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
   isLoading = false,
   showToolbar = true,
   hidePageHeading = false,
-  pageTitle = '需求看板',
+  pageTitle = '智研看板',
   pageIcon,
   allowDragStatusChange = false,
 }) => {

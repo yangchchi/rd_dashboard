@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import JSZip from 'jszip';
 import { buildZipContentDisposition } from './rd-download-header';
@@ -323,6 +323,15 @@ export class RdController {
     return this.rd.createAgentSession(body);
   }
 
+  @Patch('agent-sessions/:id/metadata')
+  @RequirePermissions('page.pipeline')
+  patchAgentSessionMetadata(
+    @Param('id') id: string,
+    @Body() body: { patch: Record<string, unknown>; updatedBy?: string | null },
+  ): Promise<IAgentSessionRow> {
+    return this.rd.patchAgentSessionMetadata(id, body.patch ?? {}, body.updatedBy ?? null);
+  }
+
   @Get('agent-sessions/:id/tasks')
   @RequirePermissions('page.pipeline')
   listAgentTasks(@Param('id') id: string): Promise<IAgentTaskRow[]> {
@@ -490,6 +499,28 @@ export class RdController {
   @RequirePermissions('page.pipeline')
   cleanupAgentWorkspace(@Param('id') id: string): Promise<IAgentWorkspaceProvisionResult> {
     return this.rd.cleanupAgentWorkspace(id);
+  }
+
+  @Get('agent-workspaces/:id/source-tree')
+  @RequirePermissions('page.pipeline')
+  listAgentWorkspaceSourceTree(@Param('id') id: string) {
+    return this.rd.listAgentWorkspaceSourceTree(id);
+  }
+
+  @Get('agent-workspaces/:id/source-file')
+  @RequirePermissions('page.pipeline')
+  getAgentWorkspaceSourceFile(@Param('id') id: string, @Query('path') path: string) {
+    return this.rd.getAgentWorkspaceSourceFile(id, path || '');
+  }
+
+  @Post('agent-workspaces/:id/git-commit-push')
+  @RequirePermissions('page.pipeline')
+  commitAndPushAgentWorkspace(
+    @Param('id') id: string,
+    @Body()
+    body?: { commitMessage?: string | null; gitPat?: string | null; gitUsername?: string | null },
+  ) {
+    return this.rd.commitAndPushAgentWorkspace(id, body);
   }
 
   @Get('pipeline-docs/download')

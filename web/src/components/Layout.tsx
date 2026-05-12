@@ -183,27 +183,27 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
   return (
     <>
       <Sidebar collapsible="icon">
-        <SidebarHeader className="flex h-16 shrink-0 items-center border-b border-sidebar-border px-2">
+        <SidebarHeader className="flex h-16 shrink-0 items-center px-2">
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton size="lg" asChild>
                 <Link href="/" className="gap-3 items-start">
                   <span className="flex shrink-0 pt-0.5">
                     <ShipWheel
-                      className="h-10 w-10 text-blue-700 dark:text-cyan-100"
+                      className="h-10 w-10 text-blue-700 dark:text-white"
                       aria-hidden
                     />
                   </span>
                   <div className="grid min-w-0 flex-1 gap-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
-                    <span className="truncate bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-600 bg-clip-text text-base font-extrabold leading-none tracking-wide text-transparent drop-shadow-[0_2px_4px_rgba(59,130,246,0.35)] dark:from-cyan-200 dark:via-blue-200 dark:to-purple-200 dark:drop-shadow-[0_2px_6px_rgba(125,211,252,0.45)]">
-                      AI智研平台
+                    <span className="truncate bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-600 bg-clip-text text-base font-extrabold leading-none tracking-wide text-transparent drop-shadow-[0_2px_4px_rgba(59,130,246,0.35)] dark:bg-none dark:text-white dark:drop-shadow-none">
+                      HAI智研平台
                     </span>
                     <div className="flex min-w-0 max-w-full items-center gap-1.5">
-                      <span className="h-px w-6 shrink-0 bg-gradient-to-r from-transparent via-blue-500/70 to-blue-500/30 dark:via-cyan-300/80 dark:to-cyan-300/30" />
-                      <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-700/90 dark:text-cyan-100/90">
+                      <span className="h-px w-4 shrink-0 bg-gradient-to-r from-transparent via-blue-500/70 to-blue-500/30 dark:via-white/35 dark:to-white/15" />
+                      <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-700/90 dark:text-white/90">
                         AI-Driven SDLC
                       </span>
-                      <span className="h-px w-6 shrink-0 bg-gradient-to-l from-transparent via-blue-500/70 to-blue-500/30 dark:via-cyan-300/80 dark:to-cyan-300/30" />
+                      <span className="h-px w-4 shrink-0 bg-gradient-to-l from-transparent via-blue-500/70 to-blue-500/30 dark:via-white/35 dark:to-white/15" />
                     </div>
                   </div>
                 </Link>
@@ -221,7 +221,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                     <SidebarMenuButton
                       asChild
                       isActive={isDashboardPath(pathname)}
-                      tooltip="仪表板"
+                      tooltip="智研看板"
                       className={menuButtonClass(isDashboardPath(pathname))}
                     >
                       <Link href="/dashboard" className="gap-3">
@@ -238,7 +238,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                               : "text-sidebar-foreground/85"
                           )}
                         >
-                          仪表板
+                          智研看板
                         </span>
                       </Link>
                     </SidebarMenuButton>

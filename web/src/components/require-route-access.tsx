@@ -39,7 +39,7 @@ export function RequireRouteAccess({
           </p>
         </div>
         <Button asChild variant="secondary" className="mt-2">
-          <Link href="/dashboard">返回仪表板</Link>
+          <Link href="/dashboard">返回智研看板</Link>
         </Button>
       </div>
     );

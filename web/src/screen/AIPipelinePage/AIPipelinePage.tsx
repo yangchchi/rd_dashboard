@@ -19,12 +19,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { 
-  Cpu, 
-  Play, 
-  Pause, 
-  RotateCcw, 
-  XCircle, 
+import {
+  Cpu,
+  Pause,
+  RotateCcw,
+  XCircle,
   AlertCircle,
   Terminal,
   BarChart3,
@@ -37,6 +36,8 @@ import {
   Plus,
   GitCommitHorizontal,
   Download,
+  ArrowLeft,
+  History,
 } from 'lucide-react';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import {
@@ -62,8 +63,10 @@ import { rdApi } from '@/lib/rd-api';
 import { getAuthToken } from '@/lib/auth';
 import type {
   IGitCommitRecord,
+  IPipelineCodeReviewRecord,
   IPipelineTask,
 } from '@/lib/rd-types';
+import { deriveQualityMetricsFromReview } from '@/lib/pipeline-code-review-metrics';
 import {
   extractPipelineErrorMessage,
   findProductForRequirement,
@@ -75,6 +78,7 @@ import {
 } from '@/lib/pipeline-page-utils';
 import { buildWorkspaceSessionFolderName, resolveWorkspaceProductSlug } from '@shared/pipeline-workspace-path';
 import { AgentWorkbenchPanel } from './AgentWorkbenchPanel';
+import { AgentWorkspaceCodePanel } from './AgentWorkspaceCodePanel';
 import { toast } from 'sonner';
 
 interface ICodeReviewResult {
@@ -108,8 +112,21 @@ function authJsonHeaders(): HeadersInit {
   };
 }
 
-const AIPipelinePage: React.FC = () => {
+export type AIPipelinePageProps = {
+  /** list：仅看板；detail：单条流水线 Tab 详情 */
+  view?: 'list' | 'detail';
+  /** view 为 detail 时的流水线任务 id */
+  detailTaskId?: string;
+};
+
+const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
+  view = 'list',
+  detailTaskId: detailTaskIdProp,
+}) => {
   const router = useRouter();
+  const isList = view === 'list';
+  const isDetail = view === 'detail';
+  const detailTaskId = (detailTaskIdProp || '').trim();
   const currentProfile = useCurrentUserProfile();
   const { data: requirements = [] } = useRequirementsList();
   const { data: products = [] } = useProductsList();
@@ -272,12 +289,41 @@ const AIPipelinePage: React.FC = () => {
   }, [selectedTask?.logs, activeTab]);
 
   useEffect(() => {
-    if (!tasks.length) {
+    if (isList) {
       setSelectedTaskId('');
       return;
     }
-    setSelectedTaskId((prev) => (tasks.some((t) => t.id === prev) ? prev : tasks[0].id));
-  }, [tasks]);
+    if (!detailTaskId) {
+      setSelectedTaskId('');
+      return;
+    }
+    if (tasksLoading) return;
+    if (!tasks.length || !tasks.some((t) => t.id === detailTaskId)) {
+      toast.error('未找到该流水线');
+      router.replace('/ai-pipeline');
+      return;
+    }
+    setSelectedTaskId(detailTaskId);
+  }, [isList, detailTaskId, tasks, tasksLoading, router]);
+
+  useEffect(() => {
+    if (!isDetail) return;
+    if (!detailTaskId) {
+      router.replace('/ai-pipeline');
+    }
+  }, [isDetail, detailTaskId, router]);
+
+  /** 切换任务或列表刷新后，用服务端持久化的最近一次审查摘要填充展示（审查进行中不覆盖） */
+  useEffect(() => {
+    if (isReviewing || !isDetail || !selectedTaskId) return;
+    const task = tasks.find((t) => t.id === selectedTaskId);
+    const hist = task?.codeReviewHistory;
+    if (hist?.length) {
+      setReviewResult(hist[hist.length - 1].summaryMarkdown);
+    } else {
+      setReviewResult('');
+    }
+  }, [isDetail, isReviewing, selectedTaskId, tasks]);
 
   /** 产品列表晚于需求加载时，在 Git/沙箱仍为空时补全 */
   useEffect(() => {
@@ -318,7 +364,7 @@ const AIPipelinePage: React.FC = () => {
   };
 
   const handleViewTask = (taskId: string) => {
-    setSelectedTaskId(taskId);
+    router.push(`/ai-pipeline/${encodeURIComponent(taskId)}`);
   };
 
   const renamePipelineTask = async (taskId: string, nextName: string) => {
@@ -341,6 +387,9 @@ const AIPipelinePage: React.FC = () => {
     try {
       await deletePipelineTask.mutateAsync(taskId);
       toast.success('已删除');
+      if (isDetail && detailTaskId === taskId) {
+        router.replace('/ai-pipeline');
+      }
     } catch (error) {
       logger.error('删除流水线任务失败', error);
       toast.error('删除失败，请重试');
@@ -400,27 +449,75 @@ const AIPipelinePage: React.FC = () => {
 
   const handleCodeReview = async () => {
     if (!selectedTask) return;
-    
+
+    const taskSnapshot = selectedTask;
     setIsReviewing(true);
     setReviewResult('');
-    
+
+    const testSummary =
+      taskSnapshot.testReport && taskSnapshot.testReport.total > 0
+        ? `\n=== 测试报告摘要 ===\n通过 ${taskSnapshot.testReport.passed}/${taskSnapshot.testReport.total}，失败 ${taskSnapshot.testReport.failed}，覆盖率 ${taskSnapshot.testReport.coverage}%`
+        : '';
+    const codeContent = [
+      '=== 流水线日志 ===',
+      ...taskSnapshot.logs.map((l) => `[${l.timestamp}][${l.level}] ${l.message}`),
+      testSummary,
+    ]
+      .join('\n')
+      .slice(0, 120_000);
+
+    const additionalRequirements =
+      '重点关注代码规范、潜在 bug 与性能问题。审查结束后请在文末追加以下四行（将数字替换为 0–100 的整数评分，勿加其它前缀）：\n' +
+      '【评分】规格一致性:数字\n' +
+      '【评分】API覆盖度:数字\n' +
+      '【评分】代码质量:数字\n' +
+      '【评分】测试通过率:数字';
+
+    let accumulated = '';
     try {
-      const codeContent = selectedTask.logs.map(l => l.message).join('\n');
       const stream = await capabilityClient
         .load('code_review_assistant_1')
         .callStream<ICodeReviewResult>('textSummary', {
           code_content: codeContent,
-          additional_requirements: '重点关注代码规范、潜在bug和性能问题'
+          additional_requirements: additionalRequirements,
         });
 
       for await (const chunk of stream) {
         if (chunk.summary) {
-          setReviewResult(prev => prev + chunk.summary);
+          accumulated += chunk.summary;
+          setReviewResult(accumulated);
         }
       }
+
+      if (!accumulated.trim()) {
+        accumulated = '（模型未返回有效审查内容）';
+        setReviewResult(accumulated);
+      }
+
+      const qualityMetrics = deriveQualityMetricsFromReview({
+        summaryMarkdown: accumulated,
+        testReport: taskSnapshot.testReport,
+      });
+      const record: IPipelineCodeReviewRecord = {
+        id: `review_${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        summaryMarkdown: accumulated,
+        qualityMetrics,
+      };
+      const nextHistory = [...(taskSnapshot.codeReviewHistory ?? []), record];
+
+      await upsertPipelineTask.mutateAsync({
+        ...taskSnapshot,
+        qualityMetrics,
+        codeReviewHistory: nextHistory,
+        ...rdAuditUpdate(),
+      });
+      toast.success('审查已完成，质量指标与记录已保存');
     } catch (error) {
       logger.error('代码审查失败:', error);
-      setReviewResult('代码审查服务暂时不可用，请稍后重试。');
+      const fallback = '代码审查服务暂时不可用，请稍后重试。';
+      setReviewResult(fallback);
+      toast.error('审查失败，未写入记录');
     } finally {
       setIsReviewing(false);
     }
@@ -623,10 +720,10 @@ const AIPipelinePage: React.FC = () => {
       };
 
       await upsertPipelineTask.mutateAsync(newTask);
-      setSelectedTaskId(taskId);
       setIsCreateDialogOpen(false);
       resetCreateForm();
       toast.success(`流水线创建成功，文档已提交（${publishResult.commitHash || '未知提交号'}）`);
+      router.push(`/ai-pipeline/${encodeURIComponent(taskId)}`);
     } catch (error) {
       const message = extractPipelineErrorMessage(error, '提交失败');
       toast.error(message);
@@ -678,40 +775,66 @@ const AIPipelinePage: React.FC = () => {
         />
         {/* 页面标题 */}
         <section className="w-full">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="flex items-center gap-2 rd-page-title">
-                <Cpu className="size-6 text-purple-500" />
-                流水线
-              </h1>
-              <p className="rd-page-desc mt-1">
-                实时监控AI代码生成、测试与部署全流程
-              </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              {isDetail ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="mt-0.5 shrink-0"
+                  onClick={() => router.push('/ai-pipeline')}
+                  aria-label="返回流水线列表"
+                >
+                  <ArrowLeft className="size-4" />
+                </Button>
+              ) : null}
+              <div>
+                <h1 className="flex items-center gap-2 rd-page-title">
+                  <Cpu className="size-6 text-purple-500" />
+                  {isDetail ? '流水线详情' : '流水线'}
+                </h1>
+                <p className="rd-page-desc mt-1">
+                  {isDetail
+                    ? tasksLoading
+                      ? '加载流水线数据…'
+                      : selectedTask?.requirementTitle || '流水线详情'
+                    : '实时监控AI代码生成、测试与部署全流程'}
+                </p>
+                {isDetail && !tasksLoading && selectedTask ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    返回列表可查看或创建其他流水线。
+                  </p>
+                ) : null}
+              </div>
             </div>
-            <div className="flex items-center gap-4">
-              <Button onClick={() => setIsCreateDialogOpen(true)}>
-                <Plus className="size-4 mr-2" />
-                创建流水线
-              </Button>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex shrink-0 flex-col items-stretch gap-3 sm:items-end">
+              {isList ? (
+                <Button onClick={() => setIsCreateDialogOpen(true)}>
+                  <Plus className="size-4 mr-2" />
+                  创建流水线
+                </Button>
+              ) : null}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
                 <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse-dot" />
-                  <span>运行中: {tasks.filter(t => t.status !== 'completed' && t.status !== 'failed').length}</span>
+                  <div className="h-2 w-2 animate-pulse-dot rounded-full bg-purple-500" />
+                  <span>运行中: {tasks.filter((t) => t.status !== 'completed' && t.status !== 'failed').length}</span>
                 </div>
-                <div className="flex items-center gap-1 ml-4">
-                  <div className="w-2 h-2 rounded-full bg-green-500" />
-                  <span>已完成: {tasks.filter(t => t.status === 'completed').length}</span>
+                <div className="flex items-center gap-1">
+                  <div className="h-2 w-2 rounded-full bg-green-500" />
+                  <span>已完成: {tasks.filter((t) => t.status === 'completed').length}</span>
                 </div>
-                <div className="flex items-center gap-1 ml-4">
-                  <div className="w-2 h-2 rounded-full bg-red-500" />
-                  <span>失败: {tasks.filter(t => t.status === 'failed').length}</span>
+                <div className="flex items-center gap-1">
+                  <div className="h-2 w-2 rounded-full bg-red-500" />
+                  <span>失败: {tasks.filter((t) => t.status === 'failed').length}</span>
                 </div>
               </div>
             </div>
           </div>
         </section>
 
-        {/* 流水线看板 */}
+        {/* 流水线看板（仅列表页） */}
+        {isList ? (
         <section className="w-full">
           <Card>
             <CardHeader className="pb-3">
@@ -719,6 +842,9 @@ const AIPipelinePage: React.FC = () => {
                 <Activity className="size-4 text-primary" />
                 流水线看板
               </CardTitle>
+              <CardDescription className="text-xs text-muted-foreground">
+                点击卡片进入详情；快捷操作请使用卡片上的按钮或菜单。
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {tasksLoading ? (
@@ -732,15 +858,11 @@ const AIPipelinePage: React.FC = () => {
               ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {tasks.map(task => {
-                  const isSelected = selectedTaskId === task.id;
-                  
                   return (
                     <Card 
                       key={task.id}
-                      className={`cursor-pointer transition-all duration-200 hover:shadow-md ${
-                        isSelected ? 'ring-2 ring-primary border-primary' : ''
-                      }`}
-                      onClick={() => setSelectedTaskId(task.id)}
+                      className="cursor-pointer transition-all duration-200 hover:shadow-md hover:-translate-y-0.5"
+                      onClick={() => router.push(`/ai-pipeline/${encodeURIComponent(task.id)}`)}
                     >
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between mb-2">
@@ -835,14 +957,21 @@ const AIPipelinePage: React.FC = () => {
             </CardContent>
           </Card>
         </section>
+        ) : null}
 
-        {/* 任务详情 */}
-        {selectedTask && (
+        {/* 任务详情（仅详情页，且已解析到任务） */}
+        {isDetail && tasksLoading ? (
+          <div className="flex justify-center py-20">
+            <Loader2 className="size-10 animate-spin text-muted-foreground" />
+          </div>
+        ) : null}
+        {isDetail && selectedTask ? (
           <section className="w-full">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-5 max-w-3xl">
+              <TabsList className="grid w-full max-w-full grid-cols-6">
                 <TabsTrigger value="overview">概览</TabsTrigger>
                 <TabsTrigger value="agent">Agent工作台</TabsTrigger>
+                <TabsTrigger value="code">代码</TabsTrigger>
                 <TabsTrigger value="logs">实时日志</TabsTrigger>
                 <TabsTrigger value="tests">测试报告</TabsTrigger>
                 <TabsTrigger value="commits">commit记录</TabsTrigger>
@@ -923,6 +1052,34 @@ const AIPipelinePage: React.FC = () => {
                               <Streamdown>{reviewResult}</Streamdown>
                             </div>
                           )}
+                          {selectedTask.codeReviewHistory &&
+                            selectedTask.codeReviewHistory.length > 0 && (
+                              <div className="mt-4 space-y-2">
+                                <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                                  <History className="size-3.5 shrink-0" />
+                                  审查记录（点击切换查看）
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {[...selectedTask.codeReviewHistory].reverse().map((rec) => (
+                                    <Button
+                                      key={rec.id}
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 text-xs font-normal"
+                                      onClick={() => setReviewResult(rec.summaryMarkdown)}
+                                    >
+                                      {new Date(rec.createdAt).toLocaleString('zh-CN', {
+                                        month: '2-digit',
+                                        day: '2-digit',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })}
+                                    </Button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                         </div>
                       )}
                     </CardContent>
@@ -1050,6 +1207,23 @@ const AIPipelinePage: React.FC = () => {
                 />
               </TabsContent>
 
+              <TabsContent value="code" className="mt-4">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Code2 className="size-4 text-primary" />
+                      代码
+                    </CardTitle>
+                    <CardDescription>
+                      在 Agent Workspace 的 worktree 中浏览源文件（只读），样式类似本地 IDE。
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <AgentWorkspaceCodePanel task={selectedTask} />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
               <TabsContent value="logs" className="mt-4">
                 <Card>
                   <CardHeader className="pb-3">
@@ -1060,7 +1234,7 @@ const AIPipelinePage: React.FC = () => {
                   </CardHeader>
                   <CardContent>
                     <ScrollArea className="h-[400px] w-full rounded-md border log-terminal p-4 font-mono text-sm">
-                      {selectedTask.logs.map((log, index) => (
+                      {selectedTask.logs.map((log) => (
                         <div key={log.id} className="flex gap-3 py-1">
                           <span className="text-slate-500 shrink-0 w-[80px]">[{log.timestamp}]</span>
                           <span className={`shrink-0 w-[50px] font-medium ${pipelineLogLevelColors[log.level]}`}>
@@ -1212,9 +1386,10 @@ const AIPipelinePage: React.FC = () => {
               </TabsContent>
             </Tabs>
           </section>
-        )}
+        ) : null}
       </div>
 
+      {isList ? (
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
           <DialogHeader className="shrink-0">
@@ -1414,6 +1589,7 @@ const AIPipelinePage: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      ) : null}
     </>
   );
 };

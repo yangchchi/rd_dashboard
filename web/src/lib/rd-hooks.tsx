@@ -46,6 +46,10 @@ export const rdKeys = {
     ['rd', 'agent-sessions', sessionId ?? '', 'tool-calls', taskId ?? ''] as const,
   agentWorkspaces: (sessionId: string | undefined) =>
     ['rd', 'agent-sessions', sessionId ?? '', 'workspaces'] as const,
+  agentWorkspaceSourceTree: (workspaceId: string | undefined) =>
+    ['rd', 'agent-workspaces', workspaceId ?? '', 'source-tree'] as const,
+  agentWorkspaceSourceFile: (workspaceId: string | undefined, path: string | undefined) =>
+    ['rd', 'agent-workspaces', workspaceId ?? '', 'source-file', path ?? ''] as const,
   contextPacks: ['rd', 'context-packs'] as const,
   products: ['rd', 'products'] as const,
   bountyTasks: ['rd', 'bounty-tasks'] as const,
@@ -396,6 +400,20 @@ export function useCreateAgentSession() {
   });
 }
 
+export function usePatchAgentSessionMetadata() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      id: string;
+      patch: Record<string, unknown>;
+      updatedBy?: string | null;
+    }) => rdApi.patchAgentSessionMetadata(args.id, args.patch, args.updatedBy),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentSessions });
+    },
+  });
+}
+
 export function useAgentTasks(sessionId: string | undefined) {
   return useQuery({
     queryKey: rdKeys.agentTasks(sessionId),
@@ -572,6 +590,47 @@ export function useAgentWorkspaces(sessionId: string | undefined) {
     queryKey: rdKeys.agentWorkspaces(sessionId),
     queryFn: () => (sessionId ? rdApi.listAgentWorkspaces(sessionId) : Promise.resolve([])),
     enabled: Boolean(sessionId),
+  });
+}
+
+export function useAgentWorkspaceSourceTree(workspaceId: string | undefined) {
+  return useQuery({
+    queryKey: rdKeys.agentWorkspaceSourceTree(workspaceId),
+    queryFn: () => rdApi.listAgentWorkspaceSourceTree(workspaceId!),
+    enabled: Boolean(workspaceId),
+    staleTime: 15_000,
+  });
+}
+
+export function useAgentWorkspaceSourceFile(workspaceId: string | undefined, filePath: string | undefined) {
+  return useQuery({
+    queryKey: rdKeys.agentWorkspaceSourceFile(workspaceId, filePath),
+    queryFn: () => rdApi.getAgentWorkspaceSourceFile(workspaceId!, filePath!),
+    enabled: Boolean(workspaceId && filePath),
+    staleTime: 30_000,
+  });
+}
+
+export function useCommitAndPushAgentWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      workspaceId: string;
+      sessionId: string;
+      body?: { commitMessage?: string | null; gitPat?: string | null; gitUsername?: string | null };
+    }) => rdApi.commitAndPushAgentWorkspace(args.workspaceId, args.body),
+    onSuccess: (_data, args) => {
+      void qc.invalidateQueries({ queryKey: rdKeys.agentWorkspaces(args.sessionId) });
+      void qc.invalidateQueries({ queryKey: rdKeys.agentWorkspaceSourceTree(args.workspaceId) });
+      void qc.invalidateQueries({
+        predicate: (q) =>
+          Array.isArray(q.queryKey) &&
+          q.queryKey[0] === 'rd' &&
+          q.queryKey[1] === 'agent-workspaces' &&
+          q.queryKey[2] === args.workspaceId &&
+          q.queryKey[3] === 'source-file',
+      });
+    },
   });
 }
 
