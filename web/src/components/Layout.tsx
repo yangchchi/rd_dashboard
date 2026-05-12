@@ -608,10 +608,8 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
             </DropdownMenu>
           </div>
         </header>
-        <div className="rd-content-canvas min-w-0 flex-1 px-6 py-8">
-          <div className="mx-auto w-full max-w-[1400px]">
-            <RequireRouteAccess pathname={pathname}>{children}</RequireRouteAccess>
-          </div>
+        <div className="rd-content-canvas min-h-0 min-w-0 w-full flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+          <RequireRouteAccess pathname={pathname}>{children}</RequireRouteAccess>
         </div>
       </SidebarInset>
     </>
