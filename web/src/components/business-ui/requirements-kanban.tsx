@@ -16,28 +16,12 @@ import { Filter, Plus, Calendar, ChevronDown } from 'lucide-react';
 import { rdAuditUpdate } from '@/lib/rd-actor';
 import { useUpsertRequirement, useDeleteRequirement } from '@/lib/rd-hooks';
 import type { IRequirement } from '@/lib/rd-types';
+import { REQUIREMENT_KANBAN_COLUMNS } from '@/lib/requirement-status-present';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import {
   ConfirmActionDialog,
   type ConfirmActionState,
 } from '@/components/business-ui/confirm-action-dialog';
-
-interface IKanbanColumn {
-  id: string;
-  title: string;
-  status: IRequirement['status'];
-  color: string;
-  dotColor: string;
-}
-
-const columns: IKanbanColumn[] = [
-  { id: 'backlog', title: '需求池', status: 'backlog', color: 'text-zinc-400', dotColor: 'bg-zinc-500' },
-  { id: 'prd_writing', title: 'PRD编写中', status: 'prd_writing', color: 'text-blue-400', dotColor: 'bg-blue-500' },
-  { id: 'spec_defining', title: '规格说明书', status: 'spec_defining', color: 'text-indigo-400', dotColor: 'bg-indigo-500' },
-  { id: 'ai_developing', title: 'AI开发中', status: 'ai_developing', color: 'text-purple-400', dotColor: 'bg-purple-500' },
-  { id: 'pending_acceptance', title: '待验收', status: 'pending_acceptance', color: 'text-orange-400', dotColor: 'bg-orange-500' },
-  { id: 'released', title: '已发布', status: 'released', color: 'text-green-400', dotColor: 'bg-green-500' },
-];
 
 const priorityConfig: Record<string, { bg: string; text: string; dot: string }> = {
   P0: { bg: 'bg-red-500/10', text: 'text-red-400', dot: 'bg-red-500' },
@@ -275,7 +259,7 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
 
         <section className="mb-2 w-full">
             <div className="grid grid-cols-1 gap-5 pb-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-              {columns.map((column) => {
+              {REQUIREMENT_KANBAN_COLUMNS.map((column) => {
                 const columnReqs = getColumnRequirements(column.status);
                 const isDropTarget = dragOverColumn === column.id;
 

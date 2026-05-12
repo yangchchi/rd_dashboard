@@ -7,6 +7,7 @@ import type {
   IRequirementFlowEvent,
   ISpecification,
 } from '@/lib/rd-types';
+import { REQUIREMENT_STATUS_LABELS } from '@/lib/requirement-status-present';
 
 export interface IFlowHistoryItem {
   id: string;
@@ -25,15 +26,6 @@ export interface IFlowHistoryViewer {
 }
 
 const PLACEHOLDER_OPERATOR_LABELS = new Set(['当前用户', '未知', '未知用户']);
-
-const REQUIREMENT_STATUS_LABELS: Record<IRequirement['status'], string> = {
-  backlog: '需求池',
-  prd_writing: 'PRD编写中',
-  spec_defining: '规格说明书',
-  ai_developing: 'AI开发中',
-  pending_acceptance: '待验收',
-  released: '已发布',
-};
 
 function isPlaceholderOperatorLabel(label: string): boolean {
   return PLACEHOLDER_OPERATOR_LABELS.has(label.trim());
@@ -133,17 +125,17 @@ export function buildRequirementFlowHistory(
     items.push({
       id: `${spec.id}-spec-enter`,
       action: '进入规格阶段',
-      stage: '规格说明书',
+      stage: REQUIREMENT_STATUS_LABELS.spec_defining,
       operator: operatorUser(spec.createdBy, undefined, viewer),
       timestamp: spec.createdAt,
-      comment: '技术评审通过，开始规格说明书编写',
+      comment: '技术评审通过，开始编写技术规格',
     });
 
     if (spec.status === 'approved') {
       items.push({
         id: `${spec.id}-spec-done`,
         action: '规格完成',
-        stage: '规格说明书',
+        stage: REQUIREMENT_STATUS_LABELS.spec_defining,
         operator: operatorUser(spec.updatedBy || spec.createdBy, undefined, viewer),
         timestamp: spec.updatedAt,
         comment: '技术规格已确定，Machine-Readable格式已生成',

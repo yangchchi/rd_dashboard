@@ -39,7 +39,9 @@ import {
 import { getCurrentUser } from '@/lib/auth';
 import { rdAuditCreate, rdAuditUpdate } from '@/lib/rd-actor';
 import { capabilityClient } from '@/lib/capability-client';
+import { getRequirementStatusPresentation } from '@/lib/requirement-status-present';
 import { cn } from '@/lib/utils';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 
 function stripHtmlTags(html: string): string {
   return html.replace(/<[^>]+>/g, '').trim();
@@ -107,15 +109,6 @@ const STATUS_BADGES: Record<
     className:
       'no-default-hover-elevate border-red-500/25 bg-red-500/10 text-red-300 shadow-none',
   },
-};
-
-const REQUIREMENT_STATUS_MAP: Record<string, string> = {
-  backlog: '需求池',
-  prd_writing: 'PRD编写中',
-  spec_defining: '规格说明书',
-  ai_developing: 'AI开发中',
-  pending_acceptance: '待验收',
-  released: '已发布',
 };
 
 /** 与插件 prd_generator_1（PRD文档自动生成器）流式协议一致 */
@@ -345,19 +338,20 @@ const PRDPage: React.FC = () => {
       <div className="flex w-full flex-col gap-6">
         {/* 页面标题 */}
         <section className="w-full">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="rd-page-header-lead">
-              <h1 className="rd-page-title">智能文档</h1>
-              <p className="rd-page-desc mt-1">
-                管理产品需求文档，支持AI辅助生成
-              </p>
+              <RdPageModuleHeading
+                icon={FileText}
+                title="智能文档"
+                description="管理产品需求文档，支持AI辅助生成"
+              />
             </div>
             <Button
               onClick={() => {
                 setPrdPreviewTab('edit');
                 setShowGenerateDialog(true);
               }}
-              className="shrink-0 shadow-sm"
+              className="shrink-0 shadow-sm sm:mt-0"
             >
               <Sparkles className="mr-2 h-4 w-4" />
               AI生成PRD
@@ -512,7 +506,7 @@ const PRDPage: React.FC = () => {
                         <div className="text-sm">
                           <p className="text-foreground">{prd.requirementTitle}</p>
                           <p className="text-xs text-muted-foreground">
-                            {REQUIREMENT_STATUS_MAP[prd.requirementStatus]}
+                            {getRequirementStatusPresentation(prd.requirementStatus).label}
                           </p>
                           {prd.latestReviewComment && (
                             <p className="text-xs text-muted-foreground mt-1">

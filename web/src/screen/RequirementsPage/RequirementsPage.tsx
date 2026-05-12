@@ -25,25 +25,17 @@ import { Search, Plus, Filter, FileDown, List, LayoutGrid } from 'lucide-react';
 import { UserDisplay } from '@/components/business-ui/user-display';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import { RequirementsKanban } from '@/components/business-ui/requirements-kanban';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { logger } from '@/lib/logger';
 import { useDeleteRequirement, useRequirementsList } from '@/lib/rd-hooks';
 import type { IRequirement } from '@/lib/rd-types';
+import { getRequirementStatusPresentation, REQUIREMENT_KANBAN_COLUMNS } from '@/lib/requirement-status-present';
 
-// Glassmorphism Dark style status map with crimson red accent
-const statusMap: Record<string, { label: string; color: string; textColor: string; bg: string }> = {
-  backlog: { label: '需求池', color: '#9CA3AF', textColor: 'text-gray-400', bg: 'bg-gray-500/10' },
-  prd_writing: { label: 'PRD编写中', color: '#60A5FA', textColor: 'text-blue-400', bg: 'bg-blue-500/10' },
-  spec_defining: { label: '规格说明书', color: '#22D3EE', textColor: 'text-cyan-400', bg: 'bg-cyan-500/10' },
-  ai_developing: { label: 'AI开发中', color: '#A78BFA', textColor: 'text-purple-400', bg: 'bg-purple-500/10' },
-  pending_acceptance: { label: '待验收', color: '#FB923C', textColor: 'text-orange-400', bg: 'bg-orange-500/10' },
-  released: { label: '已发布', color: '#4ADE80', textColor: 'text-green-400', bg: 'bg-green-500/10' },
-};
-
-const priorityMap: Record<string, { label: string; color: string; textColor: string; bg: string }> = {
-  P0: { label: 'P0', color: '#FF4D4D', textColor: 'text-red-400', bg: 'bg-red-500/10' },
-  P1: { label: 'P1', color: '#FB923C', textColor: 'text-orange-400', bg: 'bg-orange-500/10' },
-  P2: { label: 'P2', color: '#60A5FA', textColor: 'text-blue-400', bg: 'bg-blue-500/10' },
-  P3: { label: 'P3', color: '#9CA3AF', textColor: 'text-gray-400', bg: 'bg-gray-500/10' },
+const priorityMap: Record<string, { label: string; textColor: string; bg: string; dotColor: string }> = {
+  P0: { label: 'P0', textColor: 'text-red-700 dark:text-red-400', bg: 'bg-red-500/10', dotColor: 'bg-red-500' },
+  P1: { label: 'P1', textColor: 'text-orange-700 dark:text-orange-400', bg: 'bg-orange-500/10', dotColor: 'bg-orange-500' },
+  P2: { label: 'P2', textColor: 'text-blue-700 dark:text-blue-400', bg: 'bg-blue-500/10', dotColor: 'bg-blue-500' },
+  P3: { label: 'P3', textColor: 'text-slate-700 dark:text-slate-400', bg: 'bg-slate-500/10', dotColor: 'bg-slate-500' },
 };
 
 type ViewMode = 'kanban' | 'list';
@@ -132,12 +124,15 @@ const RequirementsPage: React.FC = () => {
       <div className="flex w-full flex-col gap-6">
         {/* 页头 — 与 PRD 页同一结构 */}
         <section className="w-full">
-          <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="rd-page-header-lead">
-              <h1 className="rd-page-title">需求中心</h1>
-              <p className="rd-page-desc mt-1">管理所有需求，支持看板/列表视图、搜索与筛选</p>
+              <RdPageModuleHeading
+                icon={List}
+                title="需求中心"
+                description="管理所有需求，支持看板/列表视图、搜索与筛选"
+              />
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
               <div className="flex rounded-lg border border-white/10 bg-white/[0.03] p-1">
                 <Button
                   type="button"
@@ -162,7 +157,7 @@ const RequirementsPage: React.FC = () => {
               </div>
               <Button
                 onClick={() => router.push('/requirements/new')}
-                className="shrink-0 shadow-sm"
+                className="shrink-0 shadow-sm sm:mt-0"
               >
                 <Plus className="mr-2 h-4 w-4" />
                 新建需求
@@ -192,12 +187,11 @@ const RequirementsPage: React.FC = () => {
                   </SelectTrigger>
                   <SelectContent className="rd-select-content">
                     <SelectItem value="all" className="rd-select-item">全部状态</SelectItem>
-                    <SelectItem value="backlog" className="rd-select-item">需求池</SelectItem>
-                    <SelectItem value="prd_writing" className="rd-select-item">PRD编写中</SelectItem>
-                    <SelectItem value="spec_defining" className="rd-select-item">规格说明书</SelectItem>
-                    <SelectItem value="ai_developing" className="rd-select-item">AI开发中</SelectItem>
-                    <SelectItem value="pending_acceptance" className="rd-select-item">待验收</SelectItem>
-                    <SelectItem value="released" className="rd-select-item">已发布</SelectItem>
+                    {REQUIREMENT_KANBAN_COLUMNS.map((col) => (
+                      <SelectItem key={col.status} value={col.status} className="rd-select-item">
+                        {col.title}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select value={priorityFilter} onValueChange={setPriorityFilter}>
@@ -331,7 +325,7 @@ const RequirementsPage: React.FC = () => {
                         </TableHeader>
                         <TableBody>
                           {paginatedRequirements.map((record) => {
-                            const st = statusMap[record.status];
+                            const st = getRequirementStatusPresentation(record.status);
                             const pr = priorityMap[record.priority];
                             return (
                               <TableRow key={record.id} className="border-white/[0.06]">
@@ -370,12 +364,9 @@ const RequirementsPage: React.FC = () => {
                                 </TableCell>
                                 <TableCell>
                                   <div
-                                    className={`inline-flex items-center gap-2 rounded-xl border border-white/5 px-3 py-1.5 ${st.bg}`}
+                                    className={`inline-flex items-center gap-2 rounded-xl border border-white/5 px-3 py-1.5 ${st.badgeBg}`}
                                   >
-                                    <span
-                                      className="h-2 w-2 rounded-full"
-                                      style={{ backgroundColor: st.color }}
-                                    />
+                                    <span className={`h-2 w-2 shrink-0 rounded-full ${st.dotColor}`} />
                                     <span className={`text-xs font-bold ${st.textColor}`}>{st.label}</span>
                                   </div>
                                 </TableCell>

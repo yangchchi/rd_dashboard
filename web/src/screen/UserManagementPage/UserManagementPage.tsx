@@ -18,6 +18,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { Users } from 'lucide-react';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { useAccessControl } from '@/hooks/useAccessControl';
 import { authApi } from '@/lib/auth-api';
 import { getCurrentUser, updateStoredCurrentUser } from '@/lib/auth';
@@ -167,10 +169,12 @@ const UserManagementPage: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="rd-page-header-lead">
-          <h1 className="rd-page-title">用户管理</h1>
-          <p className="rd-page-desc mt-1">
-            支持创建、查看、删除本地账号；为账号绑定「角色定义」中的访问角色，以控制菜单、页面与按钮权限
-          </p>
+          <RdPageModuleHeading
+            icon={Users}
+            title="用户管理"
+            description="支持创建、查看、删除本地账号；为账号绑定「角色定义」中的访问角色，以控制菜单、页面与按钮权限"
+            descriptionLines="multi"
+          />
         </div>
         {can('action.users.create') ? (
           <Button type="button" className="shrink-0" onClick={() => setCreateOpen(true)}>

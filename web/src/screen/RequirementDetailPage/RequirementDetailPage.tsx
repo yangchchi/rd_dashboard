@@ -34,12 +34,13 @@ import {
   useAcceptanceRecords,
   usePipelineTasksList,
 } from '@/lib/rd-hooks';
-import type { IRequirement } from '@/lib/rd-types';
+import type { IRequirement, RequirementStatus } from '@/lib/rd-types';
 import {
   buildRequirementFlowHistory,
   buildRequirementFlowHistoryFromEvents,
   type IFlowHistoryItem,
 } from '@/lib/requirement-flow-history';
+import { getRequirementStatusPresentation } from '@/lib/requirement-status-present';
 
 interface IRelatedDoc {
   id: string;
@@ -50,15 +51,29 @@ interface IRelatedDoc {
   url?: string;
 }
 
-// 状态配置
-const statusConfig: Record<string, { label: string; color: string; bgColor: string; icon: React.ElementType }> = {
-  backlog: { label: '需求池', color: 'text-slate-700', bgColor: 'bg-slate-500/10', icon: Clock },
-  prd_writing: { label: 'PRD编写中', color: 'text-blue-700', bgColor: 'bg-blue-500/10', icon: FileText },
-  spec_defining: { label: '规格说明书', color: 'text-indigo-700', bgColor: 'bg-indigo-500/10', icon: Settings2 },
-  ai_developing: { label: 'AI开发中', color: 'text-purple-700', bgColor: 'bg-purple-500/10', icon: Cpu },
-  pending_acceptance: { label: '待验收', color: 'text-orange-700', bgColor: 'bg-orange-500/10', icon: CheckCircle },
-  released: { label: '已发布', color: 'text-green-700', bgColor: 'bg-green-500/10', icon: CheckCircle },
+const STATUS_ICONS: Record<RequirementStatus, React.ElementType> = {
+  backlog: Clock,
+  prd_writing: FileText,
+  spec_defining: Settings2,
+  ai_developing: Cpu,
+  pending_acceptance: CheckCircle,
+  released: CheckCircle,
 };
+
+const statusConfig: Record<string, { label: string; color: string; bgColor: string; icon: React.ElementType }> =
+  (Object.keys(STATUS_ICONS) as RequirementStatus[]).reduce(
+    (acc, key) => {
+      const p = getRequirementStatusPresentation(key);
+      acc[key] = {
+        label: p.label,
+        color: p.textColor,
+        bgColor: p.badgeBg,
+        icon: STATUS_ICONS[key],
+      };
+      return acc;
+    },
+    {} as Record<string, { label: string; color: string; bgColor: string; icon: React.ElementType }>
+  );
 
 const priorityConfig: Record<string, { label: string; color: string; bgColor: string }> = {
   P0: { label: 'P0', color: 'text-red-700', bgColor: 'bg-red-500/10' },
@@ -79,17 +94,7 @@ const formatDateTime = (dateStr: string) => {
 };
 
 // 获取状态色条颜色
-const getStatusColor = (status: string) => {
-  const colorMap: Record<string, string> = {
-    backlog: 'bg-slate-500',
-    prd_writing: 'bg-blue-500',
-    spec_defining: 'bg-indigo-500',
-    ai_developing: 'bg-purple-500',
-    pending_acceptance: 'bg-orange-500',
-    released: 'bg-green-500',
-  };
-  return colorMap[status] || 'bg-slate-500';
-};
+const getStatusColor = (status: string) => getRequirementStatusPresentation(status).dotColor;
 
 const RequirementDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();

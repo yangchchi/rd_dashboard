@@ -37,8 +37,10 @@ import {
   ChevronsUpDown,
   Check,
   Coins,
+  PlusCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import type { IRequirement, IUser, IProduct } from '@/lib/rd-types';
 import { authApi } from '@/lib/auth-api';
 import { useUpsertRequirement } from '@/lib/rd-hooks';
@@ -399,19 +401,22 @@ const RequirementInputPage: React.FC = () => {
         <section className="w-full">
           <div className="flex items-start justify-between gap-4">
             <div className="rd-page-header-lead">
-              <h1 className="rd-page-title">需求采集</h1>
-              <p className="rd-page-desc mt-1">
-                提交业务需求；可使用 AI 将描述优化为更清晰的执行级表述
-              </p>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="mt-1 h-auto px-0 text-muted-foreground hover:text-foreground"
-                onClick={() => router.push('/requirements')}
-              >
-                返回需求中心
-              </Button>
+              <RdPageModuleHeading
+                icon={PlusCircle}
+                title="需求采集"
+                description="提交业务需求；可使用 AI 将描述优化为更清晰的执行级表述"
+                footer={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="mt-1 h-auto px-0 text-muted-foreground hover:text-foreground"
+                    onClick={() => router.push('/requirements')}
+                  >
+                    返回需求中心
+                  </Button>
+                }
+              />
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
               {/* <Button type="button" variant="outline" onClick={() => setShowAiAssistant(true)}>

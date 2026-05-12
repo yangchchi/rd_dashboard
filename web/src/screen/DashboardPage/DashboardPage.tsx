@@ -19,12 +19,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Activity, Coins, Gauge, LayoutDashboard, Filter, Plus, ChevronDown, Trophy } from 'lucide-react';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { usePipelineTasksList, useRequirementsList } from '@/lib/rd-hooks';
 import type { IRequirement } from '@/lib/rd-types';
 import { buildDashboardEfficiencyMetrics } from '@/lib/dashboard-metrics';
 import { getCurrentUser, updateStoredCurrentUser } from '@/lib/auth';
 import { authApi } from '@/lib/auth-api';
 import { toast } from 'sonner';
+import { REQUIREMENT_KANBAN_COLUMNS } from '@/lib/requirement-status-present';
 
 const LEADERBOARD_TOP = 10;
 const ROLE_SELECTED_ONCE_PREFIX = '__rd_role_selected_once_';
@@ -144,23 +146,6 @@ function LeaderboardTable({ rows, emptyLabel }: { rows: LeaderboardRow[]; emptyL
     </>
   );
 }
-
-interface IKanbanColumn {
-  id: string;
-  title: string;
-  status: IRequirement['status'];
-  color: string;
-  dotColor: string;
-}
-
-const columns: IKanbanColumn[] = [
-  { id: 'backlog', title: '需求池', status: 'backlog', color: 'text-zinc-400', dotColor: 'bg-zinc-500' },
-  { id: 'prd_writing', title: 'PRD编写中', status: 'prd_writing', color: 'text-blue-400', dotColor: 'bg-blue-500' },
-  { id: 'spec_defining', title: '规格说明书', status: 'spec_defining', color: 'text-indigo-400', dotColor: 'bg-indigo-500' },
-  { id: 'ai_developing', title: 'AI开发中', status: 'ai_developing', color: 'text-purple-400', dotColor: 'bg-purple-500' },
-  { id: 'pending_acceptance', title: '待验收', status: 'pending_acceptance', color: 'text-orange-400', dotColor: 'bg-orange-500' },
-  { id: 'released', title: '已发布', status: 'released', color: 'text-green-400', dotColor: 'bg-green-500' },
-];
 
 type FilterType = 'all' | 'mine' | 'submitted';
 
@@ -289,38 +274,14 @@ const DashboardPage: React.FC = () => {
 
   return (
     <>
-      <style jsx>{`
-        .kanban-container {
-          animation: fadeIn 0.4s ease-out;
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(16px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .glow-orb {
-          position: absolute;
-          width: 256px;
-          height: 256px;
-          background: hsl(217 91% 60% / 0.12);
-          filter: blur(100px);
-          pointer-events: none;
-        }
-      `}</style>
-
-      <div className="w-full kanban-container relative">
-        <div className="glow-orb top-0 right-0 opacity-50" />
-
-        <section className="w-full flex items-center justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center justify-center w-12 h-12 rounded-2xl border border-white/[0.08] bg-primary/10 backdrop-blur-sm">
-              <LayoutDashboard className="w-6 h-6 text-primary" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-foreground">智研看板</h1>
-              <p className="text-sm text-muted-foreground">
-                研发效能监控与分析
-              </p>
-            </div>
+      <div className="w-full animate-in fade-in slide-in-from-bottom-2 duration-300">
+        <section className="mb-8 flex w-full flex-wrap items-center justify-between gap-4">
+          <div className="rd-page-header-lead min-w-0">
+            <RdPageModuleHeading
+              icon={LayoutDashboard}
+              title="智研看板"
+              description="研发效能监控与分析"
+            />
           </div>
 
           <div className="flex items-center gap-3">
@@ -329,29 +290,29 @@ const DashboardPage: React.FC = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="gap-2 border-white/[0.1] bg-white/[0.05] text-muted-foreground backdrop-blur-sm transition-all duration-300 hover:border-white/[0.14] hover:bg-white/[0.08] hover:text-foreground"
+                  className="gap-2 border-border bg-muted/30 text-muted-foreground shadow-sm transition-colors hover:bg-muted/50 hover:text-foreground"
                 >
                   <Filter className="w-4 h-4" />
                   {filterLabels[filter]}
                   <ChevronDown className="w-3 h-3" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="border-white/[0.1] bg-[hsl(222_47%_11%_/_0.92)] text-foreground backdrop-blur-xl">
+              <DropdownMenuContent align="end" className="border-border bg-popover text-popover-foreground">
                 <DropdownMenuItem
                   onClick={() => setFilter('all')}
-                  className="focus:bg-white/[0.08] focus:text-foreground"
+                  className="focus:bg-accent focus:text-accent-foreground"
                 >
                   全部需求
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => setFilter('mine')}
-                  className="focus:bg-white/[0.08] focus:text-foreground"
+                  className="focus:bg-accent focus:text-accent-foreground"
                 >
                   我负责的
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => setFilter('submitted')}
-                  className="focus:bg-white/[0.08] focus:text-foreground"
+                  className="focus:bg-accent focus:text-accent-foreground"
                 >
                   我提交的
                 </DropdownMenuItem>
@@ -361,7 +322,7 @@ const DashboardPage: React.FC = () => {
             <Button
               size="sm"
               onClick={() => router.push('/requirements/new')}
-              className="rounded-xl font-medium shadow-sm"
+              className="rounded-lg font-medium shadow-sm"
             >
               <Plus className="w-4 h-4 mr-1" />
               新建需求
@@ -435,7 +396,7 @@ const DashboardPage: React.FC = () => {
             </Card>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {columns.map((column) => {
+            {REQUIREMENT_KANBAN_COLUMNS.map((column) => {
               const count = getColumnCount(column.status);
               const percentage =
                 filteredRequirements.length > 0
@@ -445,7 +406,7 @@ const DashboardPage: React.FC = () => {
               return (
                 <Card
                   key={column.id}
-                  className="group overflow-hidden rounded-2xl border border-white/[0.08] bg-card/70 backdrop-blur-xl transition-all duration-300 hover:border-white/[0.14]"
+                  className="group overflow-hidden rounded-xl border border-border bg-card/80 shadow-sm transition-colors duration-200 hover:border-primary/25 hover:shadow-md"
                 >
                   <div className={`h-1.5 ${column.dotColor}`} />
                   <CardContent className="p-5">

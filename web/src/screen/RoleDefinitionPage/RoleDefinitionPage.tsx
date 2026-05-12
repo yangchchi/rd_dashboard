@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { UserCog, Pencil, Plus, Trash2, RotateCcw } from 'lucide-react';
 
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -150,11 +151,12 @@ const RoleDefinitionPage: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="rd-page-header-lead">
-          <h1 className="rd-page-title">角色定义</h1>
-          <p className="rd-page-desc mt-1">
-            创建业务角色并勾选可访问的页面与按钮级权限；用户在「用户管理」中绑定角色后生效（内置 admin
-            账号拥有全部权限）
-          </p>
+          <RdPageModuleHeading
+            icon={UserCog}
+            title="角色定义"
+            description="创建业务角色并勾选可访问的页面与按钮级权限；用户在「用户管理」中绑定角色后生效（内置 admin 账号拥有全部权限）"
+            descriptionLines="multi"
+          />
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" onClick={handleResetBuiltins}>

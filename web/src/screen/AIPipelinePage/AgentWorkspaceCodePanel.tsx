@@ -416,10 +416,10 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
       {treeData?.truncated ? (
         <p className="text-xs text-amber-800">目录条目较多，已截断展示；可在本地 worktree 查看完整仓库。</p>
       ) : null}
-      <div className="flex h-[min(75vh,680px)] min-h-[400px] flex-col overflow-hidden rounded-lg border border-[#d0d7de] bg-white shadow-sm md:flex-row">
-        <aside className="flex w-full max-h-[38vh] shrink-0 flex-col border-b border-[#d0d7de] bg-[#f3f3f3] md:h-auto md:max-h-none md:w-56 md:shrink-0 md:border-b-0 md:border-r">
-          <div className="flex items-center justify-between border-b border-[#e1e4e8] px-2 py-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-[#616161]">资源管理器</span>
+      <div className="flex h-[min(75vh,680px)] min-h-[400px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm md:flex-row">
+        <aside className="flex w-full max-h-[38vh] shrink-0 flex-col border-b border-border bg-muted/50 md:h-auto md:max-h-none md:w-56 md:shrink-0 md:border-b-0 md:border-r">
+          <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">资源管理器</span>
           </div>
           <ScrollArea className="min-h-0 flex-1">
             <div className="py-1 pr-1">
@@ -445,8 +445,8 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
             </div>
           </ScrollArea>
         </aside>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-white">
-          <div className="flex shrink-0 items-center gap-0 overflow-x-auto border-b border-[#d0d7de] bg-[#f6f8fa] px-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-card">
+          <div className="flex shrink-0 items-center gap-0 overflow-x-auto border-b border-border bg-muted/40 px-1">
             {openTabs.length === 0 ? (
               <span className="px-3 py-2 text-xs text-muted-foreground">在左侧选择文件打开</span>
             ) : (
@@ -454,10 +454,10 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
                 <div
                   key={tab.path}
                   className={cn(
-                    'flex max-w-[200px] shrink-0 items-center gap-0.5 border-r border-[#d0d7de] px-2 py-1.5 text-[12px]',
+                    'flex max-w-[200px] shrink-0 items-center gap-0.5 border-r border-border px-2 py-1.5 text-[12px]',
                     activePath === tab.path
-                      ? 'border-b-2 border-b-white bg-white text-foreground shadow-sm'
-                      : 'cursor-pointer text-muted-foreground hover:bg-black/[0.04]',
+                      ? 'border-b-2 border-b-primary bg-card text-foreground shadow-sm'
+                      : 'cursor-pointer text-muted-foreground hover:bg-muted/60',
                   )}
                   role="button"
                   tabIndex={0}
@@ -487,10 +487,10 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
           </div>
           {activePath ? (
             <>
-              <div className="shrink-0 border-b border-[#e1e4e8] px-3 py-1.5 font-mono text-[11px] text-[#656d76]">
+              <div className="shrink-0 border-b border-border px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
                 {breadcrumb.map((seg, i) => (
                   <span key={`${seg}-${i}`}>
-                    {i > 0 ? <span className="mx-0.5 text-[#d0d7de]">›</span> : null}
+                    {i > 0 ? <span className="mx-0.5 text-muted-foreground/35">›</span> : null}
                     <span className={i === breadcrumb.length - 1 ? 'text-foreground' : undefined}>{seg}</span>
                   </span>
                 ))}

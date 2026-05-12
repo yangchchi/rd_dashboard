@@ -17,6 +17,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { useCurrentUserProfile } from '@/hooks/useCurrentUserProfile';
 import { getCurrentUser } from '@/lib/auth';
 import { mayClaimPmSlot, mayClaimTmSlot } from '@/lib/requirement-claim';
@@ -522,15 +523,14 @@ const BountyHuntPage: React.FC = () => {
           {publishSkin === 'parchment' ? '羊皮纸悬赏令已投掷' : '全息悬赏令已投掷'}
         </div>
       ) : null}
-      <section className="flex items-start justify-between gap-4">
+      <section className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="rd-page-header-lead">
-          <h1 className="rd-page-title flex items-center gap-2">
-            <Swords className="h-6 w-6 text-primary" />
-            赏金猎场
-          </h1>
-          <p className="rd-page-desc mt-1">
-            悬赏需产品经理与技术经理分别接槽；领取不改变需求流转状态。「AI开发中」请在「交付引擎」页创建研发流水线后生效。工序上请先接 PM，再接 TM。
-          </p>
+          <RdPageModuleHeading
+            icon={Swords}
+            title="赏金猎场"
+            description="悬赏需产品经理与技术经理分别接槽；领取不改变需求流转状态。「AI开发中」请在「交付引擎」页创建研发流水线后生效。工序上请先接 PM，再接 TM。"
+            descriptionLines="multi"
+          />
         </div>
         <div className="flex items-center gap-3">
           <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">

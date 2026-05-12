@@ -39,6 +39,7 @@ import {
   ArrowLeft,
   History,
 } from 'lucide-react';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import {
   ConfirmActionDialog,
@@ -760,7 +761,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
         }
       `}</style>
 
-      <div className="w-full space-y-6">
+      <div className="flex w-full flex-col gap-6">
         <ConfirmActionDialog
           state={confirmAction}
           onOpenChange={(open) => {
@@ -776,41 +777,43 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
         {/* 页面标题 */}
         <section className="w-full">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="rd-page-header-lead flex items-start gap-3">
-              {isDetail ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="mt-0.5 shrink-0"
-                  onClick={() => router.push('/ai-pipeline')}
-                  aria-label="返回交付引擎列表"
-                >
-                  <ArrowLeft className="size-4" />
-                </Button>
-              ) : null}
-              <div className="min-w-0">
-                <h1 className="flex items-center gap-2 rd-page-title">
-                  <Cpu className="size-6 text-purple-500" />
-                  {isDetail ? '交付引擎详情' : '交付引擎'}
-                </h1>
-                <p className="rd-page-desc mt-1">
-                  {isDetail
+            <div className="rd-page-header-lead">
+              <RdPageModuleHeading
+                icon={Cpu}
+                title={isDetail ? '交付引擎详情' : '交付引擎'}
+                description={
+                  isDetail
                     ? tasksLoading
                       ? '加载交付任务…'
                       : selectedTask?.requirementTitle || '交付引擎详情'
-                    : '实时监控AI代码生成、测试与部署全流程'}
-                </p>
-                {isDetail && !tasksLoading && selectedTask ? (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    返回交付引擎可查看或创建其他流水线。
-                  </p>
-                ) : null}
-              </div>
+                    : '实时监控AI代码生成、测试与部署全流程'
+                }
+                descriptionLines={isDetail ? 'multi' : 'single'}
+                leading={
+                  isDetail ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      onClick={() => router.push('/ai-pipeline')}
+                      aria-label="返回交付引擎列表"
+                    >
+                      <ArrowLeft className="size-4" />
+                    </Button>
+                  ) : undefined
+                }
+                footer={
+                  isDetail && !tasksLoading && selectedTask ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      返回交付引擎可查看或创建其他流水线。
+                    </p>
+                  ) : undefined
+                }
+              />
             </div>
             <div className="flex shrink-0 flex-col items-stretch gap-3 sm:items-end">
               {isList ? (
-                <Button onClick={() => setIsCreateDialogOpen(true)}>
+                <Button onClick={() => setIsCreateDialogOpen(true)} className="shrink-0 shadow-sm sm:mt-0">
                   <Plus className="size-4 mr-2" />
                   创建流水线
                 </Button>

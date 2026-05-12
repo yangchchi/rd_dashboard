@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 import { Plus, Puzzle, Search, Sparkles, Trash2 } from 'lucide-react';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import type { IAiSkillConfig } from '@/lib/ai-skill-engine';
 import { createAiSkill, deleteAiSkill, getAiSkill, listAiSkills, resetAiSkill, updateAiSkill } from '@/lib/ai-skills';
 
@@ -155,13 +156,12 @@ const PluginConfigPage: React.FC = () => {
     <div className="w-full space-y-6">
       <section className="w-full flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="rd-page-header-lead">
-          <h1 className="flex items-center gap-2 rd-page-title">
-            <Puzzle className="size-7 text-primary" />
-            插件配置
-          </h1>
-          <p className="rd-page-desc mt-1">
-            配置调用大模型与提示词，支撑 PRD 生成、规格草稿、需求分类、验收分析等研发任务；不包含组织级代码规范（请使用「编码规范」菜单）。
-          </p>
+          <RdPageModuleHeading
+            icon={Puzzle}
+            title="插件配置"
+            description="配置调用大模型与提示词，支撑 PRD 生成、规格草稿、需求分类、验收分析等研发任务；不包含组织级代码规范（请使用「编码规范」菜单）。"
+            descriptionLines="multi"
+          />
         </div>
       </section>
 

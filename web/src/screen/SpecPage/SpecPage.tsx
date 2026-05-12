@@ -23,6 +23,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { Streamdown } from '@/components/ui/streamdown';
 import { capabilityClient } from '@/lib/capability-client';
 import { getCurrentUser } from '@/lib/auth';
@@ -71,11 +72,26 @@ const SpecPage: React.FC = () => {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'approved':
-        return <Badge className="bg-green-500/10 text-green-400 hover:bg-green-500/20"><CheckCircle className="w-3 h-3 mr-1" />已批准</Badge>;
+        return (
+          <Badge className="border-0 bg-green-500/10 text-green-700 hover:bg-green-500/20 dark:text-green-400">
+            <CheckCircle className="mr-1 h-3 w-3" />
+            已批准
+          </Badge>
+        );
       case 'reviewing':
-        return <Badge className="bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20"><RefreshCw className="w-3 h-3 mr-1" />评审中</Badge>;
+        return (
+          <Badge className="border-0 bg-indigo-500/10 text-indigo-700 hover:bg-indigo-500/20 dark:text-indigo-300">
+            <RefreshCw className="mr-1 h-3 w-3" />
+            评审中
+          </Badge>
+        );
       default:
-        return <Badge className="bg-slate-500/10 text-slate-300 hover:bg-slate-500/20"><FileText className="w-3 h-3 mr-1" />草稿</Badge>;
+        return (
+          <Badge className="border-0 bg-slate-500/10 text-slate-700 hover:bg-slate-500/20 dark:text-slate-300">
+            <FileText className="mr-1 h-3 w-3" />
+            草稿
+          </Badge>
+        );
     }
   };
 
@@ -192,35 +208,20 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
 
   return (
     <>
-      <style jsx>{`
-        .spec-card {
-          transition: transform 0.2s ease-out, box-shadow 0.2s ease-out, border-color 0.2s ease-out;
-        }
-        .spec-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 12px 40px -12px hsl(0 0% 0% / 0.55);
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in {
-          animation: fadeIn 0.3s ease-out;
-        }
-      `}</style>
-
-      <div className="w-full space-y-6 animate-fade-in">
+      <div className="flex w-full animate-in fade-in flex-col gap-6 duration-300">
         {/* 页面标题 */}
         <section className="w-full">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="rd-page-header-lead">
-              <h1 className="rd-page-title">技术基准</h1>
-              <p className="rd-page-desc mt-1">
-                编辑页推荐流程：组织编码约束 → 功能规格 FS（参考 PRD）→ 技术规格 TS（参考 FS + 约束）→ 编程计划 CP（参考 FS + TS，对应 plan.md），并导出 Machine-Readable JSON
-              </p>
+              <RdPageModuleHeading
+                icon={Settings2}
+                title="技术基准"
+                description="构建流程：组织编码约束 → 功能规格 FS（参考 PRD）→ 技术规格 TS（参考 FS + 约束）→ 编程计划 CP（参考 FS + TS），并导出 Machine-Readable JSON"
+                descriptionLines="multi"
+              />
             </div>
-            <Button onClick={handleCreateSpec}>
-              <Plus className="w-4 h-4 mr-2" />
+            <Button onClick={handleCreateSpec} className="shrink-0 shadow-sm sm:mt-0">
+              <Plus className="mr-2 h-4 w-4" />
               新建规格
             </Button>
           </div>
@@ -245,7 +246,7 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="rounded-lg bg-slate-500/10 p-2">
-                  <Settings2 className="h-5 w-5 text-slate-300" />
+                  <Settings2 className="h-5 w-5 text-slate-600 dark:text-slate-300" />
                 </div>
                 <div>
                   <p className="text-2xl font-semibold">{specs.filter(s => s.status === 'draft').length}</p>
@@ -258,7 +259,7 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="rounded-lg bg-indigo-500/10 p-2">
-                  <RefreshCw className="h-5 w-5 text-indigo-300" />
+                  <RefreshCw className="h-5 w-5 text-indigo-700 dark:text-indigo-300" />
                 </div>
                 <div>
                   <p className="text-2xl font-semibold">{specs.filter(s => s.status === 'reviewing').length}</p>
@@ -271,7 +272,7 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
                 <div className="rounded-lg bg-green-500/10 p-2">
-                  <CheckCircle className="h-5 w-5 text-green-400" />
+                  <CheckCircle className="h-5 w-5 text-green-700 dark:text-green-400" />
                 </div>
                 <div>
                   <p className="text-2xl font-semibold">{specs.filter(s => s.status === 'approved').length}</p>
@@ -291,8 +292,8 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
                 <EmptyDescription>点击上方按钮创建新的规格说明书</EmptyDescription>
               </EmptyHeader>
               <EmptyContent>
-                <Button onClick={handleCreateSpec}>
-                  <Plus className="w-4 h-4 mr-2" />
+                <Button onClick={handleCreateSpec} className="shadow-sm">
+                  <Plus className="mr-2 h-4 w-4" />
                   新建规格
                 </Button>
               </EmptyContent>
@@ -300,7 +301,10 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
           ) : (
             <div className="space-y-4">
               {specs.map((spec) => (
-                <Card key={spec.id} className="spec-card overflow-hidden">
+                <Card
+                  key={spec.id}
+                  className="overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-md"
+                >
                   <div className="flex flex-col md:flex-row">
                     {/* 左侧状态条 */}
                     <div 
@@ -447,10 +451,12 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
                 </div>
               ) : conflicts.length > 0 ? (
                 <>
-                  <Alert className="border-amber-500/50 bg-amber-50/50">
-                    <AlertTriangle className="w-4 h-4 text-amber-600" />
-                    <AlertTitle className="text-amber-800">检测到 {conflicts.length} 个潜在冲突</AlertTitle>
-                    <AlertDescription className="text-amber-700">
+                  <Alert className="border-amber-500/40 bg-amber-50/90 dark:border-amber-500/30 dark:bg-amber-950/25">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                    <AlertTitle className="text-amber-900 dark:text-amber-200">
+                      检测到 {conflicts.length} 个潜在冲突
+                    </AlertTitle>
+                    <AlertDescription className="text-amber-800 dark:text-amber-100/90">
                       请在进入AI开发前解决以下冲突，以避免生成代码与现有系统不兼容。
                     </AlertDescription>
                   </Alert>
@@ -468,8 +474,8 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
                                 位置: {conflict.position}
                               </p>
                               <p className="text-sm mt-2">{conflict.description}</p>
-                              <div className="mt-3 p-2 bg-slate-50 rounded text-xs">
-                                <span className="font-medium text-green-700">建议: </span>
+                              <div className="mt-3 rounded-md bg-muted/60 p-2 text-xs">
+                                <span className="font-medium text-green-800 dark:text-green-400">建议: </span>
                                 {conflict.suggestion}
                               </div>
                             </div>
@@ -486,7 +492,7 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
               ) : null}
             </div>
 
-            <div className="flex justify-end gap-2 mt-4 pt-4 border-t">
+            <div className="mt-4 flex justify-end gap-2 border-t border-border pt-4">
               <Button variant="outline" onClick={() => setIsReviewDialogOpen(false)}>
                 关闭
               </Button>

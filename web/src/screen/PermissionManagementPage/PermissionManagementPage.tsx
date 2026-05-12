@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Check, KeyRound, Minus } from 'lucide-react';
 
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Table,
@@ -55,11 +56,12 @@ const PermissionManagementPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="rd-page-title">权限管理</h1>
-        <p className="rd-page-desc mt-1">
-          权限点目录与「角色 ↔ 权限」对照矩阵。编辑权限分配请前往「角色定义」。
-        </p>
+      <div className="rd-page-header-lead">
+        <RdPageModuleHeading
+          icon={KeyRound}
+          title="权限管理"
+          description="权限点目录与「角色 ↔ 权限」对照矩阵。编辑权限分配请前往「角色定义」。"
+        />
       </div>
 
       <Card>

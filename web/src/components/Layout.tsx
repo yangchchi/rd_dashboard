@@ -190,7 +190,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                 <Link href="/" className="gap-3 items-start">
                   <span className="flex shrink-0 pt-0.5">
                     <ShipWheel
-                      className="h-10 w-10 text-blue-700 dark:text-white"
+                      className="h-8 w-8 text-blue-700 dark:text-white"
                       aria-hidden
                     />
                   </span>
@@ -227,15 +227,15 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                       <Link href="/dashboard" className="gap-3">
                         <LayoutDashboard
                           className={cn(
-                            "size-5",
-                            isDashboardPath(pathname) ? "text-primary" : "text-muted-foreground"
+                            "size-5 shrink-0 stroke-[1.75]",
+                            isDashboardPath(pathname) ? "text-primary" : "text-sidebar-foreground/65"
                           )}
                         />
                         <span
                           className={cn(
                             isDashboardPath(pathname)
                               ? "font-semibold text-primary"
-                              : "text-sidebar-foreground/85"
+                              : "font-medium text-sidebar-foreground/90"
                           )}
                         >
                           智研看板
@@ -270,13 +270,13 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                           <Link href={item.path} className="gap-3">
                             <Icon
                               className={cn(
-                                "size-5",
-                                isActive ? "text-primary" : "text-muted-foreground"
+                                "size-5 shrink-0 stroke-[1.75]",
+                                isActive ? "text-primary" : "text-sidebar-foreground/65"
                               )}
                             />
                             <span
                               className={cn(
-                                isActive ? "font-semibold text-primary" : "text-sidebar-foreground/85"
+                                isActive ? "font-semibold text-primary" : "font-medium text-sidebar-foreground/90"
                               )}
                             >
                               {item.label}
@@ -298,17 +298,17 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                       <Link href="/products" className="gap-3">
                         <Package
                           className={cn(
-                            "size-5",
+                            "size-5 shrink-0 stroke-[1.75]",
                             isActivePath(pathname, "/products")
                               ? "text-primary"
-                              : "text-muted-foreground"
+                              : "text-sidebar-foreground/65"
                           )}
                         />
                         <span
                           className={cn(
                             isActivePath(pathname, "/products")
                               ? "font-semibold text-primary"
-                              : "text-sidebar-foreground/85"
+                              : "font-medium text-sidebar-foreground/90"
                           )}
                         >
                           产品主数据
@@ -334,10 +334,10 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                         >
                           <Settings
                             className={cn(
-                              "size-5",
+                              "size-5 shrink-0 stroke-[1.75]",
                               isSettingsSectionActive(pathname)
                                 ? "text-primary"
-                                : "text-muted-foreground"
+                                : "text-sidebar-foreground/65"
                             )}
                           />
                           <span
@@ -345,7 +345,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                               "flex-1 text-left",
                               isSettingsSectionActive(pathname)
                                 ? "font-semibold text-primary"
-                                : "text-sidebar-foreground/85"
+                                : "font-medium text-sidebar-foreground/90"
                             )}
                           >
                             设置
@@ -609,7 +609,9 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
           </div>
         </header>
         <div className="rd-content-canvas min-w-0 flex-1 px-6 py-8">
-          <RequireRouteAccess pathname={pathname}>{children}</RequireRouteAccess>
+          <div className="mx-auto w-full max-w-[1400px]">
+            <RequireRouteAccess pathname={pathname}>{children}</RequireRouteAccess>
+          </div>
         </div>
       </SidebarInset>
     </>

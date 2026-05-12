@@ -1,20 +1,27 @@
 'use client';
 
-import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import {
   ArrowUp,
   Bot,
   CheckCircle2,
   ChevronRight,
+  ClipboardList,
+  File,
   FileText,
+  FoldVertical,
   History,
+  ListChecks,
   Loader2,
   MessageSquarePlus,
   ScrollText,
+  ShieldCheck,
   Sparkles,
   Square,
   Terminal,
   User,
+  Wand2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -57,18 +64,21 @@ import {
   useProvisionAgentWorkspace,
   useRunAgentToolCallWithCodex,
   useUpsertAgentTask,
+  useAgentWorkspaceSourceTree,
 } from '@/lib/rd-hooks';
 import type {
   IAgentExecutionEvent,
   IAgentSession,
   IAgentToolCall,
   IAgentWorkspace,
+  IAgentWorkspaceSourceTreeNode,
   IPipelineTask,
 } from '@/lib/rd-types';
+import type { IAiSkillConfig } from '@/lib/ai-skill-engine';
 import { logger } from '@/lib/logger';
 import { buildAgentDiffReviewSummary } from '@/lib/agent-review-utils';
 import { fillAiSkillPromptTemplate } from '@/lib/ai-skill-engine';
-import { AGENT_WORKBENCH_PLAN_SKILL_ID, getAiSkill } from '@/lib/ai-skills';
+import { AGENT_WORKBENCH_PLAN_SKILL_ID, getAiSkill, listAiSkills } from '@/lib/ai-skills';
 import { cn } from '@/lib/utils';
 
 /** 编码对话内助手气泡的 Markdown 排版（流式与非流式共用） */
@@ -186,6 +196,161 @@ function formatDurationShort(ms: number): string {
   const m = Math.floor(s / 60);
   const rs = s % 60;
   return rs ? `${m}m ${rs}s` : `${m}m`;
+}
+
+/** 对话输入框内 `/` 技能菜单：单行摘要 */
+function truncateOneLine(s: string, max: number): string {
+  const t = s.replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
+/**
+ * 光标前若存在「可触发的 /xxx」则视为技能菜单。
+ * - 允许行首、空白后、换行后的 `/`；
+ * - `/` 前若为字母/数字/中文等「词内字符」则不触发（避免 URL、路径误触），但常见中文标点后可触发；
+ * - 全角 `／` 按 `/` 处理；
+ * - 仅含 `/` 且光标在 0 时仍视为在「/ 之后」输入（兼容部分浏览器 selection 异常）。
+ */
+function parseSlashTrigger(draft: string, cursor: number): { start: number; filter: string } | null {
+  const norm = draft.replace(/／/g, '/');
+  let c = Math.min(Math.max(cursor, 0), norm.length);
+  if (norm === '/' && c === 0) c = 1;
+  const before = norm.slice(0, c);
+  const m = before.match(/(^|[\s\n])(\/)([^\s]*)$/);
+  if (m && m.index !== undefined) {
+    const slashIdx = m.index + m[1].length;
+    return { start: slashIdx, filter: (m[3] ?? '').toLowerCase() };
+  }
+  const slashIdx = before.lastIndexOf('/');
+  if (slashIdx < 0) return null;
+  const after = before.slice(slashIdx + 1);
+  if (after.includes('\n')) return null;
+  if (slashIdx > 0) {
+    const prev = before[slashIdx - 1]!;
+    if (/\S/.test(prev) && /[a-zA-Z0-9_\u4e00-\u9fff]/.test(prev)) return null;
+  }
+  return { start: slashIdx, filter: after.toLowerCase() };
+}
+
+/**
+ * 光标前「可触发的 @xxx」用于插入仓库内文件路径（与 `/` 规则对称；全角 ＠ 视为 @）。
+ * 筛选段内不含第二个 @，避免误伤邮箱。
+ */
+function parseAtTrigger(draft: string, cursor: number): { start: number; filter: string } | null {
+  const norm = draft.replace(/＠/g, '@');
+  let c = Math.min(Math.max(cursor, 0), norm.length);
+  if (norm === '@' && c === 0) c = 1;
+  const before = norm.slice(0, c);
+  const m = before.match(/(^|[\s\n])(@)([^\s@]*)$/);
+  if (m && m.index !== undefined) {
+    const atIdx = m.index + m[1].length;
+    return { start: atIdx, filter: (m[3] ?? '').toLowerCase() };
+  }
+  const atIdx = before.lastIndexOf('@');
+  if (atIdx < 0) return null;
+  const after = before.slice(atIdx + 1);
+  if (after.includes('\n') || after.includes('@')) return null;
+  if (atIdx > 0) {
+    const prev = before[atIdx - 1]!;
+    if (/\S/.test(prev) && /[a-zA-Z0-9_\u4e00-\u9fff]/.test(prev)) return null;
+  }
+  return { start: atIdx, filter: after.toLowerCase() };
+}
+
+/** 同时存在 `/` 与 `@` 时，只保留离光标更近的一段作为当前菜单 */
+function reconcileComposerMentions(
+  draft: string,
+  cursor: number,
+): { slash: { start: number; filter: string } | null; at: { start: number; filter: string } | null } {
+  const slash = parseSlashTrigger(draft, cursor);
+  const at = parseAtTrigger(draft, cursor);
+  if (slash && at) {
+    if (at.start > slash.start) return { slash: null, at };
+    return { slash, at: null };
+  }
+  return { slash, at };
+}
+
+function flattenAgentWorkspaceFilePaths(nodes: IAgentWorkspaceSourceTreeNode[]): string[] {
+  const out: string[] = [];
+  const walk = (list: IAgentWorkspaceSourceTreeNode[]) => {
+    for (const n of list) {
+      if (n.type === 'file' && n.path?.trim()) out.push(n.path.trim());
+      else if (n.children?.length) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return [...new Set(out)].sort((a, b) => a.localeCompare(b, 'en'));
+}
+
+function skillIconForSkillId(skillId: string): LucideIcon {
+  const id = skillId.toLowerCase();
+  if (id.includes('prd')) return FileText;
+  if (id.includes('spec') || id.includes('fs_') || id.includes('ts_') || id.includes('tech')) return ListChecks;
+  if (id.includes('review') || id.includes('审查')) return ShieldCheck;
+  if (id.includes('accept') || id.includes('验收')) return ClipboardList;
+  if (id.includes('conflict') || id.includes('冲突')) return Sparkles;
+  if (id.includes('plan') || id.includes('agent_workbench')) return Wand2;
+  return Sparkles;
+}
+
+function buildAiSkillSlashInsert(skill: IAiSkillConfig, requirementTitle: string): string {
+  const hint = skill.description?.trim() || truncateOneLine(skill.promptTemplate, 280);
+  return `【技能：${skill.name}】（skill_id: ${skill.id}）\n${hint}\n\n请结合当前 worktree / ContextPack 落实上述意图；若模板含占位变量请从需求「${requirementTitle}」与仓库现状合理推断。\n\n`;
+}
+
+interface IAgentWorkbenchSlashRow {
+  key: string;
+  name: string;
+  description: string;
+  Icon: LucideIcon;
+  buildInsert: (ctx: { requirementTitle: string }) => string;
+}
+
+function buildBuiltinSlashRows(): IAgentWorkbenchSlashRow[] {
+  return [
+    {
+      key: 'builtin:compress',
+      name: '压缩上下文',
+      description: '生成本轮前要点摘要，便于长线程接力',
+      Icon: FoldVertical,
+      buildInsert: () =>
+        '【快捷：压缩上下文】\n请用 10 条以内要点概括：当前进度、未决问题、已改文件、下一步建议；忽略与编码无关的寒暄。\n\n',
+    },
+    {
+      key: 'builtin:review',
+      name: '代码审查',
+      description: '从风险、缺陷、测试缺口角度审视当前改动',
+      Icon: ShieldCheck,
+      buildInsert: () =>
+        '【快捷：代码审查】\n请基于当前 worktree diff 做审查：风险点、逻辑缺陷、边界情况、测试缺口与可执行改进；能直接修复的请改代码并自检。\n\n',
+    },
+    {
+      key: 'builtin:acceptance',
+      name: '验收对齐',
+      description: '对照需求与 Plan 列出与验收标准的差距',
+      Icon: ClipboardList,
+      buildInsert: ({ requirementTitle }) =>
+        `【快捷：验收对齐】\n需求：「${requirementTitle}」。请对照 Plan / PRD 要点，列出与验收标准仍存在的差距、需补测试或文档处，并给出最小补齐方案。\n\n`,
+    },
+    {
+      key: 'builtin:risk',
+      name: '风险与回滚',
+      description: '依赖、数据与部署层面的风险与回滚建议',
+      Icon: ListChecks,
+      buildInsert: () =>
+        '【快捷：风险与回滚】\n请识别本变更的依赖、数据迁移、配置与部署风险；给出文件级回滚建议与验证步骤。\n\n',
+    },
+    {
+      key: 'builtin:plan_sync',
+      name: 'Plan 对齐',
+      description: '用 checklist 对比 Plan 与实际执行的偏差',
+      Icon: Wand2,
+      buildInsert: () =>
+        '【快捷：Plan 对齐】\n请阅读原文 Plan，仅用 checklist 列出与当前实现不一致处，并建议如何更新 Plan 文案（不执行无依据的大范围重写）。\n\n',
+    },
+  ];
 }
 
 /** 已完成的「用户 → Agent」轮次，用于构造下一轮 Codex 的上下文（不含当前正在输入的一轮） */
@@ -347,6 +512,12 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   const [runtimeState, setRuntimeState] = useState<ICodexRuntimeState>(initialCodexRuntimeState);
   const [chatMessages, setChatMessages] = useState<IAgentChatMessage[]>([]);
   const [chatDraft, setChatDraft] = useState('');
+  const chatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [aiSkillsForSlash, setAiSkillsForSlash] = useState<IAiSkillConfig[]>([]);
+  const [slashMenu, setSlashMenu] = useState<{ start: number; filter: string } | null>(null);
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+  const [atMenu, setAtMenu] = useState<{ start: number; filter: string } | null>(null);
+  const [atActiveIndex, setAtActiveIndex] = useState(0);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const logsPreRef = useRef<HTMLPreElement | null>(null);
   const [, bumpStreamingClock] = useReducer((x: number) => x + 1, 0);
@@ -432,6 +603,8 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   const isCodexWorkspaceReady = Boolean(readyWorkspace);
   const displayWorkspace = readyWorkspace ?? primaryWorkspace;
 
+  const { data: workspaceTree } = useAgentWorkspaceSourceTree(displayWorkspace?.id);
+
   const step1Done = Boolean(activeSession);
   const step2Done = isCodexWorkspaceReady;
   const pendingApprovals = useMemo(
@@ -451,6 +624,8 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       { id: newChatMessageId(), role: 'user', content: text, createdAt: new Date().toISOString() },
     ]);
     setChatDraft('');
+    setSlashMenu(null);
+    setAtMenu(null);
   };
 
   const codexServerSyncKey = latestCodexToolCall
@@ -1039,6 +1214,163 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     codingTool === 'codex_cli' &&
     !runCodexToolCall.isPending;
 
+  useEffect(() => {
+    let cancelled = false;
+    void listAiSkills()
+      .then((list) => {
+        if (!cancelled) setAiSkillsForSlash(list);
+      })
+      .catch((err) => {
+        logger.warn('[AgentWorkbench] listAiSkills failed', err);
+        if (!cancelled) setAiSkillsForSlash([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const slashRows = useMemo((): IAgentWorkbenchSlashRow[] => {
+    const builtins = buildBuiltinSlashRows();
+    const fromRemote: IAgentWorkbenchSlashRow[] = aiSkillsForSlash.map((s) => ({
+      key: `skill:${s.id}`,
+      name: s.name,
+      description: s.description?.trim() || truncateOneLine(s.promptTemplate, 100),
+      Icon: skillIconForSkillId(s.id),
+      buildInsert: ({ requirementTitle }) => buildAiSkillSlashInsert(s, requirementTitle),
+    }));
+    return [...builtins, ...fromRemote];
+  }, [aiSkillsForSlash]);
+
+  const slashFiltered = useMemo(() => {
+    if (!slashMenu) return [];
+    const q = slashMenu.filter.trim().toLowerCase();
+    if (!q) return slashRows;
+    return slashRows.filter(
+      (r) =>
+        r.key.toLowerCase().includes(q) ||
+        r.name.toLowerCase().includes(q) ||
+        r.description.toLowerCase().includes(q),
+    );
+  }, [slashRows, slashMenu]);
+
+  const atFileIndex = useMemo(() => {
+    const paths = new Set<string>();
+    for (const doc of task.pipelineMeta.publishedDocuments ?? []) {
+      const p = doc.path?.trim();
+      if (p) paths.add(p);
+    }
+    for (const p of flattenAgentWorkspaceFilePaths(workspaceTree?.nodes ?? [])) {
+      paths.add(p);
+    }
+    return [...paths].sort((a, b) => a.localeCompare(b, 'en'));
+  }, [task.pipelineMeta.publishedDocuments, workspaceTree?.nodes]);
+
+  const atFiltered = useMemo(() => {
+    if (!atMenu) return [];
+    const q = atMenu.filter.trim().toLowerCase();
+    const base = !q
+      ? atFileIndex
+      : atFileIndex.filter((p) => {
+          const pl = p.toLowerCase();
+          return pl.includes(q) || pl.split('/').pop()?.toLowerCase().includes(q);
+        });
+    return base.slice(0, 120);
+  }, [atFileIndex, atMenu]);
+
+  useEffect(() => {
+    if (!slashMenu) return;
+    setSlashActiveIndex(0);
+  }, [slashMenu?.start, slashMenu?.filter]); // eslint-disable-line react-hooks/exhaustive-deps -- 仅当 / 段或筛选串变化时归零，避免 slashMenu 新对象引用每键触发
+
+  useEffect(() => {
+    if (!atMenu) return;
+    setAtActiveIndex(0);
+  }, [atMenu?.start, atMenu?.filter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const applySlashSelection = useCallback(
+    (row: IAgentWorkbenchSlashRow) => {
+      const sm = slashMenu;
+      if (!sm) return;
+      const ta = chatTextareaRef.current;
+      const end = ta?.selectionStart ?? chatDraft.length;
+      const insert = row.buildInsert({ requirementTitle: task.requirementTitle });
+      const nextDraft = chatDraft.slice(0, sm.start) + insert + chatDraft.slice(end);
+      setChatDraft(nextDraft);
+      setSlashMenu(null);
+      setAtMenu(null);
+      requestAnimationFrame(() => {
+        if (!ta) return;
+        const pos = sm.start + insert.length;
+        ta.focus();
+        ta.setSelectionRange(pos, pos);
+      });
+    },
+    [slashMenu, chatDraft, task.requirementTitle],
+  );
+
+  const applyAtSelection = useCallback(
+    (path: string) => {
+      const am = atMenu;
+      if (!am) return;
+      const ta = chatTextareaRef.current;
+      const end = ta?.selectionStart ?? chatDraft.length;
+      const insert = `@${path}`;
+      const nextDraft = chatDraft.slice(0, am.start) + insert + chatDraft.slice(end);
+      setChatDraft(nextDraft);
+      setAtMenu(null);
+      setSlashMenu(null);
+      requestAnimationFrame(() => {
+        if (!ta) return;
+        const pos = am.start + insert.length;
+        ta.focus();
+        ta.setSelectionRange(pos, pos);
+      });
+    },
+    [atMenu, chatDraft],
+  );
+
+  const syncComposerMenusFromTextarea = useCallback(() => {
+    const ta = chatTextareaRef.current;
+    if (!ta) return;
+    let c = ta.selectionStart ?? ta.value.length;
+    const v = ta.value;
+    const normS = v.replace(/／/g, '/');
+    const normA = v.replace(/＠/g, '@');
+    if (normS === '/' && c === 0) c = 1;
+    if (normA === '@' && c === 0) c = 1;
+    const { slash, at } = reconcileComposerMentions(v, c);
+    setSlashMenu(slash);
+    setAtMenu(at);
+  }, []);
+
+  const openSkillPaletteFromToolbar = useCallback(() => {
+    if (!step1Done) return;
+    const ta = chatTextareaRef.current;
+    const next = chatDraft.length === 0 || chatDraft.endsWith('\n') ? `${chatDraft}/` : `${chatDraft}\n/`;
+    setChatDraft(next);
+    setAtMenu(null);
+    setSlashMenu(parseSlashTrigger(next, next.length));
+    requestAnimationFrame(() => {
+      ta?.focus();
+      const pos = next.length;
+      ta?.setSelectionRange(pos, pos);
+    });
+  }, [chatDraft, step1Done]);
+
+  const openFilePaletteFromToolbar = useCallback(() => {
+    if (!step1Done) return;
+    const ta = chatTextareaRef.current;
+    const next = chatDraft.length === 0 || chatDraft.endsWith('\n') ? `${chatDraft}@` : `${chatDraft}\n@`;
+    setChatDraft(next);
+    setSlashMenu(null);
+    setAtMenu(parseAtTrigger(next, next.length));
+    requestAnimationFrame(() => {
+      ta?.focus();
+      const pos = next.length;
+      ta?.setSelectionRange(pos, pos);
+    });
+  }, [chatDraft, step1Done]);
+
   const stepper = (
     <div className="space-y-6">
       <Tabs
@@ -1272,7 +1604,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         </div>
         {activeSession ? (
           <>
-          <div className="mb-3 flex min-h-0 min-w-0 max-h-[min(92vh,800px)] flex-col overflow-hidden rounded-xl bg-card/80 text-sm ring-1 ring-border/25">
+          <div className="mb-3 flex min-h-0 min-w-0 max-h-[min(92vh,800px)] flex-col overflow-x-hidden overflow-y-visible rounded-xl bg-card/80 text-sm ring-1 ring-border/25">
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 bg-muted/45 px-3 py-2.5">
               <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
                 {runCodexToolCall.isPending || Boolean(runningCodexToolCall) ? (
@@ -1451,20 +1783,158 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                 对话持久化到当前会话；时钟图标切换历史，
                 <span className="font-medium text-foreground"> 文档图标 </span>
                 查看完整输出日志。
+                <span className="font-medium text-foreground"> 输入 / </span>
+                或「技能」、
+                <span className="font-medium text-foreground"> 输入 @ </span>
+                或「文件」可选仓库路径（↑↓ Enter，Esc 关闭）；
                 <span className="font-medium text-foreground"> Enter </span>
                 发送并执行（Workspace 就绪时），
                 <span className="font-medium text-foreground"> Shift+Enter </span>
                 换行；左侧「仅对话」只写入气泡。
               </p>
               <div className="p-2 sm:p-3">
-                <div className="overflow-hidden rounded-xl bg-background/90 ring-1 ring-border/25 shadow-sm">
+                <div className="relative overflow-visible rounded-xl bg-background/90 ring-1 ring-border/25 shadow-sm">
+                  {atMenu ? (
+                    <div
+                      className="absolute bottom-full left-0 right-0 z-[80] mb-1 max-h-[min(280px,42vh)] overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-card shadow-md"
+                      role="listbox"
+                      aria-label="选择文件路径"
+                    >
+                      {atFiltered.length > 0 ? (
+                        atFiltered.map((path, idx) => (
+                          <button
+                            key={path}
+                            type="button"
+                            role="option"
+                            aria-selected={idx === atActiveIndex}
+                            className={cn(
+                              'flex w-full gap-2.5 px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
+                              idx === atActiveIndex && 'bg-accent text-accent-foreground',
+                            )}
+                            onMouseEnter={() => setAtActiveIndex(idx)}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => applyAtSelection(path)}
+                          >
+                            <File className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                            <span className="min-w-0 flex-1 font-mono text-xs leading-snug text-foreground">
+                              {path}
+                            </span>
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-2.5 py-2.5 text-xs leading-relaxed text-muted-foreground">
+                          暂无匹配文件。请先完成「准备 Workspace」以加载仓库目录；已发布的 PRD/规格路径也会出现在此列表。
+                        </div>
+                      )}
+                    </div>
+                  ) : slashMenu && slashFiltered.length > 0 ? (
+                    <div
+                      className="absolute bottom-full left-0 right-0 z-[80] mb-1 max-h-[min(280px,42vh)] overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-card shadow-md"
+                      role="listbox"
+                      aria-label="技能与快捷提示"
+                    >
+                      {slashFiltered.map((row, idx) => {
+                        const Icon = row.Icon;
+                        return (
+                          <button
+                            key={row.key}
+                            type="button"
+                            role="option"
+                            aria-selected={idx === slashActiveIndex}
+                            className={cn(
+                              'flex w-full gap-2.5 px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
+                              idx === slashActiveIndex && 'bg-accent text-accent-foreground',
+                            )}
+                            onMouseEnter={() => setSlashActiveIndex(idx)}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => applySlashSelection(row)}
+                          >
+                            <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+                            <span className="min-w-0 flex-1">
+                              <span className="font-medium text-foreground">{row.name}</span>
+                              <span className="mt-0.5 block text-xs leading-snug text-muted-foreground">
+                                {row.description}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                   <Textarea
+                    ref={chatTextareaRef}
                     value={chatDraft}
-                    onChange={(e) => setChatDraft(e.target.value)}
-                    placeholder="描述后续变更或验收反馈…"
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      let c = e.target.selectionStart ?? v.length;
+                      const normS = v.replace(/／/g, '/');
+                      const normA = v.replace(/＠/g, '@');
+                      if (normS === '/' && c === 0) c = 1;
+                      if (normA === '@' && c === 0) c = 1;
+                      setChatDraft(v);
+                      const { slash, at } = reconcileComposerMentions(v, c);
+                      setSlashMenu(slash);
+                      setAtMenu(at);
+                    }}
+                    onSelect={syncComposerMenusFromTextarea}
+                    onClick={syncComposerMenusFromTextarea}
+                    onKeyUp={syncComposerMenusFromTextarea}
+                    placeholder="描述变更或验收反馈…（/ 技能 · @ 文件）"
                     disabled={!step1Done}
                     className="min-h-[72px] resize-none border-0 bg-transparent px-3 py-2.5 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                     onKeyDown={(e) => {
+                      if (atMenu) {
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setAtMenu(null);
+                          return;
+                        }
+                        if (atFiltered.length > 0) {
+                          if (e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            setAtActiveIndex((i) => Math.min(atFiltered.length - 1, i + 1));
+                            return;
+                          }
+                          if (e.key === 'ArrowUp') {
+                            e.preventDefault();
+                            setAtActiveIndex((i) => Math.max(0, i - 1));
+                            return;
+                          }
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            const path = atFiltered[atActiveIndex] ?? atFiltered[0];
+                            if (path) applyAtSelection(path);
+                            return;
+                          }
+                        } else if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          setAtMenu(null);
+                          return;
+                        }
+                      }
+                      if (slashMenu && slashFiltered.length > 0) {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          setSlashActiveIndex((i) => Math.min(slashFiltered.length - 1, i + 1));
+                          return;
+                        }
+                        if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          setSlashActiveIndex((i) => Math.max(0, i - 1));
+                          return;
+                        }
+                        if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setSlashMenu(null);
+                          return;
+                        }
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          const row = slashFiltered[slashActiveIndex] ?? slashFiltered[0];
+                          if (row) applySlashSelection(row);
+                          return;
+                        }
+                      }
                       if (e.key !== 'Enter' || e.shiftKey) return;
                       if (!chatDraft.trim() || !step1Done) return;
                       if (!canComposerRunCodex) return;
@@ -1473,24 +1943,64 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                     }}
                   />
                   <div className="flex items-center justify-between gap-2 border-t border-border/30 bg-muted/25 px-2 py-1.5">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-                          onClick={handleChatAppendUser}
-                          disabled={!step1Done || !chatDraft.trim()}
-                        >
-                          <MessageSquarePlus className="size-4 shrink-0" />
-                          <span className="hidden text-xs sm:inline">仅对话</span>
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-[240px]">
-                        写入对话队列，稍后在步骤 3 执行 Codex
-                      </TooltipContent>
-                    </Tooltip>
+                    <div className="flex min-w-0 items-center gap-0.5">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
+                            onClick={handleChatAppendUser}
+                            disabled={!step1Done || !chatDraft.trim()}
+                          >
+                            <MessageSquarePlus className="size-4 shrink-0" />
+                            <span className="hidden text-xs sm:inline">仅对话</span>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[240px]">
+                          写入对话队列，稍后在步骤 3 执行 Codex
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 gap-1 px-2 text-muted-foreground hover:text-foreground"
+                            onClick={openSkillPaletteFromToolbar}
+                            disabled={!step1Done}
+                            aria-label="打开技能列表"
+                          >
+                            <Wand2 className="size-4 shrink-0" />
+                            <span className="hidden text-xs sm:inline">技能</span>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[260px]">
+                          插入「/」并打开技能菜单（与键盘输入 / 相同）。内置快捷不依赖插件配置；下方亦含插件技能列表。
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 gap-1 px-2 text-muted-foreground hover:text-foreground"
+                            onClick={openFilePaletteFromToolbar}
+                            disabled={!step1Done}
+                            aria-label="选择文件路径"
+                          >
+                            <File className="size-4 shrink-0" />
+                            <span className="hidden text-xs sm:inline">文件</span>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[260px]">
+                          插入「@」并打开文件路径列表（与键盘输入 @ 相同）。数据来自当前 Workspace 目录树与流水线已发布文档路径。
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="hidden font-mono text-[10px] font-normal text-muted-foreground sm:inline-flex">
                         Codex CLI

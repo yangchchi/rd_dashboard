@@ -5,7 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Layers } from 'lucide-react';
 import { toast } from 'sonner';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import type { IOrgLanguageSpec, IOrganizationSpecConfig, OrgSpecLanguage } from '@/lib/mock-data-store';
 import { createDefaultOrgSpecConfig } from '@/lib/org-spec-defaults';
 import { useOrgSpecConfig, useSaveOrgSpecConfig } from '@/lib/rd-hooks';
@@ -79,10 +81,12 @@ const OrgSpecConfigPage: React.FC = () => {
     <div className="w-full space-y-6">
       <section className="w-full flex items-center justify-between">
         <div className="rd-page-header-lead">
-          <h1 className="rd-page-title">编码规范</h1>
-          <p className="rd-page-desc mt-1">
-            对齐 OpenSpec SDD。每条规则独立、可检查：先规格/场景/任务，再实现与验证。供 AI 与 CI 引用；与「插件配置」中的模型任务相互独立。
-          </p>
+          <RdPageModuleHeading
+            icon={Layers}
+            title="编码规范"
+            description="对齐 OpenSpec SDD。每条规则独立、可检查：先规格/场景/任务，再实现与验证。供 AI 与 CI 引用；与「插件配置」中的模型任务相互独立。"
+            descriptionLines="multi"
+          />
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={handleReset}>恢复默认模板</Button>

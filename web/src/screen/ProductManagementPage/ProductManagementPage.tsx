@@ -37,6 +37,7 @@ import { rdApi } from '@/lib/rd-api';
 import type { IProduct } from '@/lib/rd-types';
 import { toast } from 'sonner';
 import { ExternalLink, Package, Pencil, Plus, Trash2 } from 'lucide-react';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 
 function newProductId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -190,8 +191,11 @@ const ProductManagementPage: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="rd-page-header-lead">
-          <h1 className="rd-page-title">产品主数据</h1>
-          <p className="rd-page-desc mt-1">维护产品线与部署、仓库等元数据</p>
+          <RdPageModuleHeading
+            icon={Package}
+            title="产品主数据"
+            description="维护产品线与部署、仓库等元数据"
+          />
         </div>
         <Button type="button" className="shrink-0 gap-2" onClick={openCreate}>
           <Plus className="size-4" />

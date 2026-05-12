@@ -459,6 +459,7 @@
 
 /**
  * List / filter / table shells — blur-20 主面、blur-10 内嵌行
+ * 圆角：此处用 rounded-2xl 作为「大表面」层级；卡片内小组件优先 rounded-lg（见 Card 组件）
  */
 .rd-surface-card {
   @apply rounded-2xl border border-border bg-card;
@@ -541,9 +542,16 @@
   @apply min-w-0 text-sm leading-relaxed text-muted-foreground truncate;
 }
 
-/** 页眉左侧「标题 + 副标题」列：与同排操作区并存时允许副标题单行省略 */
+/** 页眉左侧「标题 + 副标题」列：与同排操作区并存时允许副标题单行省略；浅色点阵与赏金猎场页头一致 */
 .rd-page-header-lead {
   @apply min-w-0 flex-1;
+  background-image: radial-gradient(
+    circle,
+    color-mix(in oklab, var(--foreground) 10%, transparent) 0.6px,
+    transparent 1.1px
+  );
+  background-size: 14px 14px;
+  background-position: 0 0;
 }
 
 /** 列表区标题左侧图标 — 轻微渐变 + 内高光 */

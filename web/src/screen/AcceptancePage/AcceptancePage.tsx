@@ -16,6 +16,7 @@ import { Streamdown } from '@/components/ui/streamdown';
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty';
 import { FileSearch, CheckCircle, XCircle, RotateCcw, ExternalLink, MessageSquare, History, AlertCircle, Star, Send } from 'lucide-react';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { toast } from 'sonner';
 import { getCurrentUser } from '@/lib/auth';
 import { rdAuditUpdate } from '@/lib/rd-actor';
@@ -301,24 +302,15 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
 
   return (
     <>
-      <style jsx>{`
-        .acceptance-page {
-          animation: fadeIn 0.3s ease-out;
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
-
-      <div className="acceptance-page w-full space-y-6">
+      <div className="flex w-full animate-in fade-in flex-col gap-6 duration-300">
         <section className="w-full">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="rd-page-title">验收中心</h1>
-              <p className="rd-page-desc mt-1">
-                对比原始需求与实际实现，完成最终验收闭环
-              </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="rd-page-header-lead">
+              <RdPageModuleHeading
+                icon={CheckCircle}
+                title="验收中心"
+                description="对比原始需求与实际实现，完成最终验收闭环"
+              />
             </div>
           </div>
         </section>
@@ -503,7 +495,10 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
             
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAcceptDialogOpen(false)}>取消</Button>
-              <Button onClick={() => submitAcceptance(true)} className="bg-green-600 hover:bg-green-700">
+              <Button
+                onClick={() => submitAcceptance(true)}
+                className="bg-success text-success-foreground hover:bg-success/90"
+              >
                 <CheckCircle className="w-4 h-4 mr-1" />
                 确认通过
               </Button>

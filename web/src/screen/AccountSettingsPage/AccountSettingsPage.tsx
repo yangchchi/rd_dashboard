@@ -147,7 +147,7 @@ export default function AccountSettingsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-8">
+    <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-semibold leading-tight tracking-tight">个人设置</h1>
         <p className="mt-1 text-sm text-muted-foreground">管理显示信息与界面主题</p>
