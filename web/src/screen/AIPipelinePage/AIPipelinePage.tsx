@@ -776,7 +776,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
         {/* 页面标题 */}
         <section className="w-full">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex items-start gap-3">
+            <div className="rd-page-header-lead flex items-start gap-3">
               {isDetail ? (
                 <Button
                   type="button"
@@ -784,26 +784,26 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                   size="icon"
                   className="mt-0.5 shrink-0"
                   onClick={() => router.push('/ai-pipeline')}
-                  aria-label="返回流水线列表"
+                  aria-label="返回交付引擎列表"
                 >
                   <ArrowLeft className="size-4" />
                 </Button>
               ) : null}
-              <div>
+              <div className="min-w-0">
                 <h1 className="flex items-center gap-2 rd-page-title">
                   <Cpu className="size-6 text-purple-500" />
-                  {isDetail ? '流水线详情' : '流水线'}
+                  {isDetail ? '交付引擎详情' : '交付引擎'}
                 </h1>
                 <p className="rd-page-desc mt-1">
                   {isDetail
                     ? tasksLoading
-                      ? '加载流水线数据…'
-                      : selectedTask?.requirementTitle || '流水线详情'
+                      ? '加载交付任务…'
+                      : selectedTask?.requirementTitle || '交付引擎详情'
                     : '实时监控AI代码生成、测试与部署全流程'}
                 </p>
                 {isDetail && !tasksLoading && selectedTask ? (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    返回列表可查看或创建其他流水线。
+                    返回交付引擎可查看或创建其他流水线。
                   </p>
                 ) : null}
               </div>
@@ -840,7 +840,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Activity className="size-4 text-primary" />
-                流水线看板
+                交付引擎看板
               </CardTitle>
               <CardDescription className="text-xs text-muted-foreground">
                 点击卡片进入详情；快捷操作请使用卡片上的按钮或菜单。

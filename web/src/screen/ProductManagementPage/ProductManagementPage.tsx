@@ -189,7 +189,7 @@ const ProductManagementPage: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+        <div className="rd-page-header-lead">
           <h1 className="rd-page-title">产品主数据</h1>
           <p className="rd-page-desc mt-1">维护产品线与部署、仓库等元数据</p>
         </div>

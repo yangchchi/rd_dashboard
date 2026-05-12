@@ -538,7 +538,12 @@
 }
 
 .rd-page-desc {
-  @apply max-w-2xl text-balance text-sm leading-relaxed text-muted-foreground;
+  @apply min-w-0 text-sm leading-relaxed text-muted-foreground truncate;
+}
+
+/** 页眉左侧「标题 + 副标题」列：与同排操作区并存时允许副标题单行省略 */
+.rd-page-header-lead {
+  @apply min-w-0 flex-1;
 }
 
 /** 列表区标题左侧图标 — 轻微渐变 + 内高光 */

@@ -353,7 +353,7 @@ const BountyHuntPage: React.FC = () => {
       });
       if (result.ok) {
         if (result.bothFilled) {
-          toast.success('双槽已满；需求进入「AI开发中」请在流水线页创建研发流水线');
+          toast.success('双槽已满；需求进入「AI开发中」请在「交付引擎」页创建研发流水线');
         } else if (role === 'pm') {
           toast.success('已领取产品经理槽位，尚待技术经理领取');
         } else {
@@ -375,7 +375,7 @@ const BountyHuntPage: React.FC = () => {
       return;
     }
     if (!requirementIdsWithPipeline.has(task.requirementId)) {
-      toast.error('请先为该需求创建研发流水线后再提测/交付');
+      toast.error('请先在「交付引擎」为该需求创建研发流水线后再提测/交付');
       return;
     }
     try {
@@ -523,13 +523,13 @@ const BountyHuntPage: React.FC = () => {
         </div>
       ) : null}
       <section className="flex items-start justify-between gap-4">
-        <div>
+        <div className="rd-page-header-lead">
           <h1 className="rd-page-title flex items-center gap-2">
             <Swords className="h-6 w-6 text-primary" />
             赏金猎场
           </h1>
           <p className="rd-page-desc mt-1">
-            悬赏需产品经理与技术经理分别接槽；领取不改变需求流转状态。「AI开发中」请在流水线页创建研发流水线后生效。工序上请先接 PM，再接 TM。
+            悬赏需产品经理与技术经理分别接槽；领取不改变需求流转状态。「AI开发中」请在「交付引擎」页创建研发流水线后生效。工序上请先接 PM，再接 TM。
           </p>
         </div>
         <div className="flex items-center gap-3">

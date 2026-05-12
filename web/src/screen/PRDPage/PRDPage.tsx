@@ -346,7 +346,7 @@ const PRDPage: React.FC = () => {
         {/* 页面标题 */}
         <section className="w-full">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="rd-page-header-lead">
               <h1 className="rd-page-title">智能文档</h1>
               <p className="rd-page-desc mt-1">
                 管理产品需求文档，支持AI辅助生成
@@ -435,7 +435,7 @@ const PRDPage: React.FC = () => {
           </div>
         </section>
 
-        {/* 筛选栏 — 与需求列表页同一套 rd-surface */}
+        {/* 筛选栏 — 与需求中心页同一套 rd-surface */}
         <section className="w-full">
           <div className="rd-surface-card rd-surface-card-hover px-4 py-4 sm:px-5 sm:py-4">
             <div className="flex flex-wrap items-center gap-4">
@@ -464,7 +464,7 @@ const PRDPage: React.FC = () => {
           </div>
         </section>
 
-        {/* PRD列表 — 与需求列表页同一表头条 + 内容区 */}
+        {/* PRD列表 — 与需求中心页同一表头条 + 内容区 */}
         <section className="w-full">
           <div className="rd-surface-card overflow-hidden">
             <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
@@ -473,7 +473,7 @@ const PRDPage: React.FC = () => {
                   <FileText className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-foreground">PRD列表</h2>
+                  <h2 className="text-xl font-bold text-foreground">智能文档列表</h2>
                   <p className="text-sm text-muted-foreground">
                     共 <span className="font-bold text-primary">{filteredPRDList.length}</span> 个PRD文档
                   </p>

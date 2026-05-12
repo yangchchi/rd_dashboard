@@ -258,11 +258,11 @@ const RequirementDetailPage: React.FC = () => {
       <div className="w-full space-y-6 page-enter">
         {/* 顶部导航 */}
         <section className="w-full flex items-center justify-between">
-          <div className="flex items-center gap-4">
+          <div className="flex min-w-0 flex-1 items-center gap-4">
             <Button variant="ghost" size="icon" onClick={handleBack}>
               <ArrowLeft className="size-4" />
             </Button>
-            <div>
+            <div className="min-w-0">
               <h1 className="rd-page-title">{requirement.title}</h1>
               <p className="rd-page-desc mt-1">{requirement.id}</p>
             </div>
@@ -620,7 +620,7 @@ const RequirementDetailPage: React.FC = () => {
                   {requirement.status === 'ai_developing' && (
                     <Button className="w-full" size="sm" variant="outline" onClick={() => router.push('/ai-pipeline')}>
                       <Cpu className="size-4 mr-2" />
-                      查看流水线
+                      查看交付引擎
                     </Button>
                   )}
                   {requirement.status === 'pending_acceptance' && (

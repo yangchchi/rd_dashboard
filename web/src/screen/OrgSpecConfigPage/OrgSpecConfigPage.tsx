@@ -78,10 +78,10 @@ const OrgSpecConfigPage: React.FC = () => {
   return (
     <div className="w-full space-y-6">
       <section className="w-full flex items-center justify-between">
-        <div>
-          <h1 className="rd-page-title">组织编码规范（对齐 OpenSpec SDD）</h1>
+        <div className="rd-page-header-lead">
+          <h1 className="rd-page-title">编码规范</h1>
           <p className="rd-page-desc mt-1">
-            每条规则独立、可检查：先规格/场景/任务，再实现与验证。供 AI 与 CI 引用；与「插件配置」中的模型任务相互独立。
+            对齐 OpenSpec SDD。每条规则独立、可检查：先规格/场景/任务，再实现与验证。供 AI 与 CI 引用；与「插件配置」中的模型任务相互独立。
           </p>
         </div>
         <div className="flex items-center gap-2">

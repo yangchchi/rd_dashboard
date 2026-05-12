@@ -213,8 +213,8 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
         {/* 页面标题 */}
         <section className="w-full">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="rd-page-title">规格说明书</h1>
+            <div className="rd-page-header-lead">
+              <h1 className="rd-page-title">技术基准</h1>
               <p className="rd-page-desc mt-1">
                 编辑页推荐流程：组织编码约束 → 功能规格 FS（参考 PRD）→ 技术规格 TS（参考 FS + 约束）→ 编程计划 CP（参考 FS + TS，对应 plan.md），并导出 Machine-Readable JSON
               </p>

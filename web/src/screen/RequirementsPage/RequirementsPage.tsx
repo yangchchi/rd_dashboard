@@ -130,11 +130,11 @@ const RequirementsPage: React.FC = () => {
   return (
     <>
       <div className="flex w-full flex-col gap-6">
-        {/* 页头 — 与 PRD 管理页同一结构 */}
+        {/* 页头 — 与 PRD 页同一结构 */}
         <section className="w-full">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h1 className="rd-page-title">需求清单</h1>
+            <div className="rd-page-header-lead">
+              <h1 className="rd-page-title">需求中心</h1>
               <p className="rd-page-desc mt-1">管理所有需求，支持看板/列表视图、搜索与筛选</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -237,7 +237,7 @@ const RequirementsPage: React.FC = () => {
                   <List className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-foreground">需求列表</h2>
+                  <h2 className="text-xl font-bold text-foreground">全部需求</h2>
                   <p className="text-sm text-muted-foreground">
                     共 <span className="font-bold text-primary">{filteredRequirements.length}</span> 条记录
                   </p>

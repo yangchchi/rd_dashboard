@@ -248,7 +248,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                 {(
                   [
                     { path: "/bounty-hunt", label: "赏金猎场", icon: Swords, key: "bounty_hunt" as const },
-                    { path: "/requirements", label: "需求管理", icon: List, key: "requirements" as const },
+                    { path: "/requirements", label: "需求中心", icon: List, key: "requirements" as const },
                     { path: "/prd", label: "智能文档", icon: FileText, key: "prd" as const },
                     { path: "/specification", label: "技术基准", icon: Settings2, key: "spec" as const },
                     { path: "/ai-pipeline", label: "交付引擎", icon: Cpu, key: "pipeline" as const },

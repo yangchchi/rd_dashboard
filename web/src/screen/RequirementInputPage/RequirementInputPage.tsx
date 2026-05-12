@@ -398,7 +398,7 @@ const RequirementInputPage: React.FC = () => {
       <div className="requirement-input-page w-full space-y-6">
         <section className="w-full">
           <div className="flex items-start justify-between gap-4">
-            <div>
+            <div className="rd-page-header-lead">
               <h1 className="rd-page-title">需求采集</h1>
               <p className="rd-page-desc mt-1">
                 提交业务需求；可使用 AI 将描述优化为更清晰的执行级表述
@@ -410,7 +410,7 @@ const RequirementInputPage: React.FC = () => {
                 className="mt-1 h-auto px-0 text-muted-foreground hover:text-foreground"
                 onClick={() => router.push('/requirements')}
               >
-                返回需求列表
+                返回需求中心
               </Button>
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">

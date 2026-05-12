@@ -51,7 +51,7 @@ export const ACCESS_PERMISSION_LIST: AccessPermissionDef[] = [
   },
   {
     id: 'page.requirements',
-    label: '需求管理（列表 / 采集 / 详情 / 编辑）',
+    label: '需求中心（列表 / 采集 / 详情 / 编辑）',
     group: g('requirements'),
     kind: 'route',
     menuKey: 'requirements',
@@ -100,14 +100,14 @@ export const ACCESS_PERMISSION_LIST: AccessPermissionDef[] = [
   },
   {
     id: 'page.org_spec',
-    label: '组织规格',
+    label: '编码规范',
     group: g('settings'),
     kind: 'route',
     menuKey: 'settings_org_spec',
   },
   {
     id: 'page.plugins',
-    label: '插件与技能',
+    label: '插件配置',
     group: g('settings'),
     kind: 'route',
     menuKey: 'settings_plugins',
@@ -171,7 +171,7 @@ export const ACCESS_PERMISSION_MAP: ReadonlyMap<string, AccessPermissionDef> = n
 
 export const ACCESS_GROUP_LABEL: Record<AccessPermissionGroup, string> = {
   overview: '总览',
-  requirements: '需求',
+  requirements: '需求中心',
   prd_spec: 'PRD 与规格',
   delivery: '交付与验收',
   product: '产品',

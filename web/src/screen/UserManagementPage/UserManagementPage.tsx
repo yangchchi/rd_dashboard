@@ -166,7 +166,7 @@ const UserManagementPage: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+        <div className="rd-page-header-lead">
           <h1 className="rd-page-title">用户管理</h1>
           <p className="rd-page-desc mt-1">
             支持创建、查看、删除本地账号；为账号绑定「角色定义」中的访问角色，以控制菜单、页面与按钮权限

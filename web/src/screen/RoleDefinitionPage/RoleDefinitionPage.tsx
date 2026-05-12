@@ -149,7 +149,7 @@ const RoleDefinitionPage: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+        <div className="rd-page-header-lead">
           <h1 className="rd-page-title">角色定义</h1>
           <p className="rd-page-desc mt-1">
             创建业务角色并勾选可访问的页面与按钮级权限；用户在「用户管理」中绑定角色后生效（内置 admin
