@@ -5,6 +5,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   ArrowUp,
   Bot,
+  AlertCircle,
   CheckCircle2,
   ChevronRight,
   ClipboardList,
@@ -236,6 +237,7 @@ function parseSlashTrigger(draft: string, cursor: number): { start: number; filt
 /**
  * 光标前「可触发的 @xxx」用于插入仓库内文件路径（与 `/` 规则对称；全角 ＠ 视为 @）。
  * 筛选段内不含第二个 @，避免误伤邮箱。
+ * 路径 token 后出现空白则视为已结束引用（例如 `@a/b.md 开始编码`），不再弹出补全。
  */
 function parseAtTrigger(draft: string, cursor: number): { start: number; filter: string } | null {
   const norm = draft.replace(/＠/g, '@');
@@ -251,6 +253,8 @@ function parseAtTrigger(draft: string, cursor: number): { start: number; filter:
   if (atIdx < 0) return null;
   const after = before.slice(atIdx + 1);
   if (after.includes('\n') || after.includes('@')) return null;
+  /** 已输入空格等，说明 @ 路径段结束，后续是自然语言指令，不应把整段当作筛选串 */
+  if (/\s/.test(after)) return null;
   if (atIdx > 0) {
     const prev = before[atIdx - 1]!;
     if (/\S/.test(prev) && /[a-zA-Z0-9_\u4e00-\u9fff]/.test(prev)) return null;
@@ -270,6 +274,100 @@ function reconcileComposerMentions(
     return { slash, at: null };
   }
   return { slash, at };
+}
+
+function charIsAtMark(d: string, i: number): boolean {
+  const c = d[i];
+  return c === '@' || c === '＠';
+}
+
+function isValidAtTriggerPrefix(d: string, atIdx: number): boolean {
+  if (!charIsAtMark(d, atIdx)) return false;
+  if (atIdx > 0) {
+    const prev = d[atIdx - 1]!;
+    if (/\S/.test(prev) && /[a-zA-Z0-9_\u4e00-\u9fff]/.test(prev)) return false;
+  }
+  return true;
+}
+
+/** @ 路径段：@ 起至首个空白/@ 之前（与 parseAtTrigger 语义一致，不含尾部空格） */
+function findAtPathAtomRange(d: string, indexInPath: number): { start: number; end: number } | null {
+  if (indexInPath < 0 || indexInPath >= d.length) return null;
+  let j = indexInPath;
+  while (j >= 0 && !charIsAtMark(d, j)) {
+    const ch = d[j];
+    if (ch === '\n' || ch === ' ' || ch === '\t' || ch === '\r') return null;
+    j--;
+  }
+  if (j < 0 || !charIsAtMark(d, j) || !isValidAtTriggerPrefix(d, j)) return null;
+  let end = j + 1;
+  while (end < d.length) {
+    const ch = d[end]!;
+    if (ch === '\n' || ch === ' ' || ch === '\t' || ch === '\r' || charIsAtMark(d, end)) break;
+    end++;
+  }
+  if (indexInPath >= j && indexInPath < end) return { start: j, end };
+  return null;
+}
+
+function charIsSlashMark(d: string, i: number): boolean {
+  return d[i] === '/' || d[i] === '／';
+}
+
+function isValidSlashTriggerPrefix(d: string, slashIdx: number): boolean {
+  if (!charIsSlashMark(d, slashIdx)) return false;
+  if (slashIdx > 0) {
+    const prev = d[slashIdx - 1]!;
+    if (/\S/.test(prev) && /[a-zA-Z0-9_\u4e00-\u9fff]/.test(prev)) return false;
+  }
+  return true;
+}
+
+/** 技能前缀 `/xxx`：与 parseSlashTrigger 首分支一致，路径内不含空白与换行 */
+function findSlashPrefixAtomRange(d: string, indexInPrefix: number): { start: number; end: number } | null {
+  if (indexInPrefix < 0 || indexInPrefix >= d.length) return null;
+  let j = indexInPrefix;
+  while (j >= 0 && !charIsSlashMark(d, j)) {
+    const ch = d[j];
+    if (ch === '\n' || ch === ' ' || ch === '\t' || ch === '\r') return null;
+    j--;
+  }
+  if (j < 0 || !charIsSlashMark(d, j) || !isValidSlashTriggerPrefix(d, j)) return null;
+  let end = j + 1;
+  while (end < d.length) {
+    const ch = d[end]!;
+    if (ch === '\n' || ch === ' ' || ch === '\t' || ch === '\r') break;
+    end++;
+  }
+  if (indexInPrefix >= j && indexInPrefix < end) return { start: j, end };
+  return null;
+}
+
+/** Backspace 将要删除的字符下标为 deleteIndex；整段删除 @ 路径或 `/` 技能前缀 */
+function findComposerAtomicBackspaceRange(draft: string, deleteIndex: number): { start: number; end: number } | null {
+  const atR = findAtPathAtomRange(draft, deleteIndex);
+  const slashR = findSlashPrefixAtomRange(draft, deleteIndex);
+  if (atR && slashR) {
+    if (atR.start <= slashR.start && atR.end >= slashR.end) return atR;
+    if (slashR.start <= atR.start && slashR.end >= atR.end) return slashR;
+    return atR.start <= slashR.start ? atR : slashR;
+  }
+  return atR ?? slashR;
+}
+
+/** Delete 键：光标在 atom 起点时整段前删 */
+function findComposerAtomicForwardDeleteRange(
+  draft: string,
+  cursor: number,
+): { start: number; end: number } | null {
+  const atR = charIsAtMark(draft, cursor) && isValidAtTriggerPrefix(draft, cursor) ? findAtPathAtomRange(draft, cursor) : null;
+  if (atR && atR.start === cursor) return atR;
+  const slashR =
+    charIsSlashMark(draft, cursor) && isValidSlashTriggerPrefix(draft, cursor)
+      ? findSlashPrefixAtomRange(draft, cursor)
+      : null;
+  if (slashR && slashR.start === cursor) return slashR;
+  return null;
 }
 
 function flattenAgentWorkspaceFilePaths(nodes: IAgentWorkspaceSourceTreeNode[]): string[] {
@@ -497,6 +595,13 @@ function hydrateChatMessagesForSession(session: IAgentSession): IAgentChatMessag
   ];
 }
 
+/** 与步骤 1/2 完成态对齐：默认展示「第一个未完成」对应的设置 Tab */
+function workbenchSetupTabForProgress(step1Done: boolean, step2Done: boolean): 'thread' | 'workspace' | 'tool' {
+  if (!step1Done) return 'thread';
+  if (!step2Done) return 'workspace';
+  return 'tool';
+}
+
 function formatAgentSessionPickLabel(session: IAgentSession): string {
   const t = session.createdAt?.slice(0, 16)?.replace('T', ' ') ?? '';
   const tail = session.pipelineRunId ? ' · 流水线' : '';
@@ -603,10 +708,32 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   const isCodexWorkspaceReady = Boolean(readyWorkspace);
   const displayWorkspace = readyWorkspace ?? primaryWorkspace;
 
-  const { data: workspaceTree } = useAgentWorkspaceSourceTree(displayWorkspace?.id);
+  /** 仅对已就绪 Workspace 拉源树；未就绪时用 primary id 会触发「缺少 worktreePath」类接口错误 */
+  const workspaceSourceTreeQuery = useAgentWorkspaceSourceTree(readyWorkspace?.id);
+  const workspaceTree = workspaceSourceTreeQuery.data;
 
   const step1Done = Boolean(activeSession);
   const step2Done = isCodexWorkspaceReady;
+  useEffect(() => {
+    setWorkbenchSetupTab(workbenchSetupTabForProgress(step1Done, step2Done));
+  }, [task.id, activeSession?.id, step1Done, step2Done]);
+
+  const step3LatestCodexRound = useMemo(() => {
+    const tc = latestCodexToolCall;
+    if (!tc || tc.toolName !== 'codex.exec') return null;
+    return tc;
+  }, [latestCodexToolCall]);
+
+  const step3TabStatus = useMemo(() => {
+    if (!step2Done) return 'blocked' as const;
+    if (isCodexRunning) return 'running' as const;
+    const tc = step3LatestCodexRound;
+    if (!tc) return 'idle' as const;
+    if (tc.status === 'succeeded') return 'succeeded' as const;
+    if (tc.status === 'failed' || tc.status === 'cancelled') return 'stopped' as const;
+    return 'idle' as const;
+  }, [step2Done, isCodexRunning, step3LatestCodexRound]);
+
   const pendingApprovals = useMemo(
     () => toolCalls.filter((tc) => tc.approvalStatus === 'pending'),
     [toolCalls],
@@ -775,6 +902,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       });
       appendLog(`[步骤1] Agent Thread 已创建，ContextPack 已写入 PRD/规格 等文档快照（checksum=${contextPack.checksum.slice(0, 8)}…）`);
       toast.success('步骤 1 完成：已生成编码提示词与任务线程');
+      setWorkbenchSetupTab('workspace');
     } catch (error) {
       logger.error('创建 Agent Thread 失败', error);
       toast.error(error instanceof Error ? error.message : '创建 Agent Thread 失败');
@@ -900,6 +1028,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       }
 
       toast.success('步骤 2 完成：仓库与文档上下文已就绪');
+      setWorkbenchSetupTab('tool');
     } catch (error) {
       logger.error('准备 Workspace 失败', error);
       appendLog(`[步骤2][错误] ${error instanceof Error ? error.message : '准备 Workspace 失败'}`);
@@ -1277,6 +1406,37 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     return base.slice(0, 120);
   }, [atFileIndex, atMenu]);
 
+  const atPickerEmptyHint = useMemo(() => {
+    if (atFileIndex.length > 0) {
+      const raw = atMenu?.filter.trim() ?? '';
+      return raw
+        ? `没有匹配「${raw}」的路径，请调整关键词或按 Esc 关闭`
+        : '没有可展示的路径，请按 Esc 关闭';
+    }
+    if (!readyWorkspace?.id) {
+      return '暂无匹配文件。请先完成「准备 Workspace」以加载仓库目录；已发布的 PRD/规格路径也会出现在此列表。';
+    }
+    if (workspaceSourceTreeQuery.isFetching && workspaceSourceTreeQuery.data === undefined) {
+      return '正在加载仓库文件列表…';
+    }
+    if (workspaceSourceTreeQuery.isError) {
+      const m =
+        workspaceSourceTreeQuery.error instanceof Error
+          ? workspaceSourceTreeQuery.error.message
+          : String(workspaceSourceTreeQuery.error ?? '未知错误');
+      return `无法加载仓库文件列表：${m}`;
+    }
+    return '暂无可选路径：仓库中暂无已索引的源文件，且当前流水线未挂载已发布 PRD/规格路径。';
+  }, [
+    atFileIndex.length,
+    atMenu?.filter,
+    readyWorkspace?.id,
+    workspaceSourceTreeQuery.isFetching,
+    workspaceSourceTreeQuery.data,
+    workspaceSourceTreeQuery.isError,
+    workspaceSourceTreeQuery.error,
+  ]);
+
   useEffect(() => {
     if (!slashMenu) return;
     setSlashActiveIndex(0);
@@ -1378,26 +1538,40 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         onValueChange={(v) => setWorkbenchSetupTab(v as 'thread' | 'workspace' | 'tool')}
         className="w-full gap-4"
       >
-        <TabsList className="grid h-auto w-full grid-cols-3 gap-1 rounded-xl bg-muted/35 p-1.5 ring-1 ring-border/25">
+        <TabsList
+          className="grid h-auto w-full grid-cols-3 gap-1 rounded-xl bg-muted/35 p-1.5 ring-1 ring-border/25"
+          aria-label="Agent 工作台步骤"
+        >
           <TabsTrigger
             value="thread"
             className="flex flex-col items-center gap-1 px-2 py-2 text-center text-[11px] leading-tight sm:flex-row sm:text-sm"
           >
             <span className="line-clamp-2">创建 Agent Thread</span>
-            {step1Done ? <CheckCircle2 className="size-3.5 shrink-0 text-green-600" /> : null}
+            {step1Done ? <CheckCircle2 className="size-3.5 shrink-0 text-green-600" aria-hidden /> : null}
           </TabsTrigger>
           <TabsTrigger
             value="workspace"
             className="flex flex-col items-center gap-1 px-2 py-2 text-center text-[11px] leading-tight sm:flex-row sm:text-sm"
+            disabled={!step1Done}
           >
             <span className="line-clamp-2">准备 Workspace</span>
-            {step2Done ? <CheckCircle2 className="size-3.5 shrink-0 text-green-600" /> : null}
+            {step2Done ? <CheckCircle2 className="size-3.5 shrink-0 text-green-600" aria-hidden /> : null}
           </TabsTrigger>
           <TabsTrigger
             value="tool"
             className="flex flex-col items-center gap-1 px-2 py-2 text-center text-[11px] leading-tight sm:flex-row sm:text-sm"
+            disabled={!step2Done}
           >
             <span className="line-clamp-2">调用编码工具</span>
+            {step3TabStatus === 'running' ? (
+              <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
+            ) : null}
+            {step3TabStatus === 'succeeded' ? (
+              <CheckCircle2 className="size-3.5 shrink-0 text-green-600" aria-hidden />
+            ) : null}
+            {step3TabStatus === 'stopped' ? (
+              <AlertCircle className="size-3.5 shrink-0 text-amber-600" aria-hidden />
+            ) : null}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="thread" className="mt-0 outline-none">
@@ -1491,6 +1665,30 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                 </span>
                 调用编码工具
               </div>
+              {!step2Done ? (
+                <Badge variant="outline" className="border-muted-foreground/25 text-muted-foreground">
+                  需先完成步骤 2
+                </Badge>
+              ) : step3TabStatus === 'running' ? (
+                <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">
+                  <Loader2 className="mr-1 size-3 animate-spin" />
+                  运行中
+                </Badge>
+              ) : step3TabStatus === 'succeeded' ? (
+                <Badge variant="outline" className="border-green-500/30 bg-green-500/10 text-green-700">
+                  <CheckCircle2 className="mr-1 size-3" />
+                  最近一轮已成功
+                </Badge>
+              ) : step3TabStatus === 'stopped' ? (
+                <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-800">
+                  <AlertCircle className="mr-1 size-3" />
+                  最近一轮已结束（未成功）
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="border-border text-muted-foreground">
+                  待开始
+                </Badge>
+              )}
             </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="flex-1 space-y-1.5">
@@ -1539,14 +1737,65 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
           'border-l-[3px] border-l-indigo-500/70',
         )}
       >
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 pb-3">
-          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-500/10 text-xs font-bold text-indigo-700 dark:text-indigo-300">
-              4
-            </span>
-            实时反馈
+        <div className="mb-3 flex flex-col gap-2 pb-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <div className="flex shrink-0 items-center gap-2 text-sm font-semibold text-foreground">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indigo-500/10 text-xs font-bold text-indigo-700 dark:text-indigo-300">
+                4
+              </span>
+              实时反馈
+            </div>
+            <div
+              className="flex min-w-0 flex-wrap items-center gap-1.5 sm:border-l sm:border-border/50 sm:pl-3"
+              aria-label="本轮运行指标"
+            >
+              <span
+                className="inline-flex max-w-[8rem] items-baseline gap-1 rounded-md border border-indigo-500/15 bg-indigo-500/[0.06] px-1.5 py-0.5 tabular-nums ring-1 ring-inset ring-indigo-500/10"
+                title="进程 PID"
+              >
+                <span className="select-none font-sans text-[9px] font-semibold uppercase tracking-wide text-indigo-600/90 dark:text-indigo-300/90">
+                  PID
+                </span>
+                <span className="truncate font-mono text-[11px] font-medium text-foreground">
+                  {runtimeState.pid ?? '—'}
+                </span>
+              </span>
+              <span
+                className="inline-flex items-baseline gap-1 rounded-md border border-border/60 bg-muted/25 px-1.5 py-0.5 tabular-nums"
+                title="退出码"
+              >
+                <span className="select-none font-sans text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Exit
+                </span>
+                <span className="font-mono text-[11px] font-medium text-foreground">
+                  {runtimeState.exitCode ?? '—'}
+                </span>
+              </span>
+              <span
+                className="inline-flex items-baseline gap-1 rounded-md border border-border/60 bg-muted/25 px-1.5 py-0.5 tabular-nums"
+                title="本轮耗时"
+              >
+                <span className="select-none font-sans text-[9px] font-semibold tracking-wide text-muted-foreground">
+                  耗时
+                </span>
+                <span className="font-mono text-[11px] font-medium text-foreground">
+                  {runtimeState.durationMs != null ? formatDurationShort(runtimeState.durationMs) : '—'}
+                </span>
+              </span>
+              <span
+                className="inline-flex items-baseline gap-1 rounded-md border border-border/60 bg-muted/25 px-1.5 py-0.5 tabular-nums"
+                title="检测到的变更文件数"
+              >
+                <span className="select-none font-sans text-[9px] font-semibold tracking-wide text-muted-foreground">
+                  变更
+                </span>
+                <span className="font-mono text-[11px] font-medium text-foreground">
+                  {reviewSummary.files.length || runtimeState.changedFilesCount}
+                </span>
+              </span>
+            </div>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1 self-start sm:self-center">
             {!activeSession ? (
               <Button
                 type="button"
@@ -1580,28 +1829,6 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
             </AlertDescription>
           </Alert>
         )}
-        <div className="mb-4 grid grid-cols-2 gap-3 rounded-xl bg-background/60 px-3 py-3 text-xs ring-1 ring-border/20 sm:grid-cols-4">
-          <div className="min-w-0 rounded-lg bg-muted/40 px-2.5 py-2">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">PID</div>
-            <div className="mt-0.5 font-mono text-sm text-foreground">{runtimeState.pid ?? '—'}</div>
-          </div>
-          <div className="min-w-0 rounded-lg bg-muted/40 px-2.5 py-2">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Exit</div>
-            <div className="mt-0.5 font-mono text-sm text-foreground">{runtimeState.exitCode ?? '—'}</div>
-          </div>
-          <div className="min-w-0 rounded-lg bg-muted/40 px-2.5 py-2">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">耗时</div>
-            <div className="mt-0.5 font-mono text-sm text-foreground">
-              {runtimeState.durationMs != null ? `${runtimeState.durationMs}ms` : '—'}
-            </div>
-          </div>
-          <div className="min-w-0 rounded-lg bg-muted/40 px-2.5 py-2">
-            <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">变更文件</div>
-            <div className="mt-0.5 font-mono text-sm text-foreground">
-              {reviewSummary.files.length || runtimeState.changedFilesCount}
-            </div>
-          </div>
-        </div>
         {activeSession ? (
           <>
           <div className="mb-3 flex min-h-0 min-w-0 max-h-[min(92vh,800px)] flex-col overflow-x-hidden overflow-y-visible rounded-xl bg-card/80 text-sm ring-1 ring-border/25">
@@ -1823,7 +2050,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                         ))
                       ) : (
                         <div className="px-2.5 py-2.5 text-xs leading-relaxed text-muted-foreground">
-                          暂无匹配文件。请先完成「准备 Workspace」以加载仓库目录；已发布的 PRD/规格路径也会出现在此列表。
+                          {atPickerEmptyHint}
                         </div>
                       )}
                     </div>
@@ -1883,6 +2110,44 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                     disabled={!step1Done}
                     className="min-h-[72px] resize-none border-0 bg-transparent px-3 py-2.5 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                     onKeyDown={(e) => {
+                      if (
+                        (e.key === 'Backspace' || e.key === 'Delete') &&
+                        !e.ctrlKey &&
+                        !e.metaKey &&
+                        !(e as React.KeyboardEvent).nativeEvent?.isComposing
+                      ) {
+                        const ta = chatTextareaRef.current;
+                        if (ta) {
+                          const selStart = ta.selectionStart ?? 0;
+                          const selEnd = ta.selectionEnd ?? 0;
+                          if (selStart === selEnd) {
+                            let range: { start: number; end: number } | null = null;
+                            if (e.key === 'Backspace' && selStart > 0) {
+                              range = findComposerAtomicBackspaceRange(chatDraft, selStart - 1);
+                            } else if (e.key === 'Delete' && selStart < chatDraft.length) {
+                              range = findComposerAtomicForwardDeleteRange(chatDraft, selStart);
+                            }
+                            if (range && range.end > range.start) {
+                              e.preventDefault();
+                              const next = chatDraft.slice(0, range.start) + chatDraft.slice(range.end);
+                              const pos = range.start;
+                              setChatDraft(next);
+                              setSlashMenu(null);
+                              setAtMenu(null);
+                              requestAnimationFrame(() => {
+                                const el = chatTextareaRef.current;
+                                if (!el) return;
+                                el.focus();
+                                el.setSelectionRange(pos, pos);
+                                const { slash, at } = reconcileComposerMentions(next, pos);
+                                setSlashMenu(slash);
+                                setAtMenu(at);
+                              });
+                              return;
+                            }
+                          }
+                        }
+                      }
                       if (atMenu) {
                         if (e.key === 'Escape') {
                           e.preventDefault();
@@ -2144,7 +2409,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
           Agent 工作台
         </CardTitle>
         <CardDescription className="text-sm leading-relaxed max-w-none">
-          调用AI工具完成编码任务。
+          调用 AI 工具完成编码任务；完成后焦点会自动落在下一步。
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-2">{stepper}</CardContent>

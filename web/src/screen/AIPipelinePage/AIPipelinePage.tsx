@@ -21,10 +21,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Cpu,
-  Pause,
   RotateCcw,
   XCircle,
-  AlertCircle,
   Terminal,
   BarChart3,
   Activity,
@@ -35,7 +33,6 @@ import {
   Loader2,
   Plus,
   GitCommitHorizontal,
-  Download,
   ArrowLeft,
   History,
 } from 'lucide-react';
@@ -66,7 +63,9 @@ import type {
   IGitCommitRecord,
   IPipelineCodeReviewRecord,
   IPipelineTask,
+  PipelineTaskStatus,
 } from '@/lib/rd-types';
+import { cn } from '@/lib/utils';
 import { deriveQualityMetricsFromReview } from '@/lib/pipeline-code-review-metrics';
 import {
   extractPipelineErrorMessage,
@@ -105,6 +104,24 @@ interface ICreatePipelineForm {
   requirementId: string;
 }
 
+const PIPELINE_CARD_ACCENT: Record<PipelineTaskStatus, string> = {
+  code_generating: 'bg-purple-600',
+  self_testing: 'bg-blue-500',
+  building: 'bg-indigo-500',
+  deploying: 'bg-orange-500',
+  completed: 'bg-green-600',
+  failed: 'bg-red-600',
+};
+
+const PIPELINE_STATUS_BADGE_SOFT: Record<PipelineTaskStatus, string> = {
+  code_generating: 'border-purple-500/30 bg-purple-500/10 text-purple-900 dark:text-purple-100',
+  self_testing: 'border-blue-500/30 bg-blue-500/10 text-blue-900 dark:text-blue-100',
+  building: 'border-indigo-500/30 bg-indigo-500/10 text-indigo-900 dark:text-indigo-100',
+  deploying: 'border-orange-500/35 bg-orange-500/10 text-orange-950 dark:text-orange-100',
+  completed: 'border-green-500/30 bg-green-500/10 text-green-900 dark:text-green-100',
+  failed: 'border-red-500/30 bg-red-500/10 text-red-900 dark:text-red-100',
+};
+
 function authJsonHeaders(): HeadersInit {
   const token = typeof window !== 'undefined' ? getAuthToken() : null;
   return {
@@ -134,6 +151,17 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
   const { data: prds = [] } = usePrdsList();
   const { data: specs = [] } = useSpecsList();
   const { data: tasks = [], isLoading: tasksLoading } = usePipelineTasksList();
+  const pipelineBoardStats = useMemo(() => {
+    let running = 0;
+    let completed = 0;
+    let failed = 0;
+    for (const t of tasks) {
+      if (t.status === 'completed') completed += 1;
+      else if (t.status === 'failed') failed += 1;
+      else running += 1;
+    }
+    return { running, completed, failed };
+  }, [tasks]);
   const upsertPipelineTask = useUpsertPipelineTask();
   const deletePipelineTask = useDeletePipelineTask();
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
@@ -738,9 +766,20 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
     const config = pipelineStatusConfig[status];
     if (!config) return null;
     const Icon = config.icon;
+    const st = status as PipelineTaskStatus;
+    const soft = PIPELINE_STATUS_BADGE_SOFT[st];
+    if (!soft) {
+      return (
+        <Badge variant="outline" className="gap-1.5 border-border font-medium">
+          <Icon className="size-3 shrink-0 opacity-80" />
+          {config.label}
+        </Badge>
+      );
+    }
     return (
-      <Badge className={`${config.color} text-white gap-1`}>
-        <Icon className="size-3" />
+      <Badge variant="outline" className={cn('gap-1.5 border font-medium', soft)}>
+        <span className={cn('size-1.5 shrink-0 rounded-full', config.color)} aria-hidden />
+        <Icon className="size-3 shrink-0 opacity-90" aria-hidden />
         {config.label}
       </Badge>
     );
@@ -786,7 +825,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                     ? tasksLoading
                       ? '加载交付任务…'
                       : selectedTask?.requirementTitle || '交付引擎详情'
-                    : '实时监控AI代码生成、测试与部署全流程'
+                    : '实时监控 AI 代码生成、测试与部署全流程'
                 }
                 descriptionLines={isDetail ? 'multi' : 'single'}
                 leading={
@@ -821,15 +860,15 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
               <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
                 <div className="flex items-center gap-1">
                   <div className="h-2 w-2 animate-pulse-dot rounded-full bg-purple-500" />
-                  <span>运行中: {tasks.filter((t) => t.status !== 'completed' && t.status !== 'failed').length}</span>
+                  <span>运行中: {pipelineBoardStats.running}</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <div className="h-2 w-2 rounded-full bg-green-500" />
-                  <span>已完成: {tasks.filter((t) => t.status === 'completed').length}</span>
+                  <span>已完成: {pipelineBoardStats.completed}</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <div className="h-2 w-2 rounded-full bg-red-500" />
-                  <span>失败: {tasks.filter((t) => t.status === 'failed').length}</span>
+                  <span>失败: {pipelineBoardStats.failed}</span>
                 </div>
               </div>
             </div>
@@ -839,14 +878,14 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
         {/* 流水线看板（仅列表页） */}
         {isList ? (
         <section className="w-full">
-          <Card>
+          <Card className="overflow-hidden border-border shadow-sm ring-1 ring-black/[0.03]">
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">
                 <Activity className="size-4 text-primary" />
                 交付引擎看板
               </CardTitle>
               <CardDescription className="text-xs text-muted-foreground">
-                点击卡片进入详情；快捷操作请使用卡片上的按钮或菜单。
+                点击卡片进入详情；快捷操作请使用卡片上的按钮或「···」菜单。
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -855,39 +894,65 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                   <Loader2 className="size-8 animate-spin text-muted-foreground" />
                 </div>
               ) : tasks.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-12 text-center">
-                  暂无流水线任务。创建流水线后，任务将保存到数据库并在此展示。
-                </p>
+                <div className="rounded-lg border border-dashed border-border/80 bg-muted/20 px-6 py-16 text-center">
+                  <Cpu className="mx-auto mb-3 size-10 text-muted-foreground/60" aria-hidden />
+                  <p className="text-sm font-medium text-foreground">暂无流水线任务</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    创建流水线后，任务将保存到数据库并在此展示。
+                  </p>
+                </div>
               ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {tasks.map(task => {
+                  const accent = PIPELINE_CARD_ACCENT[task.status] ?? 'bg-slate-400';
                   return (
-                    <Card 
+                    <Card
                       key={task.id}
-                      className="cursor-pointer transition-all duration-200 hover:shadow-md hover:-translate-y-0.5"
+                      role="link"
+                      tabIndex={0}
+                      aria-label={`${task.requirementTitle}，${task.stage}，进度 ${task.progress}%`}
+                      className={cn(
+                        'group relative cursor-pointer overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-all duration-200',
+                        'hover:-translate-y-0.5 hover:shadow-md',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                      )}
                       onClick={() => router.push(`/ai-pipeline/${encodeURIComponent(task.id)}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          router.push(`/ai-pipeline/${encodeURIComponent(task.id)}`);
+                        }
+                      }}
                     >
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between mb-2">
+                      <span
+                        className={cn('absolute left-0 top-0 z-[1] h-full w-1 rounded-r', accent)}
+                        aria-hidden
+                      />
+                      <CardContent className="relative p-4 pl-5">
+                        <div className="mb-2 flex items-start justify-between gap-2">
                           {getStatusBadge(task.status)}
-                          {task.status === 'code_generating' && (
-                            <Loader2 className="size-4 animate-spin text-purple-500" />
-                          )}
+                          {task.status === 'code_generating' ? (
+                            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-purple-500/10 ring-1 ring-purple-500/20">
+                              <Loader2 className="size-4 animate-spin text-purple-600" aria-hidden />
+                            </span>
+                          ) : null}
                         </div>
-                        <h3 className="font-medium text-sm line-clamp-1 mb-1" title={task.requirementTitle}>
+                        <h3 className="mb-1 line-clamp-1 text-sm font-medium text-foreground" title={task.requirementTitle}>
                           {task.requirementTitle}
                         </h3>
-                        <p className="text-xs text-muted-foreground mb-3">
-                          {task.stage}
-                        </p>
+                        <p className="mb-3 text-xs text-muted-foreground">{task.stage}</p>
                         <div className="space-y-2">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">进度</span>
-                            <span className="font-medium">{task.progress}%</span>
+                          <div className="flex items-baseline justify-between gap-2 text-xs">
+                            <span className="font-medium uppercase tracking-wide text-muted-foreground">
+                              进度
+                            </span>
+                            <span className="font-mono tabular-nums text-sm font-semibold text-foreground">
+                              {task.progress}%
+                            </span>
                           </div>
-                          <Progress value={task.progress} className="h-1.5" />
+                          <Progress value={task.progress} className="h-1.5 bg-muted" />
                         </div>
-                        <div className="flex items-center justify-between mt-3 pt-3 border-t">
+                        <div className="mt-3 flex items-center justify-between border-t pt-3">
                           <div className="flex items-center gap-1">
                             <Button
                               size="sm"
@@ -910,7 +975,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                                 handleDownloadDocs(task);
                               }}
                             >
-                              下载
+                              下载（本地开发）
                             </Button>
                           </div>
                           <ListRowActionsMenu
@@ -974,7 +1039,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
               <TabsList className="grid w-full max-w-full grid-cols-6">
                 <TabsTrigger value="overview">概览</TabsTrigger>
                 <TabsTrigger value="agent">Agent工作台</TabsTrigger>
-                <TabsTrigger value="code">代码</TabsTrigger>
+                <TabsTrigger value="code">项目代码</TabsTrigger>
                 <TabsTrigger value="logs">实时日志</TabsTrigger>
                 <TabsTrigger value="tests">测试报告</TabsTrigger>
                 <TabsTrigger value="commits">commit记录</TabsTrigger>
