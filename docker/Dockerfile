@@ -5,6 +5,11 @@ FROM 10.6.37.167:30005/library/node@sha256:894c91653e564b9ba29400e6e1675bbcbc667
 FROM 10.6.37.167:30005/library/nginx:1.27-bookworm AS runtime
 WORKDIR /app
 
+# 运行时依赖：git（避免进容器后手动 apt-get）
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # 构建参数（合并为一行）
 ARG NEXT_PUBLIC_FEISHU_APP_ID
 ARG FEISHU_APP_ID
