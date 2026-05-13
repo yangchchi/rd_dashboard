@@ -2,7 +2,7 @@
 FROM 10.6.37.167:30005/library/node@sha256:894c91653e564b9ba29400e6e1675bbcbc667158c1706c655dd4ccf84d0f54e8 AS node_runtime
 
 # 主运行阶段
-FROM 10.6.37.167:30005/library/nginx:1.27-bookworm AS runtime
+FROM 10.6.37.167:30005/library/nginx:1.27-bookworm-git AS runtime
 WORKDIR /app
 
 # 构建参数（合并为一行）
