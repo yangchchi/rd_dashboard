@@ -160,7 +160,6 @@ const PluginConfigPage: React.FC = () => {
             icon={Puzzle}
             title="插件配置"
             description="配置调用大模型与提示词，支撑 PRD 生成、规格草稿、需求分类、验收分析等研发任务；不包含组织级代码规范（请使用「编码规范」菜单）。"
-            descriptionLines="multi"
           />
         </div>
       </section>

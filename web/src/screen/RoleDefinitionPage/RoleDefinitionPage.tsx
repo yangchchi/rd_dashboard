@@ -155,7 +155,6 @@ const RoleDefinitionPage: React.FC = () => {
             icon={UserCog}
             title="角色定义"
             description="创建业务角色并勾选可访问的页面与按钮级权限；用户在「用户管理」中绑定角色后生效（内置 admin 账号拥有全部权限）"
-            descriptionLines="multi"
           />
         </div>
         <div className="flex flex-wrap gap-2">

@@ -7,7 +7,7 @@ import { AppProviders } from './providers';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AI 智研平台',
+  title: 'HAI 智研平台',
   description: 'AI驱动型研发管理平台',
 };
 

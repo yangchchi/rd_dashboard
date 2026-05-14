@@ -539,7 +539,13 @@
 }
 
 .rd-page-desc {
-  @apply min-w-0 text-sm leading-relaxed text-muted-foreground truncate;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  @apply text-sm leading-relaxed text-muted-foreground;
 }
 
 /** 页眉左侧「标题 + 副标题」列：与同排操作区并存时允许副标题单行省略；浅色点阵与赏金猎场页头一致 */

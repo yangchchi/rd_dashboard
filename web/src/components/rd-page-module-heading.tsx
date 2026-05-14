@@ -4,7 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 /**
- * 与「赏金猎场」页头一致：主色线性图标与标题同一行（`flex items-center gap-2`），副标题在标题下方左对齐。
+ * 与「赏金猎场」页头一致：主色线性图标与标题同一行（`flex items-center gap-2`），副标题在标题下方左对齐；副说明统一单行省略，与各模块一致。
  */
 export type RdPageModuleHeadingProps = {
   icon: LucideIcon;
@@ -14,8 +14,6 @@ export type RdPageModuleHeadingProps = {
   leading?: ReactNode;
   /** 紧跟副标题后的补充行（小号字），仍在标题列内对齐 */
   footer?: ReactNode;
-  /** single：单行省略（默认）；multi：长说明多行展示 */
-  descriptionLines?: 'single' | 'multi';
 };
 
 export function RdPageModuleHeading({
@@ -24,7 +22,6 @@ export function RdPageModuleHeading({
   description,
   leading,
   footer,
-  descriptionLines = 'single',
 }: RdPageModuleHeadingProps) {
   const body = (
     <div className="min-w-0 flex-1">
@@ -33,11 +30,8 @@ export function RdPageModuleHeading({
         <span className="min-w-0">{title}</span>
       </h1>
       <p
-        className={
-          descriptionLines === 'multi'
-            ? 'mt-1 min-w-0 max-w-[min(100%,42rem)] text-pretty text-sm leading-relaxed text-muted-foreground'
-            : 'rd-page-desc mt-1'
-        }
+        className="rd-page-desc mt-1"
+        {...(typeof description === 'string' ? { title: description } : {})}
       >
         {description}
       </p>

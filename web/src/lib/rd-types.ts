@@ -301,6 +301,27 @@ export interface IPipelineTestReport {
   details: IPipelineTestCase[];
 }
 
+/** 由 FS / TS / 生成代码推导的自动化测试用例（持久化在流水线任务上） */
+export interface IPipelineGeneratedTestCase {
+  id: string;
+  title: string;
+  basis: Array<'fs' | 'ts' | 'code'>;
+  /** 与规约或代码的对应说明 */
+  trace: string;
+  steps: string;
+  expected: string;
+  relatedApiPath?: string;
+}
+
+/** 单次自动化测试执行快照（与代码审查历史类似，可回看） */
+export interface IPipelineTestRunRecord {
+  id: string;
+  createdAt: string;
+  testReport: IPipelineTestReport;
+  caseIds: string[];
+  note?: string;
+}
+
 export interface IPipelineQualityMetrics {
   specConsistency: number;
   apiCoverage: number;
@@ -370,6 +391,10 @@ export interface IPipelineTask {
   logs: IPipelineLogEntry[];
   testReport?: IPipelineTestReport;
   qualityMetrics?: IPipelineQualityMetrics;
+  /** AI 根据 FS/TS/代码生成的测试用例清单 */
+  generatedTestCases?: IPipelineGeneratedTestCase[];
+  /** 每次「执行自动化测试」的报告快照历史 */
+  testRunHistory?: IPipelineTestRunRecord[];
   /** 按时间顺序的审查历史，服务端持久化 */
   codeReviewHistory?: IPipelineCodeReviewRecord[];
   pipelineMeta: IPipelineMeta;

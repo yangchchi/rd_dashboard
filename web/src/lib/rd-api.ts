@@ -12,6 +12,7 @@ import type {
   IOrganizationSpecConfig,
   IPipelineCommitStore,
   IPipelineCodeReviewRecord,
+  IPipelineGeneratedTestCase,
   IPipelineLogEntry,
   IPipelineMeta,
   IPipelineQualityMetrics,
@@ -19,6 +20,7 @@ import type {
   IPipelineStepRun,
   IPipelineTask,
   IPipelineTestReport,
+  IPipelineTestRunRecord,
   IPrd,
   IProduct,
   IRequirement,
@@ -986,6 +988,12 @@ function mapPipelineTask(row: Record<string, unknown>): IPipelineTask {
   const codeReviewHistoryRaw =
     (row.codeReviewHistory as IPipelineCodeReviewRecord[] | undefined) ||
     (row.code_review_history as IPipelineCodeReviewRecord[] | undefined);
+  const generatedTestCasesRaw =
+    (row.generatedTestCases as IPipelineGeneratedTestCase[] | undefined) ||
+    (row.generated_test_cases as IPipelineGeneratedTestCase[] | undefined);
+  const testRunHistoryRaw =
+    (row.testRunHistory as IPipelineTestRunRecord[] | undefined) ||
+    (row.test_run_history as IPipelineTestRunRecord[] | undefined);
   const pipelineMeta =
     (row.pipelineMeta as IPipelineMeta) || (row.pipeline_meta as IPipelineMeta) || {};
   const commitStore =
@@ -1004,6 +1012,8 @@ function mapPipelineTask(row: Record<string, unknown>): IPipelineTask {
     testReport,
     qualityMetrics,
     codeReviewHistory: Array.isArray(codeReviewHistoryRaw) ? codeReviewHistoryRaw : undefined,
+    generatedTestCases: Array.isArray(generatedTestCasesRaw) ? generatedTestCasesRaw : undefined,
+    testRunHistory: Array.isArray(testRunHistoryRaw) ? testRunHistoryRaw : undefined,
     pipelineMeta,
     commitStore,
     createdAt: (row.createdAt as string) || (row.created_at as string),

@@ -85,7 +85,6 @@ const OrgSpecConfigPage: React.FC = () => {
             icon={Layers}
             title="编码规范"
             description="对齐 OpenSpec SDD。每条规则独立、可检查：先规格/场景/任务，再实现与验证。供 AI 与 CI 引用；与「插件配置」中的模型任务相互独立。"
-            descriptionLines="multi"
           />
         </div>
         <div className="flex items-center gap-2">

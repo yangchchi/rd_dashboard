@@ -217,7 +217,6 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
                 icon={Settings2}
                 title="技术基准"
                 description="构建流程：组织编码约束 → 功能规格 FS（参考 PRD）→ 技术规格 TS（参考 FS + 约束）→ 编程计划 CP（参考 FS + TS），并导出 Machine-Readable JSON"
-                descriptionLines="multi"
               />
             </div>
             <Button onClick={handleCreateSpec} className="shrink-0 shadow-sm sm:mt-0">

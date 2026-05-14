@@ -1,5 +1,5 @@
 'use client';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Streamdown } from '@/components/ui/streamdown';
@@ -182,6 +182,18 @@ const PRDPage: React.FC = () => {
         !linkedRequirementIds.has(req.id)
     );
   }, [prds, requirements]);
+
+  /** 弹窗打开时默认选中列表第一项；异步加载后或当前项不再可用时同步 */
+  useEffect(() => {
+    if (!showGenerateDialog) return;
+    const firstId = availableRequirements[0]?.id ?? '';
+    if (!firstId) {
+      if (selectedRequirement !== '') setSelectedRequirement('');
+      return;
+    }
+    const stillValid = availableRequirements.some((r) => r.id === selectedRequirement);
+    if (!stillValid) setSelectedRequirement(firstId);
+  }, [showGenerateDialog, availableRequirements, selectedRequirement]);
 
   const handleGeneratePRD = async () => {
     if (!selectedRequirement) {

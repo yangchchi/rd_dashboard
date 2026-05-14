@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardList,
+  Cpu,
   File,
   FileText,
   FoldVertical,
@@ -18,6 +19,7 @@ import {
   MessageSquarePlus,
   ScrollText,
   ShieldCheck,
+  Package,
   Sparkles,
   Square,
   Terminal,
@@ -47,6 +49,7 @@ import {
 import { Streamdown } from '@/components/ui/streamdown';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   useAgentSessionsList,
@@ -145,6 +148,10 @@ interface IAgentChatMessage {
   /** Codex 本轮结束时的耗时（ms），用于气泡顶栏展示 */
   durationMs?: number | null;
   exitCode?: number | null;
+  /** 从发起到首字节输出的间隔（ms），妙搭式「思考了 N 秒」 */
+  thinkingMs?: number | null;
+  /** 本轮结束时检测到的变更文件数（若有） */
+  changedFilesCount?: number | null;
 }
 
 function newChatMessageId(): string {
@@ -197,6 +204,59 @@ function formatDurationShort(ms: number): string {
   const m = Math.floor(s / 60);
   const rs = s % 60;
   return rs ? `${m}m ${rs}s` : `${m}m`;
+}
+
+/** 妙搭式「思考了 N 秒」读秒（不足 1 秒按 1 秒展示，与常见产品一致） */
+function formatThinkingSecondsLabel(ms: number | null | undefined): string {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return '—';
+  const sec = Math.max(1, Math.round(ms / 1000));
+  return `${sec} 秒`;
+}
+
+function formatCodexCompletedAtSubtitle(iso: string, exitCode: number | null | undefined): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.floor((startOfDay(new Date()) - startOfDay(d)) / 86400000);
+  const hm = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  let dayPart = '';
+  if (days === 0) dayPart = '今天';
+  else if (days === 1) dayPart = '昨天';
+  else dayPart = `${d.getMonth() + 1}月${d.getDate()}日`;
+  const tail =
+    exitCode === 0 ? '本轮已完成' : exitCode != null ? `exit ${exitCode}` : '已结束';
+  return `${dayPart} ${hm} · ${tail}`;
+}
+
+/** 从 Codex 正文中取卡片标题（首条非空行，去 exit 页脚，限长） */
+function deriveCodexSummaryCardTitle(full: string): string {
+  const body = stripPersistedCodexExitFooter(full).trim();
+  const first =
+    body
+      .split(/\n/)
+      .map((l) => l.trim())
+      .find((l) => l.length > 0) ?? body;
+  const t = first.replace(/\s+/g, ' ').trim();
+  if (!t) return '本轮输出';
+  if (t.length <= 72) return t;
+  return `${t.slice(0, 71)}…`;
+}
+
+/** 若首行与卡片标题一致则去掉，避免正文重复首句 */
+function stripLeadingLineIfMatchesTitle(full: string, title: string): string {
+  const raw = stripPersistedCodexExitFooter(full).trimStart();
+  const lines = raw.split(/\n/);
+  const idx = lines.findIndex((l) => l.trim().length > 0);
+  if (idx < 0) return raw;
+  const first = lines[idx]!.trim().replace(/\s+/g, ' ');
+  const t = title.replace(/\s+/g, ' ').trim();
+  if (first === t || first.startsWith(t) || t.startsWith(first.slice(0, Math.min(48, first.length)))) {
+    return lines
+      .slice(idx + 1)
+      .join('\n')
+      .trimStart();
+  }
+  return raw;
 }
 
 /** 对话输入框内 `/` 技能菜单：单行摘要 */
@@ -308,6 +368,221 @@ function findAtPathAtomRange(d: string, indexInPath: number): { start: number; e
   }
   if (indexInPath >= j && indexInPath < end) return { start: j, end };
   return null;
+}
+
+/** 用户正文是否包含至少一处「工作台语义」的 @仓库路径（有路径字符）；仅有孤立 @ 不算 */
+function draftContainsAtPathReference(draft: string): boolean {
+  const d = draft.replace(/＠/g, '@');
+  for (let i = 0; i < d.length; i++) {
+    if (!charIsAtMark(d, i) || !isValidAtTriggerPrefix(d, i)) continue;
+    const r = findAtPathAtomRange(d, i);
+    if (r && r.end > r.start + 1) return true;
+  }
+  return false;
+}
+
+/** 对话气泡：去掉 ANSI；去掉 Codex CLI 常见启动横幅；简短问答轮可再去掉与系统注入提示重复的前缀行（底部 exit 页脚保留） */
+function stripAnsiFromText(text: string): string {
+  return text
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b\][0-9;]*\x07/g, '')
+    .replace(/\x1b\][\s\S]*?\x1b\\/g, '');
+}
+
+function splitAssistantBubbleBodyAndExitFooter(body: string): { main: string; footer: string } {
+  const marker = '\n\n---\nexit=';
+  const idx = body.lastIndexOf(marker);
+  if (idx === -1) return { main: body, footer: '' };
+  return { main: body.slice(0, idx), footer: body.slice(idx) };
+}
+
+function stripLeadingCodexCliChromeLinesFromText(text: string): string {
+  const lines = text.split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const t = lines[i]!.trim();
+    if (t === '') {
+      i++;
+      continue;
+    }
+    if (t.startsWith('Reading additional input')) {
+      i++;
+      continue;
+    }
+    if (/^openai codex v[\d.]+/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^working directory:/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^workdir:/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^cwd:/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^model:/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^provider:/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^approval:/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^sandbox:/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^reasoning\b/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^session\b/i.test(t) && /id/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^api\b/i.test(t) && /(key|base)/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^using\b/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^\/tmp\/rd-agent/i.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^(?:[─━═=._]){4,}\s*$/.test(t)) {
+      i++;
+      continue;
+    }
+    break;
+  }
+  return lines.slice(i).join('\n').replace(/^\n+/, '');
+}
+
+function stripLeadingChatOnlyPromptEchoLines(text: string): string {
+  const lines = text.split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const t = lines[i]!.trim();
+    if (t === '') {
+      i++;
+      continue;
+    }
+    if (/^【/.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^用户：/.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^user\s/i.test(t) && (/简短问答|非编码/.test(t) || /【本轮/.test(t))) {
+      i++;
+      continue;
+    }
+    if (/^请用/.test(t) && /(简短|简要)?中文/.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^不要/.test(t) && /(复述|粘贴|Plan|系统|上文)/.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^禁止/.test(t)) {
+      i++;
+      continue;
+    }
+    if (/^---+\s*$/.test(t)) {
+      i++;
+      continue;
+    }
+    break;
+  }
+  return lines.slice(i).join('\n').replace(/^\n+/, '');
+}
+
+/** 末尾是否存在「连续两段完全相同的正文块」（Codex CLI 偶发整段复读） */
+function longestSuffixDuplicateBlockLen(t: string, minLen: number): number {
+  const n = t.length;
+  let lo = minLen;
+  let hi = Math.floor(n / 2);
+  let best = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const a = t.slice(n - mid, n);
+    const b = t.slice(n - 2 * mid, n - mid);
+    if (a === b) {
+      best = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best;
+}
+
+function stripTrailingConsecutiveDuplicateRun(text: string, minLen = 280): string {
+  let t = text.replace(/\r\n/g, '\n').trimEnd();
+  for (let g = 0; g < 8; g++) {
+    if (t.length < minLen * 2) break;
+    const L = longestSuffixDuplicateBlockLen(t, minLen);
+    if (!L) break;
+    t = t.slice(0, -L).trimEnd();
+  }
+  return t;
+}
+
+/**
+ * Codex 常在正文后输出 `tokens used …`，再把同一篇回答贴一遍；保留 tokens 行、去掉其后重复块。
+ */
+function dedupeRepeatedAnswerAfterTokensUsedLine(text: string): string {
+  const t = text.replace(/\r\n/g, '\n');
+  const re = /\n+(?:tokens used|token usage)\b[^\n]*/i;
+  const m = re.exec(t);
+  if (!m || m.index === undefined) return text;
+  const head = t.slice(0, m.index).trimEnd();
+  const rest = t.slice(m.index + m[0].length).replace(/^\n+/, '').trimEnd();
+  if (rest.length < 160) return text;
+  if (head.endsWith(rest)) {
+    return `${head}\n\n${m[0].trim()}`;
+  }
+  const hn = head.replace(/\s+/g, ' ').trim();
+  const rn = rest.replace(/\s+/g, ' ').trim();
+  if (rn.length >= 160 && hn.endsWith(rn)) {
+    return `${head}\n\n${m[0].trim()}`;
+  }
+  return text;
+}
+
+function polishCodexAssistantBubbleDisplay(
+  body: string,
+  opts: { chatOnlyStripEcho: boolean },
+): string {
+  if (/(?:^|\n)【(?:错误|异常|已取消)】/.test(body)) {
+    return stripLeadingCodexCliChromeLinesFromText(stripAnsiFromText(body)).trimEnd();
+  }
+  const { main, footer } = splitAssistantBubbleBodyAndExitFooter(body);
+  let m = stripLeadingCodexCliChromeLinesFromText(stripAnsiFromText(main));
+  if (opts.chatOnlyStripEcho) {
+    m = stripLeadingChatOnlyPromptEchoLines(m);
+  }
+  m = m.trimEnd();
+  m = stripTrailingConsecutiveDuplicateRun(m);
+  m = dedupeRepeatedAnswerAfterTokensUsedLine(m);
+  m = m.trimEnd();
+  const out = (m ? m : main.trimEnd()) + footer;
+  return out.trimEnd();
 }
 
 function charIsSlashMark(d: string, i: number): boolean {
@@ -475,7 +750,7 @@ function extractCompletedPriorTurns(messages: IAgentChatMessage[]): { user: stri
   return prior;
 }
 
-/** 每条用户消息单独一轮 Codex：Plan + 历史节选 + 本轮指令（或由步骤 3 触发的无新指令延续） */
+/** 每条用户消息单独一轮 Codex：无 @ 路径时不内嵌整份 Plan，避免每轮通读 plan.md；有 @、「开始编码」延续轮、或 Plan/验收内置快捷时再带全量 Plan */
 function buildSingleTurnCodexPrompt(
   planMarkdown: string,
   instructionThisTurn: string | null,
@@ -493,7 +768,23 @@ function buildSingleTurnCodexPrompt(
   }
 
   const plan = planMarkdown.trim() || fallbackInstruction.trim();
-  let body = plan;
+  const hasNewUserInstruction = Boolean(instructionThisTurn?.trim());
+  const shortcutNeedsFullPlan =
+    Boolean(instructionThisTurn?.trim()) &&
+    /【快捷：(Plan 对齐|验收对齐)】/.test(instructionThisTurn!);
+  const embedFullPlan =
+    !hasNewUserInstruction ||
+    shortcutNeedsFullPlan ||
+    draftContainsAtPathReference(instructionThisTurn ?? '');
+
+  const planPreambleWithoutBody = [
+    '【本轮：未在提示词中内嵌完整 Plan】',
+    '工作区已挂载 ContextPack（如 docs/ 下的 plan.md、PRD/规格等）。',
+    '若用户在本轮消息中用 @ 引用了具体仓库相对路径，请读取并对照该文件执行。',
+    '若本轮用户正文中没有任何 @路径，请勿主动打开 plan.md、勿为「对齐 Context」而整目录扫描文档；仅依据下方「此前对话节选」「本轮指令」与当前代码树完成诉求。',
+  ].join('\n');
+
+  let body = embedFullPlan ? plan : planPreambleWithoutBody;
   if (priorTurns.length > 0) {
     body += '\n\n---\n【此前对话（节选；每轮 Codex 独立执行）】\n';
     priorTurns.forEach((t, idx) => {
@@ -525,6 +816,10 @@ function pickReusablePendingCodex(
 
 /** Agent 工作台对话持久化字段（写入 rd_agent_sessions.metadata） */
 const WORKBENCH_CHAT_META_KEY = 'workbenchChatMessages';
+/** 输入区模式：Ask = 仅写入对话（Cursor Ask）；Agent = Enter/发送 执行 Codex（Cursor Agent） */
+const WORKBENCH_COMPOSER_MODE_KEY = 'workbenchComposerMode';
+
+type IWorkbenchComposerMode = 'ask' | 'agent';
 
 function serializeWorkbenchChat(messages: IAgentChatMessage[]): Record<string, unknown>[] {
   return messages.map((m) => ({
@@ -536,6 +831,8 @@ function serializeWorkbenchChat(messages: IAgentChatMessage[]): Record<string, u
     streaming: false,
     durationMs: m.durationMs ?? undefined,
     exitCode: m.exitCode ?? undefined,
+    thinkingMs: m.thinkingMs ?? undefined,
+    changedFilesCount: m.changedFilesCount ?? undefined,
   }));
 }
 
@@ -555,9 +852,142 @@ function parsePersistedWorkbenchChat(meta: unknown): IAgentChatMessage[] | null 
       typeof r.durationMs === 'number' && Number.isFinite(r.durationMs) ? r.durationMs : undefined;
     const exitCode =
       typeof r.exitCode === 'number' && Number.isFinite(r.exitCode) ? r.exitCode : undefined;
-    out.push({ id, role, content, createdAt, variant, streaming: false, durationMs, exitCode });
+    const thinkingMs =
+      typeof r.thinkingMs === 'number' && Number.isFinite(r.thinkingMs) ? r.thinkingMs : undefined;
+    const changedFilesCount =
+      typeof r.changedFilesCount === 'number' && Number.isFinite(r.changedFilesCount)
+        ? r.changedFilesCount
+        : undefined;
+    out.push({
+      id,
+      role,
+      content,
+      createdAt,
+      variant,
+      streaming: false,
+      durationMs,
+      exitCode,
+      thinkingMs,
+      changedFilesCount,
+    });
   }
   return out.length ? out : null;
+}
+
+function collapseHistoryPreviewLine(s: string, maxLen: number): string {
+  const normalized = s.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxLen) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLen - 1))}…`;
+}
+
+/** 从已持久化对话取最近一条用户发言的首行要点，供会话列表展示（参考 Cursor / 妙搭：突出对话关键信息） */
+function deriveWorkbenchSessionHistoryPreview(session: IAgentSession): string | null {
+  const raw = session.metadata?.[WORKBENCH_CHAT_META_KEY];
+  const list = parsePersistedWorkbenchChat(raw);
+  if (list?.length) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m = list[i]!;
+      if (m.role !== 'user') continue;
+      const firstMeaningful =
+        m.content
+          .split(/\n/)
+          .map((l) => l.trim())
+          .find((l) => l.length > 0) ?? m.content.trim();
+      const t = collapseHistoryPreviewLine(firstMeaningful, 96);
+      if (t) return t;
+    }
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m = list[i]!;
+      if (m.role !== 'assistant' || m.variant === 'plan') continue;
+      const body = stripPersistedCodexExitFooter(m.content);
+      const firstMeaningful =
+        body
+          .split(/\n/)
+          .map((l) => l.trim())
+          .find((l) => l.length > 0) ?? body.trim();
+      const t = collapseHistoryPreviewLine(firstMeaningful, 96);
+      if (t && t.length >= 12) return t;
+    }
+  }
+  const ins = session.metadata?.instruction;
+  if (typeof ins === 'string' && ins.trim()) {
+    const line =
+      ins
+        .split(/\n/)
+        .map((l) => l.trim())
+        .find((l) => l.length > 0) ?? ins.trim();
+    return collapseHistoryPreviewLine(line, 96) || null;
+  }
+  const plan = session.planMarkdown?.trim();
+  if (plan) {
+    const line =
+      plan
+        .split(/\n/)
+        .map((l) => l.trim())
+        .find((l) => l.length > 0) ?? plan;
+    return collapseHistoryPreviewLine(line, 96) || null;
+  }
+  return null;
+}
+
+function formatSessionHistoryMetaRow(session: IAgentSession): string {
+  const when =
+    session.updatedAt?.slice(0, 16)?.replace('T', ' ') ??
+    session.createdAt?.slice(0, 16)?.replace('T', ' ') ??
+    '';
+  const bind = session.pipelineRunId ? '绑定流水线' : '独立会话';
+  return `${(session.title || session.id).trim()} · ${bind} · ${when}`;
+}
+
+/** 去掉气泡持久化里可能带的 exit 页脚，避免进入历史摘要 */
+function stripPersistedCodexExitFooter(text: string): string {
+  const idx = text.lastIndexOf('\n\n---\nexit=');
+  return idx === -1 ? text : text.slice(0, idx).trimEnd();
+}
+
+type AgentSessionHistoryBucket = 'today' | 'yesterday' | 'week' | 'older';
+
+const AGENT_SESSION_HISTORY_BUCKET_LABEL: Record<AgentSessionHistoryBucket, string> = {
+  today: '今天',
+  yesterday: '昨天',
+  week: '近 7 天',
+  older: '更早',
+};
+
+function agentSessionHistoryTimeKey(s: IAgentSession): string {
+  return s.updatedAt || s.createdAt;
+}
+
+function agentSessionHistoryCalendarBucket(iso: string): AgentSessionHistoryBucket {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return 'older';
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.floor((startOfDay(new Date()) - startOfDay(new Date(t))) / 86400000);
+  if (days === 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days >= 2 && days <= 7) return 'week';
+  return 'older';
+}
+
+function groupAgentSessionsForHistoryList(rows: IAgentSession[]): {
+  bucket: AgentSessionHistoryBucket;
+  sessions: IAgentSession[];
+}[] {
+  const sorted = [...rows].sort((a, b) =>
+    String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)),
+  );
+  const out: { bucket: AgentSessionHistoryBucket; sessions: IAgentSession[] }[] = [];
+  for (const s of sorted) {
+    const b = agentSessionHistoryCalendarBucket(agentSessionHistoryTimeKey(s));
+    const prev = out[out.length - 1];
+    if (!prev || prev.bucket !== b) {
+      out.push({ bucket: b, sessions: [s] });
+    } else {
+      prev.sessions.push(s);
+    }
+  }
+  return out;
 }
 
 function hydrateChatMessagesForSession(session: IAgentSession): IAgentChatMessage[] {
@@ -602,12 +1032,6 @@ function workbenchSetupTabForProgress(step1Done: boolean, step2Done: boolean): '
   return 'tool';
 }
 
-function formatAgentSessionPickLabel(session: IAgentSession): string {
-  const t = session.createdAt?.slice(0, 16)?.replace('T', ' ') ?? '';
-  const tail = session.pipelineRunId ? ' · 流水线' : '';
-  return `${session.title || session.id}${tail} · ${t}`;
-}
-
 export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanelProps) {
   const [instruction, setInstruction] = useState(
     '请根据 PRD、功能规格(FS)、技术规格(TS) 与编码计划（CP）完成编码与验证。',
@@ -617,6 +1041,8 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   const [runtimeState, setRuntimeState] = useState<ICodexRuntimeState>(initialCodexRuntimeState);
   const [chatMessages, setChatMessages] = useState<IAgentChatMessage[]>([]);
   const [chatDraft, setChatDraft] = useState('');
+  /** Ask = 仅追加用户气泡；Agent = 发送并执行 Codex */
+  const [composerMode, setComposerMode] = useState<IWorkbenchComposerMode>('agent');
   const chatTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [aiSkillsForSlash, setAiSkillsForSlash] = useState<IAiSkillConfig[]>([]);
   const [slashMenu, setSlashMenu] = useState<{ start: number; filter: string } | null>(null);
@@ -669,6 +1095,16 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   const cancelCodexExecution = useCancelAgentToolCallExecution();
   const patchSessionMetadata = usePatchAgentSessionMetadata();
 
+  useEffect(() => {
+    if (!activeSession?.id) {
+      setComposerMode('agent');
+      return;
+    }
+    const raw = activeSession.metadata[WORKBENCH_COMPOSER_MODE_KEY];
+    if (raw === 'ask' || raw === 'agent') setComposerMode(raw);
+    else setComposerMode('agent');
+  }, [activeSession]);
+
   const isBusy =
     createPipelineRun.isPending ||
     createContextPack.isPending ||
@@ -694,11 +1130,12 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     Boolean(runningCodexToolCall) || runCodexToolCall.isPending || prepareToolCall.isPending;
 
   useEffect(() => {
-    const busy = Boolean(runningCodexToolCall) || runCodexToolCall.isPending;
+    const busy =
+      Boolean(runningCodexToolCall) || runCodexToolCall.isPending || prepareToolCall.isPending;
     if (!busy) return;
     const id = window.setInterval(() => bumpStreamingClock(), 1000);
     return () => window.clearInterval(id);
-  }, [runningCodexToolCall, runCodexToolCall.isPending]);
+  }, [runningCodexToolCall, runCodexToolCall.isPending, prepareToolCall.isPending]);
 
   const readyWorkspace = useMemo(
     () => workspaces.find((w) => w.status === 'ready' && Boolean(w.worktreePath?.trim())),
@@ -773,6 +1210,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       skipNextChatPersistRef.current = false;
     });
     return () => cancelAnimationFrame(rid);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅在 session id 变化时全量 hydrate；同会话内 Plan/对话由其它 effect 增量同步
   }, [activeSession?.id]);
 
   /** 同一会话内 Plan 文案随服务端更新 */
@@ -1099,6 +1537,9 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       return;
     }
 
+    /** 简短问答轮：气泡收尾时去掉 Codex 横幅及系统提示回声，便于只读回答 */
+    const chatOnlyBubblePolish = executionPrompt.trimStart().startsWith(CODEX_CHAT_ONLY_MARKER);
+
     const replyAssistantId = newChatMessageId();
     const assistantBubble: IAgentChatMessage = {
       id: replyAssistantId,
@@ -1120,11 +1561,25 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       startedAt: new Date().toISOString(),
     });
 
-    const bumpAssistant = (chunk: string) => {
+    /** 仅累积到对话气泡（Codex 常把交互输出写到 stderr，气泡不能只跟 stdout） */
+    const appendAssistantContent = (chunk: string) => {
       if (!chunk) return;
       setChatMessages((prev) =>
-        prev.map((m) => (m.id === replyAssistantId ? { ...m, content: m.content + chunk } : m)),
+        prev.map((m) => {
+          if (m.id !== replyAssistantId) return m;
+          const nextContent = m.content + chunk;
+          if (m.thinkingMs == null && nextContent.trim().length > 0) {
+            const elapsed = Math.max(0, Date.now() - Date.parse(m.createdAt));
+            return { ...m, content: nextContent, thinkingMs: elapsed };
+          }
+          return { ...m, content: nextContent };
+        }),
       );
+    };
+
+    const bumpAssistant = (chunk: string) => {
+      if (!chunk) return;
+      appendAssistantContent(chunk);
       setRuntimeOutput((prev) => `${prev}${chunk}`);
     };
 
@@ -1132,26 +1587,48 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     const closeAssistantOnce = (
       tail: string,
       markRuntimeError: boolean,
-      meta?: { durationMs?: number | null; exitCode?: number | null },
+      meta?: {
+        durationMs?: number | null;
+        exitCode?: number | null;
+        changedFilesCount?: number | null;
+      },
+      fallbackToolCall?: IAgentToolCall | null,
     ) => {
       if (assistantClosedRef.current) return;
       assistantClosedRef.current = true;
       setChatMessages((prev) =>
-        prev.map((m) =>
-          m.id === replyAssistantId
-            ? {
-                ...m,
-                streaming: false,
-                content: `${m.content}${tail}`,
-                ...(meta
-                  ? {
-                      durationMs: meta.durationMs ?? undefined,
-                      exitCode: meta.exitCode ?? undefined,
-                    }
-                  : {}),
-              }
-            : m,
-        ),
+        prev.map((m) => {
+          if (m.id !== replyAssistantId) return m;
+          let nextContent = `${m.content}${tail}`;
+          if (!nextContent.trim() && fallbackToolCall?.metadata) {
+            const fm = fallbackToolCall.metadata as Record<string, unknown>;
+            const sOut = typeof fm.stdout === 'string' ? fm.stdout : '';
+            const sErr = typeof fm.stderr === 'string' ? fm.stderr : '';
+            const merged = [sOut, sErr].filter((x) => x.trim().length > 0).join('\n\n--- stderr ---\n');
+            if (merged.trim()) {
+              nextContent = `${merged.trim()}\n${tail}`;
+            }
+          }
+          nextContent = polishCodexAssistantBubbleDisplay(nextContent, {
+            chatOnlyStripEcho: chatOnlyBubblePolish,
+          });
+          const changed =
+            meta?.changedFilesCount != null
+              ? meta.changedFilesCount
+              : (m.changedFilesCount ?? undefined);
+          return {
+            ...m,
+            streaming: false,
+            content: nextContent,
+            ...(changed != null ? { changedFilesCount: changed } : {}),
+            ...(meta
+              ? {
+                  durationMs: meta.durationMs ?? undefined,
+                  exitCode: meta.exitCode ?? undefined,
+                }
+              : {}),
+          };
+        }),
       );
       if (markRuntimeError) {
         setRuntimeState((prev) => ({
@@ -1239,6 +1716,16 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               stderrBytes: event.stderrBytes ?? prev.stderrBytes,
               lastEventAt: event.timestamp || new Date().toISOString(),
             }));
+            const chunk = event.chunk;
+            setChatMessages((prev) =>
+              prev.map((m) => {
+                if (m.id !== replyAssistantId) return m;
+                const cur = m.content.replace(/\r\n/g, '\n');
+                const ch = chunk.replace(/\r\n/g, '\n');
+                if (ch.length >= 80 && cur.endsWith(ch)) return m;
+                return { ...m, content: m.content + chunk };
+              }),
+            );
             setRuntimeOutput((prev) => `${prev}[stderr] ${event.chunk}`);
           }
           if (event.type === 'heartbeat') {
@@ -1284,7 +1771,12 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
             closeAssistantOnce(
               `\n\n---\nexit=${event.exitCode ?? '—'} · ${event.durationMs ?? 0}ms · 变更≈${event.changedFilesCount ?? 0}`,
               false,
-              { durationMs: event.durationMs ?? null, exitCode: event.exitCode ?? null },
+              {
+                durationMs: event.durationMs ?? null,
+                exitCode: event.exitCode ?? null,
+                changedFilesCount: event.changedFilesCount ?? null,
+              },
+              event.toolCall ?? null,
             );
           }
         },
@@ -1330,18 +1822,14 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   const runtimePlaceholder =
     '日志：步骤 2 的 Workspace 命令与步骤 3/4 的编码输出将显示在此处。';
 
-  const codexStreamingElapsedMs = useMemo(() => {
-    const busy = Boolean(runningCodexToolCall) || runCodexToolCall.isPending;
-    if (!busy || !runtimeState.startedAt) return 0;
-    return Math.max(0, Date.now() - Date.parse(runtimeState.startedAt));
-  }, [runningCodexToolCall, runCodexToolCall.isPending, runtimeState.startedAt, bumpStreamingClock]);
-
   const canComposerRunCodex =
     step2Done &&
     Boolean(readyWorkspace) &&
     !isCodexRunning &&
     codingTool === 'codex_cli' &&
     !runCodexToolCall.isPending;
+
+  const canComposerSendAsk = step1Done && Boolean(chatDraft.trim());
 
   useEffect(() => {
     let cancelled = false;
@@ -1929,33 +2417,55 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                               </div>
                             ) : null}
                             {m.variant === 'codex' && m.streaming ? (
-                              <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-medium text-foreground/80">
-                                  <Sparkles className="size-3 text-purple-600" />
-                                  生成中 · {formatDurationShort(codexStreamingElapsedMs)}
-                                </span>
+                              <div className="mb-2 space-y-2">
+                                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                                  <Sparkles className="size-3.5 shrink-0 opacity-70" />
+                                  <span>
+                                    思考了{' '}
+                                    {formatThinkingSecondsLabel(
+                                      m.thinkingMs ??
+                                        (!m.content.trim()
+                                          ? Math.max(0, Date.now() - Date.parse(m.createdAt))
+                                          : undefined),
+                                    )}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-2.5 py-2 text-[12px] font-medium text-foreground/90 ring-1 ring-border/45">
+                                  <Sparkles className="size-3.5 shrink-0 animate-pulse text-purple-600" />
+                                  工作中…
+                                </div>
                               </div>
                             ) : null}
-                            {m.variant === 'codex' && !m.streaming && m.durationMs != null ? (
-                              <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px]">
-                                <span
-                                  className={cn(
-                                    'font-medium',
-                                    m.exitCode === 0
-                                      ? 'text-green-700'
-                                      : m.exitCode != null
-                                        ? 'text-red-700'
-                                        : 'text-muted-foreground',
-                                  )}
-                                >
-                                  {m.exitCode === 0
-                                    ? '已成功结束'
-                                    : m.exitCode != null
-                                      ? '进程异常结束（非成功）'
-                                      : '已结束'}
-                                  {' · '}
-                                  {formatDurationShort(m.durationMs)}
-                                </span>
+                            {m.variant === 'codex' &&
+                            !m.streaming &&
+                            (m.thinkingMs != null ||
+                              m.durationMs != null ||
+                              (m.changedFilesCount ?? 0) > 0 ||
+                              m.exitCode != null) ? (
+                              <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+                                {m.thinkingMs != null ? (
+                                  <span>思考了 {formatThinkingSecondsLabel(m.thinkingMs)}</span>
+                                ) : null}
+                                {m.thinkingMs != null &&
+                                m.changedFilesCount != null &&
+                                m.changedFilesCount > 0 ? (
+                                  <span aria-hidden>
+                                    ·
+                                  </span>
+                                ) : null}
+                                {m.changedFilesCount != null && m.changedFilesCount > 0 ? (
+                                  <span>变更约 {m.changedFilesCount} 个文件</span>
+                                ) : null}
+                                {m.durationMs != null &&
+                                (m.thinkingMs != null ||
+                                  (m.changedFilesCount != null && m.changedFilesCount > 0)) ? (
+                                  <span aria-hidden>
+                                    ·
+                                  </span>
+                                ) : null}
+                                {m.durationMs != null ? (
+                                  <span>总耗时 {formatDurationShort(m.durationMs)}</span>
+                                ) : null}
                                 {m.exitCode != null ? (
                                   <span
                                     className={cn(
@@ -1977,8 +2487,35 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                                     <Streamdown className={AGENT_CHAT_MARKDOWN_CLASS}>{m.content}</Streamdown>
                                   </div>
                                 ) : (
-                                  <span className="text-xs text-muted-foreground">等待 Codex 流式输出…</span>
+                                  <span className="text-xs leading-relaxed text-muted-foreground">
+                                    Codex 已启动，正在等待终端输出（stdout 与 stderr
+                                    均会显示在此）。部分场景下会先缓冲数秒至数十秒；完整日志可点上方「文档」图标查看。
+                                  </span>
                                 )}
+                              </div>
+                            ) : m.variant === 'codex' && !m.streaming && m.content.trim() ? (
+                              <div className="min-w-0 space-y-3">
+                                <div className="flex gap-3 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 ring-1 ring-black/[0.03] dark:ring-white/[0.04]">
+                                  <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-md bg-background shadow-sm ring-1 ring-border/50">
+                                    <Package className="size-4 text-primary" />
+                                  </div>
+                                  <div className="min-w-0 flex-1 space-y-1">
+                                    <p className="text-sm font-semibold leading-snug text-foreground">
+                                      {deriveCodexSummaryCardTitle(m.content)}
+                                    </p>
+                                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                      {formatCodexCompletedAtSubtitle(m.createdAt, m.exitCode ?? null)}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="min-w-0 max-w-full overflow-x-auto overflow-y-visible">
+                                  <Streamdown className={AGENT_CHAT_MARKDOWN_CLASS}>
+                                    {stripLeadingLineIfMatchesTitle(
+                                      m.content,
+                                      deriveCodexSummaryCardTitle(m.content),
+                                    )}
+                                  </Streamdown>
+                                </div>
                               </div>
                             ) : m.content.trim() ? (
                               <div className="min-w-0 max-w-full overflow-x-auto overflow-y-visible">
@@ -2015,9 +2552,13 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                 <span className="font-medium text-foreground"> 输入 @ </span>
                 或「文件」可选仓库路径（↑↓ Enter，Esc 关闭）；
                 <span className="font-medium text-foreground"> Enter </span>
-                发送并执行（Workspace 就绪时），
+                在
+                <span className="font-medium text-foreground"> Ask </span>
+                下仅写入对话气泡（不跑 Codex）；在
+                <span className="font-medium text-foreground"> Agent </span>
+                下发送并执行（需 Workspace 就绪），
                 <span className="font-medium text-foreground"> Shift+Enter </span>
-                换行；左侧「仅对话」只写入气泡。
+                换行。
               </p>
               <div className="p-2 sm:p-3">
                 <div className="relative overflow-visible rounded-xl bg-background/90 ring-1 ring-border/25 shadow-sm">
@@ -2202,31 +2743,54 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                       }
                       if (e.key !== 'Enter' || e.shiftKey) return;
                       if (!chatDraft.trim() || !step1Done) return;
-                      if (!canComposerRunCodex) return;
                       e.preventDefault();
+                      if (composerMode === 'ask') {
+                        handleChatAppendUser();
+                        return;
+                      }
+                      if (!canComposerRunCodex) return;
                       void handleChatSendAndExecute();
                     }}
                   />
                   <div className="flex items-center justify-between gap-2 border-t border-border/30 bg-muted/25 px-2 py-1.5">
-                    <div className="flex min-w-0 items-center gap-0.5">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 gap-1.5 px-2 text-muted-foreground hover:text-foreground"
-                            onClick={handleChatAppendUser}
-                            disabled={!step1Done || !chatDraft.trim()}
-                          >
-                            <MessageSquarePlus className="size-4 shrink-0" />
-                            <span className="hidden text-xs sm:inline">仅对话</span>
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-[240px]">
-                          写入对话队列，稍后在步骤 3 执行 Codex
-                        </TooltipContent>
-                      </Tooltip>
+                    <div className="flex min-w-0 items-center gap-1">
+                      <ToggleGroup
+                        type="single"
+                        variant="outline"
+                        size="sm"
+                        spacing={0}
+                        value={composerMode}
+                        onValueChange={(v) => {
+                          if (v !== 'ask' && v !== 'agent') return;
+                          setComposerMode(v);
+                          if (!activeSession?.id) return;
+                          patchSessionMetadata.mutate({
+                            id: activeSession.id,
+                            patch: { [WORKBENCH_COMPOSER_MODE_KEY]: v },
+                            updatedBy: operatorName ?? null,
+                          });
+                        }}
+                        disabled={!step1Done}
+                        className="h-8 shrink-0"
+                        aria-label="输入模式：Ask 或 Agent"
+                      >
+                        <ToggleGroupItem
+                          value="ask"
+                          aria-label="Ask：仅对话"
+                          className="h-8 gap-1 px-2.5 text-xs data-[state=on]:bg-primary/10 data-[state=on]:text-primary"
+                        >
+                          <MessageSquarePlus className="size-3.5 shrink-0" />
+                          Ask
+                        </ToggleGroupItem>
+                        <ToggleGroupItem
+                          value="agent"
+                          aria-label="Agent：执行编码"
+                          className="h-8 gap-1 px-2.5 text-xs data-[state=on]:bg-primary/10 data-[state=on]:text-primary"
+                        >
+                          <Cpu className="size-3.5 shrink-0" />
+                          Agent
+                        </ToggleGroupItem>
+                      </ToggleGroup>
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Button
@@ -2277,22 +2841,42 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                             size="icon"
                             className={cn(
                               'size-9 shrink-0 rounded-full shadow-sm',
-                              canComposerRunCodex && chatDraft.trim()
-                                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                                : '',
+                              composerMode === 'ask'
+                                ? canComposerSendAsk
+                                  ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                                  : ''
+                                : canComposerRunCodex && chatDraft.trim()
+                                  ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                                  : '',
                             )}
-                            disabled={!canComposerRunCodex || !chatDraft.trim()}
-                            onClick={() => void handleChatSendAndExecute()}
-                            aria-label="发送并执行 Codex"
+                            disabled={
+                              composerMode === 'ask'
+                                ? !canComposerSendAsk
+                                : !canComposerRunCodex || !chatDraft.trim()
+                            }
+                            onClick={() => {
+                              if (composerMode === 'ask') {
+                                handleChatAppendUser();
+                                return;
+                              }
+                              void handleChatSendAndExecute();
+                            }}
+                            aria-label={
+                              composerMode === 'ask' ? '发送（Ask，仅对话）' : '发送并执行 Codex（Agent）'
+                            }
                           >
-                            {runCodexToolCall.isPending ? (
+                            {composerMode === 'agent' && runCodexToolCall.isPending ? (
                               <Loader2 className="size-4 animate-spin" />
                             ) : (
                               <ArrowUp className="size-4" />
                             )}
                           </Button>
                         </TooltipTrigger>
-                        <TooltipContent side="top">发送并执行本轮 Codex</TooltipContent>
+                        <TooltipContent side="top">
+                          {composerMode === 'ask'
+                            ? 'Ask：仅写入对话，不执行 Codex'
+                            : 'Agent：发送并执行本轮 Codex（Workspace 就绪时）'}
+                        </TooltipContent>
                       </Tooltip>
                     </div>
                   </div>
@@ -2310,51 +2894,66 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
             </div>
           </div>
           <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
-            <DialogContent className="flex max-h-[min(520px,75vh)] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+            <DialogContent className="flex max-h-[min(560px,78vh)] max-w-xl flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
               <DialogHeader className="border-b border-border px-6 py-4 text-left">
                 <DialogTitle>会话历史</DialogTitle>
                 <DialogDescription className="text-xs leading-relaxed">
-                  选择一项加载已保存的对话。标记为「当前流水线」的是当前研发流水线绑定的会话。
+                  主标题从已保存对话中提炼最近要点；副标题为会话名、绑定关系与最后活动时间。标记「当前流水线」的是本流水线绑定的会话。
                 </DialogDescription>
               </DialogHeader>
-              <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-                <ul className="space-y-1">
-                  {[...sessions]
-                    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-                    .map((s) => {
-                      const isCurrentPipeline = pipelineLinkedSession?.id === s.id;
-                      const isActiveView = activeSession?.id === s.id;
-                      return (
-                        <li key={s.id}>
-                          <button
-                            type="button"
-                            className={cn(
-                              'w-full rounded-md border border-transparent px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
-                              isActiveView && 'border-primary/30 bg-primary/10',
-                            )}
-                            onClick={() => {
-                              if (isCurrentPipeline) {
-                                setHistorySessionId(null);
-                              } else {
-                                setHistorySessionId(s.id);
-                              }
-                              setHistoryDialogOpen(false);
-                            }}
-                          >
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="min-w-0 flex-1 break-words font-medium leading-snug">
-                                {formatAgentSessionPickLabel(s)}
-                              </span>
-                              {isCurrentPipeline ? (
-                                <Badge variant="outline" className="shrink-0 text-[10px] font-normal">
-                                  当前流水线
-                                </Badge>
-                              ) : null}
-                            </div>
-                          </button>
-                        </li>
-                      );
-                    })}
+              <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+                <ul className="space-y-3">
+                  {groupAgentSessionsForHistoryList(sessions).map(({ bucket, sessions: bucketSessions }) => (
+                    <li key={bucket} className="list-none">
+                      <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {AGENT_SESSION_HISTORY_BUCKET_LABEL[bucket]}
+                      </div>
+                      <ul className="space-y-2">
+                        {bucketSessions.map((s) => {
+                          const isCurrentPipeline = pipelineLinkedSession?.id === s.id;
+                          const isActiveView = activeSession?.id === s.id;
+                          const preview = deriveWorkbenchSessionHistoryPreview(s);
+                          return (
+                            <li key={s.id}>
+                              <button
+                                type="button"
+                                className={cn(
+                                  'w-full rounded-lg border px-3 py-3 text-left text-sm shadow-sm transition-colors hover:bg-accent/80 hover:text-accent-foreground',
+                                  isActiveView
+                                    ? 'border-primary/40 bg-primary/[0.07] ring-1 ring-primary/15'
+                                    : 'border-border/70 bg-card',
+                                )}
+                                onClick={() => {
+                                  if (isCurrentPipeline) {
+                                    setHistorySessionId(null);
+                                  } else {
+                                    setHistorySessionId(s.id);
+                                  }
+                                  setHistoryDialogOpen(false);
+                                }}
+                              >
+                                <div className="flex items-start gap-2.5">
+                                  <div className="min-w-0 flex-1 space-y-1.5">
+                                    <p className="line-clamp-2 text-[13px] font-semibold leading-snug text-foreground">
+                                      {preview ?? '（暂无对话摘要，进入后可继续发送）'}
+                                    </p>
+                                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                                      {formatSessionHistoryMetaRow(s)}
+                                    </p>
+                                  </div>
+                                  {isCurrentPipeline ? (
+                                    <Badge variant="outline" className="mt-0.5 shrink-0 text-[10px] font-normal">
+                                      当前流水线
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </li>
+                  ))}
                 </ul>
               </div>
             </DialogContent>

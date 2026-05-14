@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCurrentUserProfile } from '@/hooks/useCurrentUserProfile';
 import { capabilityClient } from '@/lib/capability-client';
@@ -17,6 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
@@ -35,6 +36,8 @@ import {
   GitCommitHorizontal,
   ArrowLeft,
   History,
+  Play,
+  FlaskConical,
 } from 'lucide-react';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
@@ -63,10 +66,20 @@ import type {
   IGitCommitRecord,
   IPipelineCodeReviewRecord,
   IPipelineTask,
+  IPipelineTestRunRecord,
   PipelineTaskStatus,
 } from '@/lib/rd-types';
 import { cn } from '@/lib/utils';
 import { deriveQualityMetricsFromReview } from '@/lib/pipeline-code-review-metrics';
+import {
+  buildFsTsContextForTask,
+  collectAgentWorkspaceCodeExcerpt,
+  heuristicExecuteReport,
+  heuristicGeneratedCasesFromSpecs,
+  parseExecutionReportFromAi,
+  parseGeneratedCasesFromAi,
+  resolveSpecsForPipelineTask,
+} from '@/lib/pipeline-test-artifacts';
 import {
   extractPipelineErrorMessage,
   findProductForRequirement,
@@ -167,6 +180,12 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
   const [activeTab, setActiveTab] = useState('overview');
   const [isReviewing, setIsReviewing] = useState(false);
+  const [isGeneratingTestCases, setIsGeneratingTestCases] = useState(false);
+  const [isRunningTests, setIsRunningTests] = useState(false);
+  const [testRunPreview, setTestRunPreview] = useState<IPipelineTestRunRecord | null>(null);
+  /** 与代码审查一致：测试用例生成 / 测试报告执行 的流式 Markdown 输出 */
+  const [testStreamPhase, setTestStreamPhase] = useState<'generate_cases' | 'execute_tests' | null>(null);
+  const [testStreamMarkdown, setTestStreamMarkdown] = useState('');
   const [reviewResult, setReviewResult] = useState('');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isPublishingDocs, setIsPublishingDocs] = useState(false);
@@ -175,7 +194,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
   const [createForm, setCreateForm] = useState<ICreatePipelineForm>({
     name: '',
     gitUrl: '',
-    gitAuthMode: 'ssh',
+    gitAuthMode: 'pat',
     gitUsername: '',
     gitPat: '',
     sandboxUrl: '',
@@ -186,11 +205,24 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
     requirementId: '',
   });
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const testStreamEndRef = useRef<HTMLDivElement>(null);
 
   const selectedTask = useMemo(
     () => tasks.find((t) => t.id === selectedTaskId),
     [selectedTaskId, tasks],
   );
+  const selectedTaskLinkedSpecs = useMemo(
+    () => (selectedTask ? resolveSpecsForPipelineTask(selectedTask, specs) : []),
+    [selectedTask, specs],
+  );
+  const displayTestReport = useMemo(() => {
+    if (!selectedTask) return undefined;
+    if (testRunPreview) return testRunPreview.testReport;
+    if (selectedTask.testReport) return selectedTask.testReport;
+    const hist = selectedTask.testRunHistory;
+    if (hist?.length) return hist[hist.length - 1]!.testReport;
+    return undefined;
+  }, [selectedTask, testRunPreview]);
   const selectedRequirement = requirements.find((r) => r.id === createForm.requirementId);
   const availableRequirementsForPipeline = useMemo(() => {
     const requirementIdsWithPipeline = new Set(tasks.map((t) => t.requirementId));
@@ -233,7 +265,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
     setCreateForm({
       name: '',
       gitUrl: '',
-      gitAuthMode: 'ssh',
+      gitAuthMode: 'pat',
       gitUsername: '',
       gitPat: '',
       sandboxUrl: '',
@@ -289,16 +321,15 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
     throw new Error(lastError || '获取 commit 记录失败');
   };
 
-  const syncPipelineNameByRequirement = (nextRequirementId: string) => {
-    const nextRequirement = requirements.find((r) => r.id === nextRequirementId);
-    const nextDefaultName = nextRequirement ? `${nextRequirement.title}-生产流水线` : '';
-    const currentRequirement = requirements.find((r) => r.id === createForm.requirementId);
-    const currentDefaultName = currentRequirement ? `${currentRequirement.title}-生产流水线` : '';
-    const nextProduct = findProductForRequirement(nextRequirement, products);
-    const nextGit = nextProduct?.gitUrl?.trim() ?? '';
-    const nextSandbox = nextProduct?.sandboxUrl?.trim() ?? '';
-
+  const syncPipelineNameByRequirement = useCallback((nextRequirementId: string) => {
     setCreateForm((prev) => {
+      const nextRequirement = requirements.find((r) => r.id === nextRequirementId);
+      const nextDefaultName = nextRequirement ? `${nextRequirement.title}-生产流水线` : '';
+      const currentRequirement = requirements.find((r) => r.id === prev.requirementId);
+      const currentDefaultName = currentRequirement ? `${currentRequirement.title}-生产流水线` : '';
+      const nextProduct = findProductForRequirement(nextRequirement, products);
+      const nextGit = nextProduct?.gitUrl?.trim() ?? '';
+      const nextSandbox = nextProduct?.sandboxUrl?.trim() ?? '';
       const shouldApplyDefaultName = !prev.name.trim() || prev.name === currentDefaultName;
       return {
         ...prev,
@@ -308,7 +339,20 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
         sandboxUrl: nextSandbox,
       };
     });
-  };
+  }, [requirements, products]);
+
+  /** 创建弹窗打开且未选需求时，列表有数据则默认选中第一项（含名称与产品 Git/沙箱同步） */
+  useEffect(() => {
+    if (!isCreateDialogOpen || createForm.requirementId) return;
+    const first = availableRequirementsForPipeline[0];
+    if (!first) return;
+    syncPipelineNameByRequirement(first.id);
+  }, [
+    isCreateDialogOpen,
+    createForm.requirementId,
+    availableRequirementsForPipeline,
+    syncPipelineNameByRequirement,
+  ]);
 
   // 自动滚动日志到底部
   useEffect(() => {
@@ -341,6 +385,18 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
       router.replace('/ai-pipeline');
     }
   }, [isDetail, detailTaskId, router]);
+
+  useEffect(() => {
+    setTestRunPreview(null);
+    setTestStreamPhase(null);
+    setTestStreamMarkdown('');
+  }, [selectedTaskId]);
+
+  useEffect(() => {
+    if (activeTab !== 'tests') return;
+    if (!testStreamMarkdown && !isGeneratingTestCases && !isRunningTests) return;
+    testStreamEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [activeTab, testStreamMarkdown, isGeneratingTestCases, isRunningTests]);
 
   /** 切换任务或列表刷新后，用服务端持久化的最近一次审查摘要填充展示（审查进行中不覆盖） */
   useEffect(() => {
@@ -549,6 +605,186 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
       toast.error('审查失败，未写入记录');
     } finally {
       setIsReviewing(false);
+    }
+  };
+
+  const handleGeneratePipelineTestCases = async () => {
+    if (!selectedTask) return;
+    const linked = resolveSpecsForPipelineTask(selectedTask, specs);
+    if (!linked.length) {
+      toast.error('未找到关联规格（FS/TS），请确认流水线已绑定 PRD/规格');
+      return;
+    }
+    setIsGeneratingTestCases(true);
+    setTestStreamPhase('generate_cases');
+    setTestStreamMarkdown('> 正在读取 FS/TS 与 Agent Workspace 生成代码…\n\n');
+    const taskSnapshot = selectedTask;
+    const streamHeadCases = '> **测试用例生成**（流式输出）\n\n';
+    try {
+      const fsTs = buildFsTsContextForTask(taskSnapshot, linked);
+      const codeExcerpt = await collectAgentWorkspaceCodeExcerpt(taskSnapshot.requirementId);
+      setTestStreamMarkdown(streamHeadCases);
+      const bundle = `=== FS / TS 规约上下文 ===\n${fsTs}\n\n=== 生成代码摘录（Agent Workspace）===\n${codeExcerpt}`.slice(
+        0,
+        118_000,
+      );
+
+      const additionalRequirements =
+        '你是资深测试架构师。请仅基于上文 FS、TS 与生成代码设计「可自动化执行」的测试用例。\n' +
+        '正文可做简短说明；最后必须且仅能包含一个 JSON 代码块（fence 标记为 json），格式如下（勿在代码块外再写 JSON）：\n' +
+        '```json\n' +
+        '{"cases":[{"id":"string","title":"string","basis":["fs","ts","code"],"trace":"string","steps":"string","expected":"string","relatedApiPath":"string?"}]}\n' +
+        '```\n' +
+        '至少 4 条；basis 每项为 fs、ts、code 的非空子集；需覆盖 API 契约、数据层与关键实现路径。';
+
+      let accumulated = '';
+      const stream = await capabilityClient
+        .load('code_review_assistant_1')
+        .callStream<ICodeReviewResult>('textSummary', {
+          code_content: bundle,
+          additional_requirements: additionalRequirements,
+        });
+
+      for await (const chunk of stream) {
+        if (chunk.summary) {
+          accumulated += chunk.summary;
+          setTestStreamMarkdown(streamHeadCases + accumulated);
+        }
+      }
+
+      if (!accumulated.trim()) {
+        accumulated = '（模型未返回有效内容）';
+        setTestStreamMarkdown(streamHeadCases + accumulated);
+      }
+
+      let cases = parseGeneratedCasesFromAi(accumulated);
+      if (!cases?.length) {
+        cases = heuristicGeneratedCasesFromSpecs(linked);
+        toast.message('已用语义模板生成测试用例', {
+          description: '模型未返回可解析 JSON，已根据 FS/TS 结构化内容回退生成。',
+        });
+      } else {
+        toast.success(`已生成 ${cases.length} 条测试用例`);
+      }
+
+      await upsertPipelineTask.mutateAsync({
+        ...taskSnapshot,
+        generatedTestCases: cases,
+        ...rdAuditUpdate(),
+      });
+    } catch (error) {
+      logger.error('生成测试用例失败', error);
+      setTestStreamMarkdown(
+        (prev) =>
+          prev +
+          `\n\n---\n**生成失败：** ${error instanceof Error ? error.message : '请稍后重试'}\n`,
+      );
+      toast.error('生成失败，请稍后重试');
+    } finally {
+      setIsGeneratingTestCases(false);
+    }
+  };
+
+  const handleRunPipelineTests = async () => {
+    if (!selectedTask) return;
+    const cases = selectedTask.generatedTestCases ?? [];
+    if (!cases.length) {
+      toast.error('请先生成测试用例');
+      return;
+    }
+    setIsRunningTests(true);
+    setTestStreamPhase('execute_tests');
+    setTestStreamMarkdown('> 正在汇总测试用例与 FS/TS、代码上下文…\n\n');
+    const taskSnapshot = selectedTask;
+    const runSalt = `run_${Date.now()}`;
+    const streamHeadRun = '> **测试报告**（流式输出，解析末尾 JSON 后写入下方统计表）\n\n';
+    try {
+      const linked = resolveSpecsForPipelineTask(taskSnapshot, specs);
+      const fsTs = buildFsTsContextForTask(taskSnapshot, linked);
+      const codeExcerpt = await collectAgentWorkspaceCodeExcerpt(taskSnapshot.requirementId);
+      setTestStreamMarkdown(streamHeadRun);
+      const caseLines = cases
+        .map(
+          (c) =>
+            `- [${c.id}] ${c.title}\n  依据: ${c.basis.join('+')} · ${c.trace}\n  步骤: ${c.steps}\n  期望: ${c.expected}`,
+        )
+        .join('\n');
+      const bundle =
+        `=== 待执行用例 ===\n${caseLines}\n\n=== FS/TS 上下文（摘要）===\n${fsTs.slice(0, 40_000)}\n\n=== 代码摘录 ===\n${codeExcerpt.slice(0, 40_000)}`.slice(
+          0,
+          118_000,
+        );
+
+      const additionalRequirements =
+        '请模拟在沙箱中对上述用例执行自动化测试，给出汇总结果。\n' +
+        '最后必须且仅能包含一个 JSON 代码块（fence 为 json），格式：\n' +
+        '```json\n' +
+        '{"coverage":0-100的整数,"details":[{"name":"与用例标题一致或子步骤","status":"passed或failed","duration":"如 42ms","error":"失败时必填否则省略"}]}\n' +
+        '```\n' +
+        'details 条数应与待执行用例一一对应或可为其合理子拆分；coverage 为估算代码覆盖率。';
+
+      let accumulated = '';
+      const stream = await capabilityClient
+        .load('code_review_assistant_1')
+        .callStream<ICodeReviewResult>('textSummary', {
+          code_content: bundle,
+          additional_requirements: additionalRequirements,
+        });
+
+      for await (const chunk of stream) {
+        if (chunk.summary) {
+          accumulated += chunk.summary;
+          setTestStreamMarkdown(streamHeadRun + accumulated);
+        }
+      }
+
+      if (!accumulated.trim()) {
+        accumulated = '（模型未返回有效内容）';
+        setTestStreamMarkdown(streamHeadRun + accumulated);
+      }
+
+      let report = parseExecutionReportFromAi(accumulated);
+      let note: string | undefined;
+      if (!report) {
+        report = heuristicExecuteReport(cases, runSalt);
+        note = '模型未返回可解析执行结果，已使用 FS/TS/用例驱动的演示执行器。';
+        toast.message('已生成测试报告', { description: note });
+      } else {
+        toast.success('自动化测试已完成并写入报告');
+      }
+
+      const record: IPipelineTestRunRecord = {
+        id: `trun_${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        testReport: report,
+        caseIds: cases.map((c) => c.id),
+        note,
+      };
+      const nextHistory = [...(taskSnapshot.testRunHistory ?? []), record];
+      const lastReview = taskSnapshot.codeReviewHistory?.[taskSnapshot.codeReviewHistory.length - 1];
+      const qualityMetrics = deriveQualityMetricsFromReview({
+        summaryMarkdown: lastReview?.summaryMarkdown ?? '',
+        testReport: report,
+      });
+
+      await upsertPipelineTask.mutateAsync({
+        ...taskSnapshot,
+        testReport: report,
+        testRunHistory: nextHistory,
+        qualityMetrics,
+        ...rdAuditUpdate(),
+      });
+      setTestRunPreview(null);
+    } catch (error) {
+      logger.error('执行自动化测试失败', error);
+      setTestStreamMarkdown(
+        (prev) =>
+          prev +
+          `\n\n---\n**执行失败：** ${error instanceof Error ? error.message : '请稍后重试'}\n`,
+      );
+      toast.error('执行失败，未更新报告');
+    } finally {
+      setIsRunningTests(false);
     }
   };
 
@@ -827,7 +1063,6 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                       : selectedTask?.requirementTitle || '交付引擎详情'
                     : '实时监控 AI 代码生成、测试与部署全流程'
                 }
-                descriptionLines={isDetail ? 'multi' : 'single'}
                 leading={
                   isDetail ? (
                     <Button
@@ -1042,7 +1277,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                 <TabsTrigger value="code">项目代码</TabsTrigger>
                 <TabsTrigger value="logs">实时日志</TabsTrigger>
                 <TabsTrigger value="tests">测试报告</TabsTrigger>
-                <TabsTrigger value="commits">commit记录</TabsTrigger>
+                <TabsTrigger value="commits">Commit记录</TabsTrigger>
               </TabsList>
 
               <TabsContent value="overview" className="mt-4">
@@ -1329,36 +1564,227 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base flex items-center gap-2">
                       <FileCheck className="size-4 text-primary" />
-                      测试报告
+                      测试报告与自动化用例
                     </CardTitle>
+                    <CardDescription>
+                      测试用例依据 FS、TS 与 Agent Workspace 中的生成代码由 AI 推导；每次执行测试会更新当前报告并追加一条历史快照（与代码审查记录类似）。
+                    </CardDescription>
                   </CardHeader>
-                  <CardContent>
-                    {selectedTask.testReport ? (
-                      <div className="space-y-6">
-                        {/* 测试统计 */}
-                        <div className="grid grid-cols-4 gap-4">
-                          <div className="text-center p-4 bg-muted/50 rounded-lg">
-                            <div className="text-2xl font-bold">{selectedTask.testReport.total}</div>
+                  <CardContent className="space-y-6">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                      <p className="text-xs text-muted-foreground">
+                        已解析关联规格 {selectedTaskLinkedSpecs.length} 份
+                        {(selectedTask.pipelineMeta?.specIds?.length ?? 0) > 0
+                          ? `（meta.specIds：${(selectedTask.pipelineMeta?.specIds ?? []).join('、')}）`
+                          : '（未配置 specIds 时按 PRD 回退匹配）'}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => void handleGeneratePipelineTestCases()}
+                          disabled={
+                            isGeneratingTestCases ||
+                            isRunningTests ||
+                            upsertPipelineTask.isPending ||
+                            !selectedTaskLinkedSpecs.length
+                          }
+                        >
+                          {isGeneratingTestCases ? (
+                            <>
+                              <Loader2 className="size-3 mr-1 animate-spin" />
+                              生成中…
+                            </>
+                          ) : (
+                            <>
+                              <FlaskConical className="size-3.5 mr-1" />
+                              AI 生成测试用例
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => void handleRunPipelineTests()}
+                          disabled={
+                            isGeneratingTestCases ||
+                            isRunningTests ||
+                            upsertPipelineTask.isPending ||
+                            !(selectedTask.generatedTestCases && selectedTask.generatedTestCases.length > 0)
+                          }
+                        >
+                          {isRunningTests ? (
+                            <>
+                              <Loader2 className="size-3 mr-1 animate-spin" />
+                              执行中…
+                            </>
+                          ) : (
+                            <>
+                              <Play className="size-3.5 mr-1" />
+                              执行自动化测试
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {(testStreamPhase !== null || testStreamMarkdown.trim().length > 0) && (
+                      <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-muted/30 p-4 space-y-2">
+                        <div className="flex items-center justify-between gap-2 shrink-0">
+                          <h4 className="font-medium text-sm flex items-center gap-2 min-w-0">
+                            {testStreamPhase === 'execute_tests' ? (
+                              <>
+                                <Activity className="size-4 text-primary shrink-0" />
+                                测试报告 · 模型流式输出
+                              </>
+                            ) : testStreamPhase === 'generate_cases' ? (
+                              <>
+                                <FlaskConical className="size-4 text-primary shrink-0" />
+                                测试用例 · 模型流式输出
+                              </>
+                            ) : (
+                              <>
+                                <FileCheck className="size-4 text-muted-foreground shrink-0" />
+                                最近一次模型输出
+                              </>
+                            )}
+                          </h4>
+                          <div className="flex shrink-0 items-center gap-2">
+                            {(isGeneratingTestCases || isRunningTests) && (
+                              <Loader2 className="size-4 animate-spin text-primary" aria-hidden />
+                            )}
+                            <span className="hidden text-[10px] text-muted-foreground sm:inline tabular-nums">
+                              框内滚动查看
+                            </span>
+                          </div>
+                        </div>
+                        <div
+                          className={cn(
+                            'h-[min(38vh,360px)] max-h-[50vh] w-full min-h-[8rem] shrink-0 overflow-y-auto overflow-x-auto',
+                            'rounded-md border border-border bg-card p-3 text-sm overscroll-y-contain',
+                            '[scrollbar-gutter:stable]',
+                          )}
+                          role="region"
+                          aria-label="模型流式输出"
+                        >
+                          {testStreamMarkdown.trim() ? (
+                            <div className="min-w-0 break-words [&_.prose]:max-w-none">
+                              <Streamdown>{testStreamMarkdown}</Streamdown>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">正在连接模型…</p>
+                          )}
+                          <div ref={testStreamEndRef} className="h-px shrink-0" aria-hidden />
+                        </div>
+                      </div>
+                    )}
+
+                    {(selectedTask.generatedTestCases ?? []).length > 0 ? (
+                      <div className="border border-border rounded-lg overflow-hidden">
+                        <div className="bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                          测试用例（自动生成 · 执行依据）
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-muted/30 border-b border-border">
+                              <tr>
+                                <th className="text-left p-3 font-medium">标题 / 追溯</th>
+                                <th className="text-left p-3 font-medium w-[120px]">依据</th>
+                                <th className="text-left p-3 font-medium">步骤与期望</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border">
+                              {(selectedTask.generatedTestCases ?? []).map((tc) => (
+                                <tr key={tc.id} className="hover:bg-muted/30">
+                                  <td className="p-3 align-top">
+                                    <div className="font-medium text-foreground">{tc.title}</div>
+                                    <div className="text-xs text-muted-foreground mt-1 font-mono">{tc.trace}</div>
+                                    {tc.relatedApiPath ? (
+                                      <div className="text-xs text-primary mt-0.5 font-mono">{tc.relatedApiPath}</div>
+                                    ) : null}
+                                  </td>
+                                  <td className="p-3 align-top">
+                                    <div className="flex flex-wrap gap-1">
+                                      {tc.basis.map((b) => (
+                                        <Badge
+                                          key={b}
+                                          variant="outline"
+                                          className={cn(
+                                            'text-[10px] px-1.5 py-0 font-normal',
+                                            b === 'fs' && 'border-slate-400/50 text-slate-700',
+                                            b === 'ts' && 'border-indigo-400/50 text-indigo-800',
+                                            b === 'code' && 'border-purple-400/50 text-purple-800',
+                                          )}
+                                        >
+                                          {b.toUpperCase()}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  </td>
+                                  <td className="p-3 align-top text-xs text-muted-foreground">
+                                    <div>
+                                      <span className="font-medium text-foreground">步骤：</span>
+                                      {tc.steps}
+                                    </div>
+                                    <div className="mt-1">
+                                      <span className="font-medium text-foreground">期望：</span>
+                                      {tc.expected}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {displayTestReport ? (
+                      <div className="space-y-4">
+                        {testRunPreview ? (
+                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs">
+                            <span className="text-muted-foreground">
+                              查看历史快照：
+                              {new Date(testRunPreview.createdAt).toLocaleString('zh-CN')}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => setTestRunPreview(null)}
+                            >
+                              返回当前 / 最新结果
+                            </Button>
+                          </div>
+                        ) : null}
+                        {testRunPreview?.note ? (
+                          <p className="text-xs text-muted-foreground">{testRunPreview.note}</p>
+                        ) : null}
+
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                          <div className="text-center p-4 bg-muted/50 rounded-lg border border-border">
+                            <div className="text-2xl font-bold">{displayTestReport.total}</div>
                             <div className="text-xs text-muted-foreground mt-1">总测试数</div>
                           </div>
-                          <div className="text-center p-4 bg-green-50 rounded-lg">
-                            <div className="text-2xl font-bold text-green-600">{selectedTask.testReport.passed}</div>
+                          <div className="text-center p-4 bg-green-500/10 rounded-lg border border-green-500/20">
+                            <div className="text-2xl font-bold text-green-700">{displayTestReport.passed}</div>
                             <div className="text-xs text-muted-foreground mt-1">通过</div>
                           </div>
-                          <div className="text-center p-4 bg-red-50 rounded-lg">
-                            <div className="text-2xl font-bold text-red-600">{selectedTask.testReport.failed}</div>
+                          <div className="text-center p-4 bg-red-500/10 rounded-lg border border-red-500/20">
+                            <div className="text-2xl font-bold text-red-700">{displayTestReport.failed}</div>
                             <div className="text-xs text-muted-foreground mt-1">失败</div>
                           </div>
-                          <div className="text-center p-4 bg-blue-50 rounded-lg">
-                            <div className="text-2xl font-bold text-blue-600">{selectedTask.testReport.coverage}%</div>
+                          <div className="text-center p-4 bg-primary/10 rounded-lg border border-primary/20">
+                            <div className="text-2xl font-bold text-primary">{displayTestReport.coverage}%</div>
                             <div className="text-xs text-muted-foreground mt-1">代码覆盖率</div>
                           </div>
                         </div>
 
-                        {/* 测试详情 */}
-                        <div className="border rounded-lg overflow-hidden">
+                        <div className="border border-border rounded-lg overflow-hidden">
                           <table className="w-full text-sm">
-                            <thead className="bg-muted/50">
+                            <thead className="bg-muted/50 border-b border-border">
                               <tr>
                                 <th className="text-left p-3 font-medium">测试用例</th>
                                 <th className="text-left p-3 font-medium">状态</th>
@@ -1366,13 +1792,13 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                                 <th className="text-left p-3 font-medium">错误信息</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y">
-                              {selectedTask.testReport.details.map((test, idx) => (
-                                <tr key={idx} className="hover:bg-muted/30">
+                            <tbody className="divide-y divide-border">
+                              {displayTestReport.details.map((test, idx) => (
+                                <tr key={`${test.name}-${idx}`} className="hover:bg-muted/30">
                                   <td className="p-3 font-mono text-xs">{test.name}</td>
                                   <td className="p-3">
                                     {test.status === 'passed' ? (
-                                      <Badge variant="default" className="bg-green-500 gap-1">
+                                      <Badge variant="default" className="bg-green-600 gap-1">
                                         <CheckCircle2 className="size-3" />
                                         通过
                                       </Badge>
@@ -1384,7 +1810,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                                     )}
                                   </td>
                                   <td className="p-3 text-muted-foreground">{test.duration}</td>
-                                  <td className="p-3 text-red-500 text-xs">{test.error || '-'}</td>
+                                  <td className="p-3 text-red-600 text-xs">{test.error || '—'}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1392,12 +1818,53 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                         </div>
                       </div>
                     ) : (
-                      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                      <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground border border-dashed border-border rounded-lg">
                         <FileCheck className="size-12 mb-2 opacity-50" />
-                        <p>测试报告将在自动化测试完成后生成</p>
-                        <p className="text-sm mt-1">当前阶段: {selectedTask.stage}</p>
+                        <p>尚无测试报告</p>
+                        <p className="text-sm mt-1 max-w-md">
+                          请使用「AI 生成测试用例」后，再点击「执行自动化测试」生成报告。流水线阶段为：{selectedTask.stage}
+                        </p>
                       </div>
                     )}
+
+                    {selectedTask.testRunHistory && selectedTask.testRunHistory.length > 0 ? (
+                      <div className="pt-2 border-t border-border">
+                        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-2">
+                          <History className="size-3.5 shrink-0" />
+                          测试执行历史（点击切换快照）
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant={testRunPreview ? 'outline' : 'default'}
+                            size="sm"
+                            className="h-8 text-xs font-normal"
+                            onClick={() => setTestRunPreview(null)}
+                          >
+                            当前 / 最新
+                          </Button>
+                          {[...selectedTask.testRunHistory].reverse().map((rec) => (
+                            <Button
+                              key={rec.id}
+                              type="button"
+                              variant={testRunPreview?.id === rec.id ? 'default' : 'outline'}
+                              size="sm"
+                              className="h-8 text-xs font-normal"
+                              onClick={() => setTestRunPreview(rec)}
+                            >
+                              {new Date(rec.createdAt).toLocaleString('zh-CN', {
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                              })}
+                              {rec.note ? ' · 回退' : ''}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -1459,182 +1926,283 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
 
       {isList ? (
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
-          <DialogHeader className="shrink-0">
+        <DialogContent className="flex max-h-[85vh] w-full max-w-2xl flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="shrink-0 space-y-2 border-b border-border px-6 pt-6 pb-4 text-left">
             <DialogTitle>创建流水线</DialogTitle>
             <DialogDescription>
-              配置流水线基础信息，必须关联 PRD 与规格，并对接 Git 仓库地址。
+              选择已具备 PRD 与规格的需求，配置 Git 与运行环境；提交后将写入文档并生成可追踪的流水线记录。
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-2 pr-1">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">关联需求（主线）</label>
-              <Select
-                value={createForm.requirementId}
-                onValueChange={syncPipelineNameByRequirement}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="请先选择需求" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableRequirementsForPipeline.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.title} ({r.id})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                仅展示满足前置依赖（已存在 PRD 与规格说明）且尚未创建流水线的需求。
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">流水线名称</label>
-              <Input
-                placeholder={defaultPipelineName || '例如：支付网关-生产流水线'}
-                value={createForm.name}
-                onChange={(e) => setCreateForm((prev) => ({ ...prev, name: e.target.value }))}
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Git 认证方式</label>
-                <Select
-                  value={createForm.gitAuthMode}
-                  onValueChange={(value: ICreatePipelineForm['gitAuthMode']) =>
-                    setCreateForm((prev) => ({
-                      ...prev,
-                      gitAuthMode: value,
-                    }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择认证方式" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ssh">SSH</SelectItem>
-                    <SelectItem value="pat">PAT</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">触发方式</label>
-                <Select
-                  value={createForm.triggerMode}
-                  onValueChange={(value: ICreatePipelineForm['triggerMode']) =>
-                    setCreateForm((prev) => ({ ...prev, triggerMode: value }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择触发方式" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="manual">手动触发</SelectItem>
-                    <SelectItem value="push">代码推送触发</SelectItem>
-                    <SelectItem value="schedule">定时触发</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">优先级</label>
-                <Select
-                  value={createForm.priority}
-                  onValueChange={(value: ICreatePipelineForm['priority']) =>
-                    setCreateForm((prev) => ({ ...prev, priority: value }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="选择优先级" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="P0">P0</SelectItem>
-                    <SelectItem value="P1">P1</SelectItem>
-                    <SelectItem value="P2">P2</SelectItem>
-                    <SelectItem value="P3">P3</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Git 地址</label>
-              <Input
-                placeholder={
-                  createForm.gitAuthMode === 'pat'
-                    ? 'https://github.com/org/repo.git'
-                    : 'git@github.com:org/repo.git'
-                }
-                value={createForm.gitUrl}
-                onChange={(e) => setCreateForm((prev) => ({ ...prev, gitUrl: e.target.value }))}
-              />
-              {productForSelectedRequirement && (
-                <p className="text-xs text-muted-foreground">
-                  已根据需求所属产品「{productForSelectedRequirement.name}」从产品目录带入；可在「产品管理」中维护仓库与沙箱。
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-5 pr-1">
+            <section
+              className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 shadow-sm"
+              aria-labelledby="cp-section-req"
+            >
+              <div className="space-y-1">
+                <h3 id="cp-section-req" className="text-sm font-semibold text-foreground">
+                  关联与命名
+                </h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  仅列出已具备 PRD 与规格、且尚未创建流水线的需求；名称可与需求标题联动。
                 </p>
-              )}
-            </div>
-
-            {createForm.gitAuthMode === 'pat' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              </div>
+              <div className="space-y-4">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Git 用户名</label>
-                  <Input
-                    placeholder="未填写时默认 git"
-                    value={createForm.gitUsername}
-                    onChange={(e) => setCreateForm((prev) => ({ ...prev, gitUsername: e.target.value }))}
-                  />
+                  <Label htmlFor="cp-requirement" className="text-sm font-medium">
+                    关联需求（主线）
+                  </Label>
+                  <Select
+                    value={createForm.requirementId}
+                    onValueChange={syncPipelineNameByRequirement}
+                  >
+                    <SelectTrigger id="cp-requirement" className="w-full">
+                      <SelectValue placeholder="请先选择需求" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableRequirementsForPipeline.map((r) => (
+                        <SelectItem key={r.id} value={r.id}>
+                          {r.title} ({r.id})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Git PAT （ Personal Access Token ）</label>
+                  <Label htmlFor="cp-name" className="text-sm font-medium">
+                    流水线名称
+                  </Label>
                   <Input
-                    type="password"
-                    placeholder="仅 HTTPS 地址生效，不会保存到流水线元数据"
-                    value={createForm.gitPat}
-                    onChange={(e) => setCreateForm((prev) => ({ ...prev, gitPat: e.target.value }))}
+                    id="cp-name"
+                    placeholder={defaultPipelineName || '例如：支付网关-生产流水线'}
+                    value={createForm.name}
+                    onChange={(e) => setCreateForm((prev) => ({ ...prev, name: e.target.value }))}
                   />
                 </div>
               </div>
-            )}
+            </section>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">沙箱环境地址</label>
-              <Input
-                placeholder="https://sandbox.example.com"
-                value={createForm.sandboxUrl}
-                onChange={(e) => setCreateForm((prev) => ({ ...prev, sandboxUrl: e.target.value }))}
-              />
+            <section
+              className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 shadow-sm"
+              aria-labelledby="cp-section-git"
+            >
+              <div className="space-y-1">
+                <h3 id="cp-section-git" className="text-sm font-semibold text-foreground">
+                  Git 仓库与认证
+                </h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  默认使用 PAT + HTTPS；仓库地址可与产品主数据对齐后在创建页微调。
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="cp-git-auth" className="text-sm font-medium">
+                    Git 认证方式
+                  </Label>
+                  <Select
+                    value={createForm.gitAuthMode}
+                    onValueChange={(value: ICreatePipelineForm['gitAuthMode']) =>
+                      setCreateForm((prev) => ({
+                        ...prev,
+                        gitAuthMode: value,
+                      }))
+                    }
+                  >
+                    <SelectTrigger id="cp-git-auth" className="w-full">
+                      <SelectValue placeholder="选择认证方式" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pat">PAT（Personal Access Token）</SelectItem>
+                      <SelectItem value="ssh">SSH</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cp-trigger" className="text-sm font-medium">
+                    触发方式
+                  </Label>
+                  <Select
+                    value={createForm.triggerMode}
+                    onValueChange={(value: ICreatePipelineForm['triggerMode']) =>
+                      setCreateForm((prev) => ({ ...prev, triggerMode: value }))
+                    }
+                  >
+                    <SelectTrigger id="cp-trigger" className="w-full">
+                      <SelectValue placeholder="选择触发方式" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="manual">手动触发</SelectItem>
+                      <SelectItem value="push">代码推送触发</SelectItem>
+                      <SelectItem value="schedule">定时触发</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cp-priority" className="text-sm font-medium">
+                    优先级
+                  </Label>
+                  <Select
+                    value={createForm.priority}
+                    onValueChange={(value: ICreatePipelineForm['priority']) =>
+                      setCreateForm((prev) => ({ ...prev, priority: value }))
+                    }
+                  >
+                    <SelectTrigger id="cp-priority" className="w-full">
+                      <SelectValue placeholder="选择优先级" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="P0">P0</SelectItem>
+                      <SelectItem value="P1">P1</SelectItem>
+                      <SelectItem value="P2">P2</SelectItem>
+                      <SelectItem value="P3">P3</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {createForm.gitAuthMode === 'pat' && (
+                <div
+                  className="rounded-md border border-border bg-background/80 px-3 py-2.5 text-xs text-muted-foreground"
+                  role="note"
+                >
+                  <span className="font-medium text-foreground">PAT 说明：</span>
+                  <a
+                    href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens"
+                    className="text-primary underline-offset-2 hover:underline ml-1"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    GitHub
+                  </a>
+                  <span className="mx-1 text-muted-foreground">·</span>
+                  <a
+                    href="https://docs.gitlab.com/user/profile/personal_access_tokens/"
+                    className="text-primary underline-offset-2 hover:underline"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    GitLab
+                  </a>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="cp-git-url" className="text-sm font-medium">
+                  Git 仓库地址
+                </Label>
+                <Input
+                  id="cp-git-url"
+                  className="font-mono text-sm"
+                  placeholder={
+                    createForm.gitAuthMode === 'pat'
+                      ? 'https://github.com/org/repo.git'
+                      : 'git@github.com:org/repo.git'
+                  }
+                  value={createForm.gitUrl}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, gitUrl: e.target.value }))}
+                />
+                {productForSelectedRequirement && (
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    已由产品「{productForSelectedRequirement.name}」预填；可在「产品管理」中维护主数据后重新打开本弹窗同步。
+                  </p>
+                )}
+              </div>
+
+              {createForm.gitAuthMode === 'pat' && (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="cp-git-user" className="text-sm font-medium">
+                      Git 用户名
+                    </Label>
+                    <Input
+                      id="cp-git-user"
+                      placeholder="未填写时默认 git"
+                      value={createForm.gitUsername}
+                      onChange={(e) => setCreateForm((prev) => ({ ...prev, gitUsername: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="cp-git-pat" className="text-sm font-medium">
+                      Git PAT（Personal Access Token）
+                    </Label>
+                    <Input
+                      id="cp-git-pat"
+                      type="password"
+                      placeholder="仅 HTTPS 生效；不会写入流水线持久化元数据"
+                      value={createForm.gitPat}
+                      onChange={(e) => setCreateForm((prev) => ({ ...prev, gitPat: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <section
+              className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 shadow-sm"
+              aria-labelledby="cp-section-run"
+            >
+              <h3 id="cp-section-run" className="text-sm font-semibold text-foreground">
+                运行环境
+              </h3>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="cp-sandbox" className="text-sm font-medium">
+                    沙箱环境地址
+                  </Label>
+                  <Input
+                    id="cp-sandbox"
+                    className="font-mono text-sm"
+                    placeholder="https://sandbox.example.com"
+                    value={createForm.sandboxUrl}
+                    onChange={(e) => setCreateForm((prev) => ({ ...prev, sandboxUrl: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="cp-branch" className="text-sm font-medium">
+                    目标分支
+                  </Label>
+                  <Input
+                    id="cp-branch"
+                    className="font-mono text-sm"
+                    placeholder="main"
+                    value={createForm.branch}
+                    onChange={(e) => setCreateForm((prev) => ({ ...prev, branch: e.target.value }))}
+                  />
+                </div>
+              </div>
+            </section>
+
+            <div
+              className="space-y-2 rounded-lg border border-border border-l-4 border-l-primary bg-muted/20 p-4 text-sm shadow-sm"
+              role="status"
+            >
+              <p className="font-semibold text-foreground">交付前核对</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                提交后将把 PRD / 规格文档推送至上述 Git 分支，并创建本流水线任务。
+              </p>
+              <ul className="list-inside list-disc space-y-1 text-muted-foreground">
+                <li>PRD 数量：{prdOptions.length}</li>
+                <li>规格数量：{specOptions.length}</li>
+              </ul>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">目标分支</label>
-              <Input
-                placeholder="main"
-                value={createForm.branch}
-                onChange={(e) => setCreateForm((prev) => ({ ...prev, branch: e.target.value }))}
-              />
-            </div>
-
-            <div className="rounded-md border bg-muted/20 p-3 text-sm space-y-1">
-              <p>将自动关联该需求下的 PRD 与规格：</p>
-              <p className="text-muted-foreground">PRD 数量：{prdOptions.length}</p>
-              <p className="text-muted-foreground">规格数量：{specOptions.length}</p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">备注</label>
-              <Textarea
-                placeholder="可填写执行策略、环境变量说明等"
-                value={createForm.remarks}
-                onChange={(e) => setCreateForm((prev) => ({ ...prev, remarks: e.target.value }))}
-                className="min-h-[80px]"
-              />
-            </div>
+            <section className="space-y-3 rounded-lg border border-border bg-muted/20 p-4 shadow-sm">
+              <div className="space-y-2">
+                <Label htmlFor="cp-remarks" className="text-sm font-medium">
+                  备注
+                </Label>
+                <Textarea
+                  id="cp-remarks"
+                  placeholder="可填写执行策略、环境变量说明等"
+                  value={createForm.remarks}
+                  onChange={(e) => setCreateForm((prev) => ({ ...prev, remarks: e.target.value }))}
+                  className="min-h-[88px]"
+                />
+              </div>
+            </section>
           </div>
 
-          <DialogFooter className="shrink-0 border-t pt-4 bg-background">
+          <DialogFooter className="shrink-0 gap-2 border-t border-border bg-background px-6 py-4 sm:justify-end">
             <Button
               variant="outline"
               onClick={() => {
@@ -1648,10 +2216,10 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
               {isPublishingDocs ? (
                 <>
                   <Loader2 className="size-4 mr-2 animate-spin" />
-                  提交中...
+                  提交中…
                 </>
               ) : (
-                '创建'
+                '创建流水线'
               )}
             </Button>
           </DialogFooter>

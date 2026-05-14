@@ -38,6 +38,7 @@ import type { IProduct } from '@/lib/rd-types';
 import { toast } from 'sonner';
 import { ExternalLink, Package, Pencil, Plus, Trash2 } from 'lucide-react';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
+import { cn } from '@/lib/utils';
 
 function newProductId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -331,128 +332,208 @@ const ProductManagementPage: React.FC = () => {
           if (!open) setEditingId(null);
         }}
       >
-        <DialogContent className="max-h-[min(90vh,640px)] overflow-y-auto sm:max-w-lg">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[85vh] w-full max-w-2xl flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="shrink-0 space-y-2 border-b border-border px-6 pt-6 pb-4 text-left">
             <DialogTitle>{editingId ? '编辑产品' : '新增产品'}</DialogTitle>
             <DialogDescription>
-              填写产品编码、产品标识（必填）、名称、负责人、技术经理、类型及环境与仓库地址。
+              填写基础标识、职责分工与类型，并维护沙箱、生产与 Git 仓库地址，便于流水线一键带入。
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-1">
-            <div className="grid gap-2">
-              <Label htmlFor="pm-code">产品编码</Label>
-              <Input
-                id="pm-code"
-                value={form.code}
-                onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
-                placeholder="例如：PRD-CORE-001"
-                className="rd-input-glass font-mono text-sm"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pm-identifier">
-                产品标识 <RequiredMark />
-              </Label>
-              <Input
-                id="pm-identifier"
-                value={form.identifier}
-                onChange={(e) => setForm((f) => ({ ...f, identifier: e.target.value }))}
-                placeholder="例如：core-trading、数据中台-dw"
-                className="rd-input-glass font-mono text-sm"
-              />
-              <p className="text-xs text-muted-foreground">
-                系统内稳定引用，建议使用小写英文、数字与短横线；与「产品编码」可同时维护。
-              </p>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pm-name">
-                产品名称 <RequiredMark />
-              </Label>
-              <Input
-                id="pm-name"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="例如：核心交易平台"
-                className="rd-input-glass"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pm-owner">产品负责人</Label>
-              <Input
-                id="pm-owner"
-                value={form.owner}
-                onChange={(e) => setForm((f) => ({ ...f, owner: e.target.value }))}
-                placeholder="姓名或账号"
-                className="rd-input-glass"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pm-tm">技术经理</Label>
-              <Input
-                id="pm-tm"
-                value={form.technicalManager}
-                onChange={(e) => setForm((f) => ({ ...f, technicalManager: e.target.value }))}
-                placeholder="姓名或账号"
-                className="rd-input-glass"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pm-type">产品类型</Label>
-              <Input
-                id="pm-type"
-                value={form.productType}
-                onChange={(e) => setForm((f) => ({ ...f, productType: e.target.value }))}
-                placeholder="例如：自研业务系统、平台型产品、商业套件"
-                className="rd-input-glass"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pm-desc">描述</Label>
-              <Textarea
-                id="pm-desc"
-                value={form.description}
-                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                placeholder="产品定位、边界说明等"
-                className="min-h-[88px] rd-input-glass"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pm-sandbox">沙箱地址</Label>
-              <Input
-                id="pm-sandbox"
-                value={form.sandboxUrl}
-                onChange={(e) => setForm((f) => ({ ...f, sandboxUrl: e.target.value }))}
-                placeholder="https://sandbox.example.com"
-                className="rd-input-glass font-mono text-sm"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pm-prod">生产地址</Label>
-              <Input
-                id="pm-prod"
-                value={form.productionUrl}
-                onChange={(e) => setForm((f) => ({ ...f, productionUrl: e.target.value }))}
-                placeholder="https://app.example.com"
-                className="rd-input-glass font-mono text-sm"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="pm-git">Git 仓库地址</Label>
-              <Input
-                id="pm-git"
-                value={form.gitUrl}
-                onChange={(e) => setForm((f) => ({ ...f, gitUrl: e.target.value }))}
-                placeholder="https://github.com/org/repo"
-                className="rd-input-glass font-mono text-sm"
-              />
-            </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-5">
+            <section
+              className={cn(
+                'space-y-4 rounded-lg border border-border bg-muted/20 p-4',
+                'shadow-sm',
+              )}
+              aria-labelledby="pm-section-identity"
+            >
+              <div className="space-y-1">
+                <h3 id="pm-section-identity" className="text-sm font-semibold text-foreground">
+                  基础标识
+                </h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  编码与标识用于系统内引用；标识创建后请谨慎修改。
+                </p>
+              </div>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="pm-code" className="text-sm font-medium">
+                    产品编码
+                  </Label>
+                  <Input
+                    id="pm-code"
+                    value={form.code}
+                    onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
+                    placeholder="例如：PRD-CORE-001"
+                    className="rd-input-glass font-mono text-sm"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pm-identifier" className="text-sm font-medium">
+                    产品标识 <RequiredMark />
+                  </Label>
+                  <Input
+                    id="pm-identifier"
+                    value={form.identifier}
+                    onChange={(e) => setForm((f) => ({ ...f, identifier: e.target.value }))}
+                    placeholder="例如：core-trading、数据中台-dw"
+                    className="rd-input-glass font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    系统内稳定引用，建议使用小写英文、数字与短横线；与「产品编码」可同时维护。
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pm-name" className="text-sm font-medium">
+                    产品名称 <RequiredMark />
+                  </Label>
+                  <Input
+                    id="pm-name"
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="例如：核心交易平台"
+                    className="rd-input-glass"
+                  />
+                </div>
+              </div>
+            </section>
+
+            <section
+              className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 shadow-sm"
+              aria-labelledby="pm-section-roles"
+            >
+              <div className="space-y-1">
+                <h3 id="pm-section-roles" className="text-sm font-semibold text-foreground">
+                  职责与分类
+                </h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  便于在需求与流水线中展示责任人与产品形态。
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="pm-owner" className="text-sm font-medium">
+                    产品负责人
+                  </Label>
+                  <Input
+                    id="pm-owner"
+                    value={form.owner}
+                    onChange={(e) => setForm((f) => ({ ...f, owner: e.target.value }))}
+                    placeholder="姓名或账号"
+                    className="rd-input-glass"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pm-tm" className="text-sm font-medium">
+                    技术经理
+                  </Label>
+                  <Input
+                    id="pm-tm"
+                    value={form.technicalManager}
+                    onChange={(e) => setForm((f) => ({ ...f, technicalManager: e.target.value }))}
+                    placeholder="姓名或账号"
+                    className="rd-input-glass"
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="pm-type" className="text-sm font-medium">
+                    产品类型
+                  </Label>
+                  <Input
+                    id="pm-type"
+                    value={form.productType}
+                    onChange={(e) => setForm((f) => ({ ...f, productType: e.target.value }))}
+                    placeholder="例如：自研业务系统、平台型产品、商业套件"
+                    className="rd-input-glass"
+                  />
+                </div>
+              </div>
+            </section>
+
+            <section
+              className="space-y-3 rounded-lg border border-border bg-muted/20 p-4 shadow-sm"
+              aria-labelledby="pm-section-desc"
+            >
+              <h3 id="pm-section-desc" className="text-sm font-semibold text-foreground">
+                说明
+              </h3>
+              <div className="space-y-2">
+                <Label htmlFor="pm-desc" className="text-sm font-medium">
+                  描述
+                </Label>
+                <Textarea
+                  id="pm-desc"
+                  value={form.description}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="产品定位、边界说明等"
+                  className="min-h-[88px] rd-input-glass"
+                />
+              </div>
+            </section>
+
+            <section
+              className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 shadow-sm"
+              aria-labelledby="pm-section-env"
+            >
+              <div className="space-y-1">
+                <h3 id="pm-section-env" className="text-sm font-semibold text-foreground">
+                  环境与仓库
+                </h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  创建流水线时将优先从此处带入沙箱与 Git；建议使用 HTTPS 仓库地址以便 PAT 认证。
+                </p>
+              </div>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="pm-sandbox" className="text-sm font-medium">
+                    沙箱环境地址
+                  </Label>
+                  <Input
+                    id="pm-sandbox"
+                    value={form.sandboxUrl}
+                    onChange={(e) => setForm((f) => ({ ...f, sandboxUrl: e.target.value }))}
+                    placeholder="https://sandbox.example.com"
+                    className="rd-input-glass font-mono text-sm"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pm-prod" className="text-sm font-medium">
+                    生产环境地址
+                  </Label>
+                  <Input
+                    id="pm-prod"
+                    value={form.productionUrl}
+                    onChange={(e) => setForm((f) => ({ ...f, productionUrl: e.target.value }))}
+                    placeholder="https://app.example.com"
+                    className="rd-input-glass font-mono text-sm"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pm-git" className="text-sm font-medium">
+                    Git 仓库地址
+                  </Label>
+                  <Input
+                    id="pm-git"
+                    value={form.gitUrl}
+                    onChange={(e) => setForm((f) => ({ ...f, gitUrl: e.target.value }))}
+                    placeholder="https://github.com/org/repo.git"
+                    className="rd-input-glass font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    与流水线默认 PAT 认证一致时，请填写以 <code className="font-mono text-[11px]">https://</code> 开头的克隆地址。
+                  </p>
+                </div>
+              </div>
+            </section>
           </div>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="secondary" onClick={() => setDialogOpen(false)} disabled={submitting}>
+
+          <DialogFooter className="shrink-0 gap-2 border-t border-border bg-background px-6 py-4 sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={submitting}>
               取消
             </Button>
             <Button type="button" onClick={() => void handleSubmit()} disabled={submitting}>
-              {submitting ? '保存中…' : '保存'}
+              {submitting ? '保存中…' : editingId ? '保存更改' : '创建产品'}
             </Button>
           </DialogFooter>
         </DialogContent>

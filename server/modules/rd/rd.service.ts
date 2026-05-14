@@ -258,6 +258,24 @@ export interface IPipelineCodeReviewRecord {
   qualityMetrics: IPipelineQualityMetrics;
 }
 
+export interface IPipelineGeneratedTestCase {
+  id: string;
+  title: string;
+  basis: Array<'fs' | 'ts' | 'code'>;
+  trace: string;
+  steps: string;
+  expected: string;
+  relatedApiPath?: string;
+}
+
+export interface IPipelineTestRunRecord {
+  id: string;
+  createdAt: string;
+  testReport: IPipelineTestReport;
+  caseIds: string[];
+  note?: string;
+}
+
 export interface IPipelinePublishedDocument {
   path: string;
   kind: 'prd' | 'fs' | 'ts';
@@ -310,6 +328,8 @@ export interface IPipelineTaskRow {
   testReport?: IPipelineTestReport | null;
   qualityMetrics?: IPipelineQualityMetrics | null;
   codeReviewHistory?: IPipelineCodeReviewRecord[] | null;
+  generatedTestCases?: IPipelineGeneratedTestCase[] | null;
+  testRunHistory?: IPipelineTestRunRecord[] | null;
   pipelineMeta: IPipelineMeta;
   commitStore?: IPipelineCommitStore | null;
   createdAt: string;
@@ -997,6 +1017,12 @@ export class RdService implements OnModuleInit {
       ALTER TABLE rd_pipeline_tasks ADD COLUMN IF NOT EXISTS code_review_history JSONB NOT NULL DEFAULT '[]'::jsonb;
     `);
     await this.db.execute(sql`
+      ALTER TABLE rd_pipeline_tasks ADD COLUMN IF NOT EXISTS generated_test_cases JSONB NOT NULL DEFAULT '[]'::jsonb;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_pipeline_tasks ADD COLUMN IF NOT EXISTS test_run_history JSONB NOT NULL DEFAULT '[]'::jsonb;
+    `);
+    await this.db.execute(sql`
       ALTER TABLE rd_products ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
     `);
     await this.db.execute(sql`
@@ -1522,6 +1548,12 @@ export class RdService implements OnModuleInit {
     const codeReviewHistoryRaw =
       (r.code_review_history as IPipelineCodeReviewRecord[] | null) ??
       (r.codeReviewHistory as IPipelineCodeReviewRecord[] | null);
+    const generatedTestCasesRaw =
+      (r.generated_test_cases as IPipelineGeneratedTestCase[] | null) ??
+      (r.generatedTestCases as IPipelineGeneratedTestCase[] | null);
+    const testRunHistoryRaw =
+      (r.test_run_history as IPipelineTestRunRecord[] | null) ??
+      (r.testRunHistory as IPipelineTestRunRecord[] | null);
     const pipelineMeta =
       (r.pipeline_meta as IPipelineMeta) || (r.pipelineMeta as IPipelineMeta) || {};
     const commitStore =
@@ -1539,6 +1571,8 @@ export class RdService implements OnModuleInit {
       testReport: testReport ?? undefined,
       qualityMetrics: qualityMetrics ?? undefined,
       codeReviewHistory: Array.isArray(codeReviewHistoryRaw) ? codeReviewHistoryRaw : undefined,
+      generatedTestCases: Array.isArray(generatedTestCasesRaw) ? generatedTestCasesRaw : undefined,
+      testRunHistory: Array.isArray(testRunHistoryRaw) ? testRunHistoryRaw : undefined,
       pipelineMeta,
       commitStore: commitStore ?? undefined,
       createdAt: t.createdAt,
@@ -3019,6 +3053,12 @@ export class RdService implements OnModuleInit {
           qualityMetrics: body.qualityMetrics !== undefined ? body.qualityMetrics : existing.qualityMetrics,
           codeReviewHistory:
             body.codeReviewHistory !== undefined ? body.codeReviewHistory : existing.codeReviewHistory ?? [],
+          generatedTestCases:
+            body.generatedTestCases !== undefined
+              ? body.generatedTestCases
+              : existing.generatedTestCases ?? [],
+          testRunHistory:
+            body.testRunHistory !== undefined ? body.testRunHistory : existing.testRunHistory ?? [],
           createdAt: existing.createdAt,
           updatedAt: now,
           createdBy: existing.createdBy ?? body.createdBy ?? null,
@@ -3037,6 +3077,8 @@ export class RdService implements OnModuleInit {
           testReport: body.testReport,
           qualityMetrics: body.qualityMetrics,
           codeReviewHistory: body.codeReviewHistory ?? [],
+          generatedTestCases: body.generatedTestCases ?? [],
+          testRunHistory: body.testRunHistory ?? [],
           pipelineMeta: body.pipelineMeta || {},
           commitStore: body.commitStore,
           createdAt: body.createdAt || now,
@@ -3048,7 +3090,7 @@ export class RdService implements OnModuleInit {
       INSERT INTO rd_pipeline_tasks (
         id, requirement_id, requirement_title, status, progress, stage,
         start_time, estimated_end_time, logs, test_report, quality_metrics,
-        code_review_history, pipeline_meta, commit_store, created_by, updated_by, created_at, updated_at
+        code_review_history, generated_test_cases, test_run_history, pipeline_meta, commit_store, created_by, updated_by, created_at, updated_at
       ) VALUES (
         ${merged.id},
         ${merged.requirementId},
@@ -3062,6 +3104,8 @@ export class RdService implements OnModuleInit {
         ${this.jsonbSql(merged.testReport ?? null)},
         ${this.jsonbSql(merged.qualityMetrics ?? null)},
         ${JSON.stringify(merged.codeReviewHistory ?? [])}::jsonb,
+        ${JSON.stringify(merged.generatedTestCases ?? [])}::jsonb,
+        ${JSON.stringify(merged.testRunHistory ?? [])}::jsonb,
         ${JSON.stringify(merged.pipelineMeta || {})}::jsonb,
         ${this.jsonbSql(merged.commitStore ?? null)},
         ${merged.createdBy ?? null},
@@ -3081,6 +3125,8 @@ export class RdService implements OnModuleInit {
         test_report = EXCLUDED.test_report,
         quality_metrics = EXCLUDED.quality_metrics,
         code_review_history = EXCLUDED.code_review_history,
+        generated_test_cases = EXCLUDED.generated_test_cases,
+        test_run_history = EXCLUDED.test_run_history,
         pipeline_meta = EXCLUDED.pipeline_meta,
         commit_store = EXCLUDED.commit_store,
         updated_by = EXCLUDED.updated_by,

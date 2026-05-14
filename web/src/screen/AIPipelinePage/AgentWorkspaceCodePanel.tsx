@@ -321,7 +321,7 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
         </span>
         <div className="flex shrink-0 items-center gap-2">
           <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => void refetch()}>
-            刷新树
+            刷新
           </Button>
           <Button
             type="button"

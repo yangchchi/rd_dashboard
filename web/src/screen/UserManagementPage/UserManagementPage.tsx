@@ -173,7 +173,6 @@ const UserManagementPage: React.FC = () => {
             icon={Users}
             title="用户管理"
             description="支持创建、查看、删除本地账号；为账号绑定「角色定义」中的访问角色，以控制菜单、页面与按钮权限"
-            descriptionLines="multi"
           />
         </div>
         {can('action.users.create') ? (

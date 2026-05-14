@@ -529,7 +529,6 @@ const BountyHuntPage: React.FC = () => {
             icon={Swords}
             title="赏金猎场"
             description="悬赏需产品经理与技术经理分别接槽；领取不改变需求流转状态。「AI开发中」请在「交付引擎」页创建研发流水线后生效。工序上请先接 PM，再接 TM。"
-            descriptionLines="multi"
           />
         </div>
         <div className="flex items-center gap-3">
