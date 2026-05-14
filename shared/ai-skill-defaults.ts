@@ -38,7 +38,8 @@ export const DEFAULT_AI_SKILLS: Record<string, IDefaultAiSkillConfig> = {
     provider: 'ark',
     model: 'deepseek-v3-2-251201',
     stream: true,
-    tools: [{ type: 'web_search', max_keyword: 3 }],
+    /** 默认不传 web_search：部分方舟配置会长时间挂起等待工具结果；需要时设 ARK_STREAM_ALLOW_WEB_SEARCH=true */
+    tools: [],
     promptTemplate: `你是一位资深产品经理，请基于以下需求生成一份 PRD 文档（必须使用中文）。
 
 原始需求信息：

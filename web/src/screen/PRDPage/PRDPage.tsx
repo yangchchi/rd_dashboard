@@ -47,6 +47,9 @@ function stripHtmlTags(html: string): string {
   return html.replace(/<[^>]+>/g, '').trim();
 }
 
+/** AI 流式生成最长等待（毫秒），避免接口挂起时按钮永久「生成中」 */
+const PRD_STREAM_TIMEOUT_MS = 180_000;
+
 /** 列表与详情统一展示本地时间，避免裸 ISO 字符串 */
 function formatPrdDateTime(iso: string): string {
   if (!iso) return '—';
@@ -214,6 +217,9 @@ const PRDPage: React.FC = () => {
     setPrdPreviewTab('edit');
     setIsStreaming(true);
 
+    const streamAbort = new AbortController();
+    const streamTimeoutId = window.setTimeout(() => streamAbort.abort(), PRD_STREAM_TIMEOUT_MS);
+
     try {
       const originalRequirement = [
         `需求标题：${requirement.title}`,
@@ -224,11 +230,15 @@ const PRDPage: React.FC = () => {
 
       const stream = capabilityClient
         .load('prd_generator_1')
-        .callStream<PrdGeneratorStreamChunk>('textGenerate', {
-          original_requirement: originalRequirement,
-          additional_requirements:
-            '请生成完整的PRD文档，包含背景、目标、业务流程、功能列表和非功能性需求。',
-        });
+        .callStream<PrdGeneratorStreamChunk>(
+          'textGenerate',
+          {
+            original_requirement: originalRequirement,
+            additional_requirements:
+              '请生成完整的PRD文档，包含背景、目标、业务流程、功能列表和非功能性需求。',
+          },
+          { signal: streamAbort.signal }
+        );
 
       let fullContent = '';
       for await (const chunk of stream) {
@@ -273,9 +283,18 @@ const PRDPage: React.FC = () => {
       setSelectedRequirement('');
 
       router.push(`/prd/${newId}/edit`);
-    } catch {
-      toast.error('PRD生成失败，请重试');
+    } catch (e) {
+      const aborted =
+        e instanceof DOMException && e.name === 'AbortError';
+      toast.error(
+        aborted
+          ? `PRD 生成超过 ${PRD_STREAM_TIMEOUT_MS / 60_000} 分钟未结束，已取消。请检查 ARK_API_KEY、网络或模型服务。`
+          : e instanceof Error
+            ? e.message
+            : 'PRD生成失败，请重试'
+      );
     } finally {
+      window.clearTimeout(streamTimeoutId);
       setGenerating(false);
       setIsStreaming(false);
     }

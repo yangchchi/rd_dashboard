@@ -39,6 +39,16 @@ function isReasoningPayload(data: Record<string, unknown>): boolean {
   return false;
 }
 
+/** 方舟 Responses 在带 web_search 时可能长时间等待；默认不传该工具，需启用时设 ARK_STREAM_ALLOW_WEB_SEARCH=true */
+function filterArkRequestTools(skill: AiSkillConfig | null | undefined): unknown[] {
+  const raw = Array.isArray(skill?.tools) ? skill!.tools! : [];
+  if (process.env.ARK_STREAM_ALLOW_WEB_SEARCH === 'true') return raw;
+  return raw.filter((t) => {
+    if (!t || typeof t !== 'object') return true;
+    return String((t as { type?: string }).type) !== 'web_search';
+  });
+}
+
 function extractArkStreamText(payload: unknown): string {
   const data = payload as Record<string, unknown>;
   if (isReasoningPayload(data)) return '';
@@ -229,7 +239,7 @@ export class CapabilitiesService {
   ): AsyncGenerator<string> {
     const model = skill?.model || process.env.ARK_MODEL || DEFAULT_ARK_MODEL;
     const endpoint = skill?.endpoint || process.env.ARK_API_ENDPOINT || DEFAULT_ARK_ENDPOINT;
-    const tools = Array.isArray(skill?.tools) ? skill.tools : [];
+    const tools = filterArkRequestTools(skill);
 
     const response = await fetch(endpoint, {
       method: 'POST',

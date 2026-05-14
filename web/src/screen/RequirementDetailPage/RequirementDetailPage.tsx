@@ -34,7 +34,22 @@ import {
   useAcceptanceRecords,
   usePipelineTasksList,
 } from '@/lib/rd-hooks';
-import type { IRequirement, RequirementStatus } from '@/lib/rd-types';
+import type {
+  IAcceptanceRecord,
+  IPipelineTask,
+  IPrd,
+  IRequirement,
+  IRequirementFlowEvent,
+  ISpecification,
+  RequirementStatus,
+} from '@/lib/rd-types';
+
+/** useQuery 尚无 data 时避免 `= []` 每渲染新建引用，否则会拖垮依赖它们的 useEffect */
+const EMPTY_PRDS: IPrd[] = [];
+const EMPTY_SPECS: ISpecification[] = [];
+const EMPTY_ACCEPTANCE: IAcceptanceRecord[] = [];
+const EMPTY_PIPELINE_TASKS: IPipelineTask[] = [];
+const EMPTY_FLOW_EVENTS: IRequirementFlowEvent[] = [];
 import {
   buildRequirementFlowHistory,
   buildRequirementFlowHistoryFromEvents,
@@ -100,11 +115,16 @@ const RequirementDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { data: requirement, isLoading: reqLoading } = useRequirement(id);
-  const { data: prds = [] } = usePrdsList();
-  const { data: specs = [] } = useSpecsList();
-  const { data: acceptanceRecords = [] } = useAcceptanceRecords();
-  const { data: pipelineTasks = [] } = usePipelineTasksList();
-  const { data: flowEvents = [] } = useRequirementFlowEvents(id);
+  const { data: prdsData } = usePrdsList();
+  const { data: specsData } = useSpecsList();
+  const { data: acceptanceData } = useAcceptanceRecords();
+  const { data: pipelineTasksData } = usePipelineTasksList();
+  const { data: flowEventsData } = useRequirementFlowEvents(id);
+  const prds = prdsData ?? EMPTY_PRDS;
+  const specs = specsData ?? EMPTY_SPECS;
+  const acceptanceRecords = acceptanceData ?? EMPTY_ACCEPTANCE;
+  const pipelineTasks = pipelineTasksData ?? EMPTY_PIPELINE_TASKS;
+  const flowEvents = flowEventsData ?? EMPTY_FLOW_EVENTS;
   const [history, setHistory] = useState<IFlowHistoryItem[]>([]);
   const [relatedDocs, setRelatedDocs] = useState<IRelatedDoc[]>([]);
   const [authVersion, setAuthVersion] = useState(0);

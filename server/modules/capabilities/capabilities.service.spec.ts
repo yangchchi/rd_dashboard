@@ -23,6 +23,7 @@ describe('CapabilitiesService', () => {
     delete process.env.VITE_ARK_API_KEY;
     delete process.env.ARK_API_ENDPOINT;
     delete process.env.ARK_MODEL;
+    delete process.env.ARK_STREAM_ALLOW_WEB_SEARCH;
     global.fetch = jest.fn() as jest.Mock;
   });
 
@@ -119,6 +120,7 @@ describe('CapabilitiesService', () => {
   });
 
   it('streams configurable AI skill prompts through server-side Ark key', async () => {
+    process.env.ARK_STREAM_ALLOW_WEB_SEARCH = 'true';
     process.env.ARK_API_KEY = 'server-key';
     process.env.ARK_API_ENDPOINT = 'https://ark.example.test/responses';
     const responseBody = new ReadableStream({
@@ -159,5 +161,37 @@ describe('CapabilitiesService', () => {
     expect(requestBody.input[0].content[0].text).toBe('PRD: 用户需要一个 AI 研发平台');
     expect(requestBody.tools).toEqual([{ type: 'web_search' }]);
     expect(body).toContain('功能规格正文');
+  });
+
+  it('omits web_search from Ark tool list unless ARK_STREAM_ALLOW_WEB_SEARCH=true', async () => {
+    delete process.env.ARK_STREAM_ALLOW_WEB_SEARCH;
+    process.env.ARK_API_KEY = 'server-key';
+    process.env.ARK_API_ENDPOINT = 'https://ark.example.test/responses';
+    const responseBody = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode('data: {"output_text":"x"}\n\ndata: [DONE]\n\n')
+        );
+        controller.close();
+      },
+    });
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      body: responseBody,
+    })) as jest.Mock;
+    const service = new CapabilitiesService({
+      getAiSkill: jest.fn().mockResolvedValue({
+        model: 'm',
+        promptTemplate: 'P {{prd_document}}',
+        tools: [{ type: 'web_search' }],
+      }),
+    } as never);
+    await collectStream(
+      service.stream('fs_auto_generation', 'textGenerate', {
+        prd_document: '用户需要一个 AI 研发平台',
+      })
+    );
+    const requestBody = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+    expect(requestBody.tools).toEqual([]);
   });
 });
