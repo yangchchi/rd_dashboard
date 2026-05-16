@@ -40,15 +40,9 @@ export const DEFAULT_AI_SKILLS: Record<string, IDefaultAiSkillConfig> = {
     provider: 'ark',
     model: 'deepseek-v3-2-251201',
     stream: true,
-<<<<<<< HEAD
-    /** PRD 须完全基于下方已给材料；勿启用联网检索，否则模型易输出「将搜索…」类前言，污染正文。 */
+    /** PRD 须完全基于下方已给材料；勿启用联网检索，否则模型易输出「将搜索…」类前言，污染正文。默认不传 web_search：部分方舟配置会长时间挂起等待工具结果；需要搜索能力时设 ARK_STREAM_ALLOW_WEB_SEARCH=true。 */
     tools: [],
     promptTemplate: `你是一位资深 B 端产品经理。请仅依据下列已给材料用中文撰写 PRD；禁止假设可联网检索；禁止输出思考过程、「我将搜索/查找…」、工具说明、XML/HTML 推理标签及任何套话前言。回复的第一个非空字符必须是 Markdown 的「#」。
-=======
-    /** 默认不传 web_search：部分方舟配置会长时间挂起等待工具结果；需要时设 ARK_STREAM_ALLOW_WEB_SEARCH=true */
-    tools: [],
-    promptTemplate: `你是一位资深产品经理，请基于以下需求生成一份 PRD 文档（必须使用中文）。
->>>>>>> f136ef170cca4ea752e12457b05260afbb327556
 
 【材料优先级（冲突时从高到低采纳）】
 1) 原始需求（含「需求标题」「需求描述」及文首范围锚定）——定义本条 PRD 必须交付的能力与价值；

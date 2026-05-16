@@ -335,15 +335,11 @@ export class CapabilitiesService {
   ): AsyncGenerator<string> {
     const model = skill?.model || process.env.ARK_MODEL || DEFAULT_ARK_MODEL;
     const endpoint = skill?.endpoint || process.env.ARK_API_ENDPOINT || DEFAULT_ARK_ENDPOINT;
-<<<<<<< HEAD
-    let tools = Array.isArray(skill?.tools) ? [...skill.tools] : [];
+    let tools = filterArkRequestTools(skill);
     /** PRD 插件仅消费请求内材料；禁用 tools（如 web_search），避免模型先输出「将搜索…」类前言污染流式正文 */
     if (capabilityId && /^prd_generator/.test(capabilityId)) {
       tools = [];
     }
-=======
-    const tools = filterArkRequestTools(skill);
->>>>>>> f136ef170cca4ea752e12457b05260afbb327556
 
     const response = await fetch(endpoint, {
       method: 'POST',

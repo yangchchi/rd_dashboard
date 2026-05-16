@@ -111,7 +111,6 @@ function stripHtmlTags(html: string): string {
   return html.replace(/<[^>]+>/g, '').trim();
 }
 
-<<<<<<< HEAD
 /** 同产品参考 PRD：除 background 外合并目标、功能列表等，避免只传空背景导致模型“丢上下文” */
 function formatReferencePrdForPrompt(refPrd: IPrd, refReqTitle?: string): string {
   const chunks: string[] = [
@@ -138,10 +137,9 @@ function formatReferencePrdForPrompt(refPrd: IPrd, refReqTitle?: string): string
   if (fc) chunks.push(`### 流程图说明\n${fc}`);
   return chunks.join('\n\n');
 }
-=======
+
 /** AI 流式生成最长等待（毫秒），避免接口挂起时按钮永久「生成中」 */
 const PRD_STREAM_TIMEOUT_MS = 180_000;
->>>>>>> f136ef170cca4ea752e12457b05260afbb327556
 
 /** 列表与详情统一展示本地时间，避免裸 ISO 字符串 */
 function formatPrdDateTime(iso: string): string {
@@ -403,33 +401,25 @@ const PRDPage: React.FC = () => {
       const uploadCount = uploadedSupplementaryDocs.length;
       const stream = capabilityClient
         .load('prd_generator_1')
-<<<<<<< HEAD
-        .callStream<PrdGeneratorStreamChunk>('textGenerate', {
-          original_requirement: originalRequirement,
-          additional_requirements: [
-            '请生成完整的 PRD（背景、目标、业务流程、功能列表、非功能性需求等），结构清晰、可评审。',
-            '业务范围必须与上文「需求标题」「需求描述」一致；产品简介与用户上传文档不得喧宾夺主，不得编造未在材料中出现且与需求无关的大段“行业故事”。',
-            '若提供了同产品参考 PRD 或用户上传文档：继承术语、结构习惯与产品级约束，并与本条需求自洽；冲突处以本条需求为准。',
-            uploadCount > 0
-              ? `用户已上传 ${uploadCount} 份参考文档，生成时须综合引用每一份中的有效信息，不得只采用其中一份而忽略其余。`
-              : '',
-          ]
-            .filter(Boolean)
-            .join(''),
-          related_prd_document,
-          user_supplementary_document,
-        });
-=======
         .callStream<PrdGeneratorStreamChunk>(
           'textGenerate',
           {
             original_requirement: originalRequirement,
-            additional_requirements:
-              '请生成完整的PRD文档，包含背景、目标、业务流程、功能列表和非功能性需求。',
+            additional_requirements: [
+              '请生成完整的 PRD（背景、目标、业务流程、功能列表、非功能性需求等），结构清晰、可评审。',
+              '业务范围必须与上文「需求标题」「需求描述」一致；产品简介与用户上传文档不得喧宾夺主，不得编造未在材料中出现且与需求无关的大段“行业故事”。',
+              '若提供了同产品参考 PRD 或用户上传文档：继承术语、结构习惯与产品级约束，并与本条需求自洽；冲突处以本条需求为准。',
+              uploadCount > 0
+                ? `用户已上传 ${uploadCount} 份参考文档，生成时须综合引用每一份中的有效信息，不得只采用其中一份而忽略其余。`
+                : '',
+            ]
+              .filter(Boolean)
+              .join(''),
+            related_prd_document,
+            user_supplementary_document,
           },
           { signal: streamAbort.signal }
         );
->>>>>>> f136ef170cca4ea752e12457b05260afbb327556
 
       let fullContent = '';
       for await (const chunk of stream) {
