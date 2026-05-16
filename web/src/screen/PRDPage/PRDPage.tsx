@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Streamdown } from '@/components/ui/streamdown';
@@ -24,11 +24,15 @@ import {
   Files,
   PenLine,
   CircleCheck,
+  Paperclip,
+  Link2,
+  X,
 } from 'lucide-react';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import { toast } from 'sonner';
 import {
   usePrdsList,
+  useProductsList,
   useRequirementsList,
   useReviewPrd,
   useSubmitPrdReview,
@@ -42,9 +46,96 @@ import { capabilityClient } from '@/lib/capability-client';
 import { getRequirementStatusPresentation } from '@/lib/requirement-status-present';
 import { cn } from '@/lib/utils';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
+import { Label } from '@/components/ui/label';
+import type { IPrd, IRequirement } from '@/lib/rd-types';
+import { buildNewPrdStoredTitle, formatPrdListTitle } from '@/lib/prd-display-title';
+
+/** 单段上下文上限，避免超出模型窗口 */
+const PRD_GEN_CONTEXT_MAX_CHARS = 28000;
+
+function truncateForModelContext(text: string, maxChars: number): string {
+  const t = text.trim();
+  if (!t) return '';
+  if (t.length <= maxChars) return t;
+  return `${t.slice(0, maxChars)}\n\n…（已截断，原文约 ${t.length} 字）`;
+}
+
+/** 用户上传的参考文档（可多份） */
+interface IPrdSupplementaryUpload {
+  id: string;
+  name: string;
+  content: string;
+}
+
+function readTextFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(new Error('read failed'));
+    reader.readAsText(file, 'UTF-8');
+  });
+}
+
+/** 合并多份上传文档与粘贴内容，供 PRD 生成 API 引用 */
+function buildUserSupplementaryDocumentForPrompt(
+  uploads: IPrdSupplementaryUpload[],
+  pasted: string
+): string {
+  const parts: string[] = [];
+  if (uploads.length > 0) {
+    parts.push(`【用户上传参考文档 · 共 ${uploads.length} 份，生成时须综合引用每一份】`);
+    uploads.forEach((doc, i) => {
+      const body = doc.content.trim();
+      if (!body) return;
+      parts.push(`\n---\n【${i + 1}/${uploads.length} · ${doc.name}】\n\n${body}`);
+    });
+  }
+  const paste = pasted.trim();
+  if (paste) {
+    parts.push(`\n---\n【粘贴补充说明】\n\n${paste}`);
+  }
+  return parts.join('\n').trim();
+}
+
+function resetPrdSupplementaryState(
+  setUploads: React.Dispatch<React.SetStateAction<IPrdSupplementaryUpload[]>>,
+  setPasted: React.Dispatch<React.SetStateAction<string>>,
+  fileInput: HTMLInputElement | null
+): void {
+  setUploads([]);
+  setPasted('');
+  if (fileInput) fileInput.value = '';
+}
 
 function stripHtmlTags(html: string): string {
   return html.replace(/<[^>]+>/g, '').trim();
+}
+
+/** 同产品参考 PRD：除 background 外合并目标、功能列表等，避免只传空背景导致模型“丢上下文” */
+function formatReferencePrdForPrompt(refPrd: IPrd, refReqTitle?: string): string {
+  const chunks: string[] = [
+    `【参考PRD】${refPrd.title || 'PRD文档'}`,
+    refReqTitle ? `【其关联需求】${refReqTitle}` : '',
+    '---',
+  ].filter(Boolean);
+  const b = (refPrd.background || '').trim();
+  const o = (refPrd.objectives || '').trim();
+  const nf = (refPrd.nonFunctional || '').trim();
+  const fc = (refPrd.flowchart || '').trim();
+  if (b) chunks.push(`### 背景\n${b}`);
+  if (o) chunks.push(`### 项目目标\n${o}`);
+  const fl = refPrd.featureList || [];
+  if (fl.length > 0) {
+    const lines = fl.map((f) => {
+      const crit =
+        f.acceptanceCriteria?.length ? `\n  - 验收：${f.acceptanceCriteria.join('；')}` : '';
+      return `- **${f.name}**：${(f.description || '').trim()}${crit}`;
+    });
+    chunks.push(`### 功能列表\n${lines.join('\n')}`);
+  }
+  if (nf) chunks.push(`### 非功能性需求\n${nf}`);
+  if (fc) chunks.push(`### 流程图说明\n${fc}`);
+  return chunks.join('\n\n');
 }
 
 /** 列表与详情统一展示本地时间，避免裸 ISO 字符串 */
@@ -71,6 +162,8 @@ interface IPrdListItem {
   id: string;
   requirementId: string;
   title: string;
+  /** 列表展示用：产品名-需求标题 */
+  displayTitle: string;
   requirementTitle: string;
   status: 'draft' | 'reviewing' | 'approved' | 'rejected';
   version: number;
@@ -120,6 +213,7 @@ const PRDPage: React.FC = () => {
   const router = useRouter();
   const { data: requirements = [] } = useRequirementsList();
   const { data: prds = [] } = usePrdsList();
+  const { data: products = [] } = useProductsList();
   const upsertPrd = useUpsertPrd();
   const upsertRequirement = useUpsertRequirement();
   const reviewPrd = useReviewPrd();
@@ -138,6 +232,7 @@ const PRDPage: React.FC = () => {
         id: prd.id,
         requirementId: prd.requirementId,
         title: prd.title || 'PRD文档',
+        displayTitle: formatPrdListTitle(req as IRequirement | undefined, products, prd.title),
         requirementTitle: req?.title || '未关联需求',
         status: prd.status,
         version: prd.version,
@@ -146,7 +241,7 @@ const PRDPage: React.FC = () => {
         requirementStatus: req?.status || 'backlog',
       };
     });
-  }, [prds, requirements]);
+  }, [prds, requirements, products]);
 
   const prdStats = useMemo(
     () => ({
@@ -166,9 +261,45 @@ const PRDPage: React.FC = () => {
   const [generatedContent, setGeneratedContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [prdPreviewTab, setPrdPreviewTab] = useState<'edit' | 'preview'>('edit');
+  /** 同产品下选中的已有 PRD id，空字符串表示不引用 */
+  const [referencePrdId, setReferencePrdId] = useState('');
+  const [uploadedSupplementaryDocs, setUploadedSupplementaryDocs] = useState<IPrdSupplementaryUpload[]>(
+    []
+  );
+  const [pastedSupplementary, setPastedSupplementary] = useState('');
+  const supplementaryFileInputRef = useRef<HTMLInputElement>(null);
+
+  const selectedRequirementEntity = useMemo(
+    () => requirements.find((r) => r.id === selectedRequirement),
+    [requirements, selectedRequirement]
+  );
+
+  const productKey = (selectedRequirementEntity?.product ?? '').trim();
+  const productLabel = useMemo(() => {
+    if (!productKey) return '';
+    const p = products.find((x) => x.id === productKey);
+    return p ? `${p.name}（${p.identifier || p.code || p.id}）` : productKey;
+  }, [productKey, products]);
+
+  const siblingPrdOptions = useMemo(() => {
+    if (!productKey) return [];
+    return prds.filter((prd) => {
+      if (prd.requirementId === selectedRequirement) return false;
+      const r = requirements.find((x) => x.id === prd.requirementId);
+      return (r?.product ?? '').trim() === productKey;
+    });
+  }, [prds, requirements, selectedRequirement, productKey]);
+
+  useEffect(() => {
+    if (!referencePrdId) return;
+    const ok = siblingPrdOptions.some((p) => p.id === referencePrdId);
+    if (!ok) setReferencePrdId('');
+  }, [referencePrdId, siblingPrdOptions]);
 
   const filteredPRDList = prdList.filter((prd) => {
-    const matchKeyword = prd.title.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+    const matchKeyword =
+      prd.displayTitle.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+      prd.title.toLowerCase().includes(searchKeyword.toLowerCase()) ||
       prd.requirementTitle.toLowerCase().includes(searchKeyword.toLowerCase());
     const matchStatus = statusFilter === 'all' || prd.status === statusFilter;
     return matchKeyword && matchStatus;
@@ -215,19 +346,69 @@ const PRDPage: React.FC = () => {
     setIsStreaming(true);
 
     try {
+      const productEntity = productKey ? products.find((x) => x.id === productKey) : undefined;
+      const productLines: string[] = [];
+      if (productKey) {
+        productLines.push(`所属产品：${productLabel || productKey}`);
+        const pd = (productEntity?.description || '').trim();
+        if (pd) {
+          productLines.push(
+            `产品简介（语境对齐，节选）：\n${truncateForModelContext(pd, 4500)}`
+          );
+        }
+      } else {
+        productLines.push('所属产品：未绑定（需求未关联产品目录）');
+      }
+
       const originalRequirement = [
+        '【范围锚定】「需求标题 / 需求描述」定义本条 PRD 必须交付的功能与价值；产品信息与参考文档仅用于术语、定位与约束对齐，禁止用参考材料中的其他独立功能主题替代本条需求。',
+        ...productLines,
         `需求标题：${requirement.title}`,
         `需求描述：${stripHtmlTags(requirement.description || '')}`,
         `期望上线时间：${requirement.expectedDate}`,
         `业务优先级：${requirement.priority}`,
-      ].join('\n');
+        requirement.sketchUrl ? `草图/附件链接：${requirement.sketchUrl}` : '',
+        requirement.aiCategory ? `AI 预分类：${requirement.aiCategory}` : '',
+      ]
+        .filter((x) => String(x).trim().length > 0)
+        .join('\n');
 
+      const refPrd = referencePrdId ? prds.find((p) => p.id === referencePrdId) : undefined;
+      const refReqTitle = refPrd
+        ? requirements.find((r) => r.id === refPrd.requirementId)?.title
+        : undefined;
+      const relatedPrdBlock = refPrd ? formatReferencePrdForPrompt(refPrd, refReqTitle) : '';
+
+      const related_prd_document = truncateForModelContext(
+        relatedPrdBlock || '（未提供）',
+        PRD_GEN_CONTEXT_MAX_CHARS
+      );
+      const suppCombined = buildUserSupplementaryDocumentForPrompt(
+        uploadedSupplementaryDocs,
+        pastedSupplementary
+      );
+      const user_supplementary_document = truncateForModelContext(
+        suppCombined || '（未提供）',
+        PRD_GEN_CONTEXT_MAX_CHARS
+      );
+
+      const uploadCount = uploadedSupplementaryDocs.length;
       const stream = capabilityClient
         .load('prd_generator_1')
         .callStream<PrdGeneratorStreamChunk>('textGenerate', {
           original_requirement: originalRequirement,
-          additional_requirements:
-            '请生成完整的PRD文档，包含背景、目标、业务流程、功能列表和非功能性需求。',
+          additional_requirements: [
+            '请生成完整的 PRD（背景、目标、业务流程、功能列表、非功能性需求等），结构清晰、可评审。',
+            '业务范围必须与上文「需求标题」「需求描述」一致；产品简介与用户上传文档不得喧宾夺主，不得编造未在材料中出现且与需求无关的大段“行业故事”。',
+            '若提供了同产品参考 PRD 或用户上传文档：继承术语、结构习惯与产品级约束，并与本条需求自洽；冲突处以本条需求为准。',
+            uploadCount > 0
+              ? `用户已上传 ${uploadCount} 份参考文档，生成时须综合引用每一份中的有效信息，不得只采用其中一份而忽略其余。`
+              : '',
+          ]
+            .filter(Boolean)
+            .join(''),
+          related_prd_document,
+          user_supplementary_document,
         });
 
       let fullContent = '';
@@ -247,7 +428,7 @@ const PRDPage: React.FC = () => {
       await upsertPrd.mutateAsync({
         id: newId,
         requirementId: requirement.id,
-        title: `${requirement.title}PRD`,
+        title: buildNewPrdStoredTitle(requirement as IRequirement, products),
         background: fullContent,
         objectives: '',
         flowchart: '',
@@ -271,6 +452,12 @@ const PRDPage: React.FC = () => {
       setShowGenerateDialog(false);
       setGeneratedContent('');
       setSelectedRequirement('');
+      setReferencePrdId('');
+      resetPrdSupplementaryState(
+        setUploadedSupplementaryDocs,
+        setPastedSupplementary,
+        supplementaryFileInputRef.current
+      );
 
       router.push(`/prd/${newId}/edit`);
     } catch {
@@ -322,6 +509,48 @@ const PRDPage: React.FC = () => {
     );
   };
 
+  const handleSupplementaryFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList?.length) return;
+    const incoming = Array.from(fileList);
+    const added: IPrdSupplementaryUpload[] = [];
+    const failed: string[] = [];
+    for (const file of incoming) {
+      try {
+        const text = await readTextFile(file);
+        added.push({
+          id: `supp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          name: file.name,
+          content: text,
+        });
+      } catch {
+        failed.push(file.name);
+      }
+    }
+    if (added.length > 0) {
+      setUploadedSupplementaryDocs((prev) => [...prev, ...added]);
+      toast.success(
+        added.length === 1 ? `已添加参考文档：${added[0].name}` : `已添加 ${added.length} 份参考文档`
+      );
+    }
+    if (failed.length > 0) {
+      toast.error(`读取失败：${failed.join('、')}`);
+    }
+    if (supplementaryFileInputRef.current) supplementaryFileInputRef.current.value = '';
+  };
+
+  const removeSupplementaryDoc = (id: string) => {
+    setUploadedSupplementaryDocs((prev) => prev.filter((d) => d.id !== id));
+  };
+
+  const clearSupplementaryDocument = () => {
+    resetPrdSupplementaryState(
+      setUploadedSupplementaryDocs,
+      setPastedSupplementary,
+      supplementaryFileInputRef.current
+    );
+  };
+
   const getStatusBadge = (status: string) => {
     const config = STATUS_BADGES[status] || {
       label: status,
@@ -361,6 +590,12 @@ const PRDPage: React.FC = () => {
             <Button
               onClick={() => {
                 setPrdPreviewTab('edit');
+                setReferencePrdId('');
+                resetPrdSupplementaryState(
+                  setUploadedSupplementaryDocs,
+                  setPastedSupplementary,
+                  supplementaryFileInputRef.current
+                );
                 setShowGenerateDialog(true);
               }}
               className="shrink-0 shadow-sm sm:mt-0"
@@ -510,7 +745,7 @@ const PRDPage: React.FC = () => {
                             className="font-medium hover:underline text-left"
                             onClick={() => handleView(prd.id)}
                           >
-                            {prd.title}
+                            {prd.displayTitle}
                           </button>
                         </div>
                       </TableCell>
@@ -614,6 +849,12 @@ const PRDPage: React.FC = () => {
               setGeneratedContent('');
               setSelectedRequirement('');
               setPrdPreviewTab('edit');
+              setReferencePrdId('');
+              resetPrdSupplementaryState(
+                setUploadedSupplementaryDocs,
+                setPastedSupplementary,
+                supplementaryFileInputRef.current
+              );
             }
           }}
         >
@@ -624,7 +865,7 @@ const PRDPage: React.FC = () => {
                 AI生成PRD
               </DialogTitle>
               <DialogDescription>
-                选择需求池中的需求，AI将自动生成结构化PRD文档
+                选择待编写 PRD 的需求；可选引用同产品已有 PRD，并上传多份参考文档（.txt / .md），生成时将综合引用全部材料。
               </DialogDescription>
             </DialogHeader>
 
@@ -664,6 +905,143 @@ const PRDPage: React.FC = () => {
                     )}
                   </p>
                 )}
+              </div>
+
+              <div className="space-y-3 rounded-lg border border-border bg-muted/15 p-3 sm:p-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <Link2 className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+                  关联文档（可选）
+                </div>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  引用同产品已有 PRD 的正文，或上传多份参考文档 / 粘贴补充说明；所有材料将随原始需求一并送入模型，生成时须综合引用。
+                </p>
+
+                {selectedRequirement && !productKey && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400/90 leading-relaxed">
+                    当前需求未设置「所属产品」，无法列出同产品 PRD。可在需求详情中补充产品后重试；您仍可仅使用下方用户文档作为补充输入。
+                  </p>
+                )}
+
+                {selectedRequirement && productKey && (
+                  <p className="text-xs text-muted-foreground">
+                    当前产品：{productLabel || productKey}
+                  </p>
+                )}
+
+                <div className="space-y-2">
+                  <Label htmlFor="prd-ref-prd" className="text-xs font-medium text-muted-foreground">
+                    同产品已有 PRD
+                  </Label>
+                  <Select
+                    value={referencePrdId || '__none__'}
+                    onValueChange={(v) => setReferencePrdId(v === '__none__' ? '' : v)}
+                    disabled={generating || !productKey || siblingPrdOptions.length === 0}
+                  >
+                    <SelectTrigger id="prd-ref-prd" className="w-full">
+                      <SelectValue
+                        placeholder={
+                          !productKey
+                            ? '需先为需求设置所属产品'
+                            : siblingPrdOptions.length === 0
+                              ? '暂无其他需求的 PRD'
+                              : '选择要继承规范的参考 PRD'
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">不引用</SelectItem>
+                      {siblingPrdOptions.map((p) => {
+                        const rForP = requirements.find((r) => r.id === p.requirementId);
+                        const optLabel = formatPrdListTitle(
+                          rForP as IRequirement | undefined,
+                          products,
+                          p.title
+                        );
+                        return (
+                          <SelectItem key={p.id} value={p.id}>
+                            <span className="truncate">{optLabel}</span>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                    <Paperclip className="h-3.5 w-3.5" aria-hidden />
+                    用户上传 / 粘贴（.txt、.md，建议 UTF-8，可多选）
+                  </Label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      ref={supplementaryFileInputRef}
+                      type="file"
+                      accept=".txt,.md,.markdown,text/plain"
+                      multiple
+                      className="sr-only"
+                      id="prd-gen-supplementary-file"
+                      onChange={handleSupplementaryFileChange}
+                      disabled={generating}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={generating}
+                      onClick={() => supplementaryFileInputRef.current?.click()}
+                    >
+                      选择文件（可多选）
+                    </Button>
+                    {(uploadedSupplementaryDocs.length > 0 || pastedSupplementary.trim()) && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-xs"
+                        onClick={clearSupplementaryDocument}
+                        disabled={generating}
+                      >
+                        清除全部
+                      </Button>
+                    )}
+                  </div>
+                  {uploadedSupplementaryDocs.length > 0 && (
+                    <ul className="flex flex-wrap gap-2" aria-label="已上传参考文档">
+                      {uploadedSupplementaryDocs.map((doc) => (
+                        <li key={doc.id}>
+                          <Badge
+                            variant="secondary"
+                            className="gap-1 pr-1 font-normal max-w-[min(100%,280px)]"
+                          >
+                            <span className="truncate" title={doc.name}>
+                              {doc.name}
+                            </span>
+                            <span className="text-muted-foreground shrink-0">
+                              ({doc.content.length.toLocaleString()} 字)
+                            </span>
+                            <button
+                              type="button"
+                              className="ml-0.5 rounded-sm p-0.5 hover:bg-muted disabled:opacity-50"
+                              aria-label={`移除 ${doc.name}`}
+                              disabled={generating}
+                              onClick={() => removeSupplementaryDoc(doc.id)}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <Textarea
+                    value={pastedSupplementary}
+                    onChange={(e) => setPastedSupplementary(e.target.value)}
+                    disabled={generating}
+                    placeholder="可粘贴内部规范、接口约定、术语表等（与上方上传文件一并作为参考，可留空）"
+                    className="min-h-[88px] resize-y font-mono text-xs leading-relaxed"
+                    spellCheck={false}
+                  />
+                </div>
               </div>
 
               {isStreaming && (
@@ -729,6 +1107,12 @@ const PRDPage: React.FC = () => {
                   setGeneratedContent('');
                   setSelectedRequirement('');
                   setPrdPreviewTab('edit');
+                  setReferencePrdId('');
+                  resetPrdSupplementaryState(
+                    setUploadedSupplementaryDocs,
+                    setPastedSupplementary,
+                    supplementaryFileInputRef.current
+                  );
                 }}
                 disabled={generating}
               >

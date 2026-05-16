@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTheme } from 'next-themes';
 import { ChevronRight, FileCode2, Folder, FolderOpen, GitBranch, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -18,7 +19,7 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { codeToHtml } from '@/lib/shiki';
-import type { BundledLanguage } from '@/lib/shiki';
+import type { BundledLanguage, BundledTheme } from '@/lib/shiki';
 import {
   useAgentSessionsList,
   useAgentWorkspaceSourceFile,
@@ -28,6 +29,7 @@ import {
   usePipelineRunsList,
 } from '@/lib/rd-hooks';
 import type { IAgentWorkspace, IAgentWorkspaceSourceTreeNode, IPipelineTask } from '@/lib/rd-types';
+import { resolvePipelineWorkspaceBranchLabel } from '@shared/pipeline-meta-branch';
 import { cn } from '@/lib/utils';
 
 interface IAgentWorkspaceCodePanelProps {
@@ -88,19 +90,19 @@ function TreeRow({
         <button
           type="button"
           className={cn(
-            'flex w-full items-center gap-0.5 py-0.5 text-left text-[12px] text-[#333] hover:bg-black/[0.06]',
-            activePath?.startsWith(`${node.path}/`) && 'bg-primary/5',
+            'flex w-full items-center gap-0.5 py-0.5 text-left text-[12px] text-foreground hover:bg-accent/70',
+            activePath?.startsWith(`${node.path}/`) && 'bg-primary/10',
           )}
           style={{ paddingLeft: 6 + depth * 10 }}
           onClick={() => toggle(node.path)}
         >
           <ChevronRight
-            className={cn('size-3 shrink-0 text-[#666] transition-transform', isOpen && 'rotate-90')}
+            className={cn('size-3 shrink-0 text-muted-foreground transition-transform', isOpen && 'rotate-90')}
           />
           {isOpen ? (
-            <FolderOpen className="size-3.5 shrink-0 text-[#c09553]" />
+            <FolderOpen className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400/90" />
           ) : (
-            <Folder className="size-3.5 shrink-0 text-[#c09553]" />
+            <Folder className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400/90" />
           )}
           <span className="min-w-0 truncate">{node.name}</span>
         </button>
@@ -122,29 +124,31 @@ function TreeRow({
     <button
       type="button"
       className={cn(
-        'flex w-full items-center gap-1 py-0.5 text-left text-[12px] text-[#333] hover:bg-black/[0.06]',
-        activePath === node.path && 'bg-primary/10 font-medium text-primary',
+        'flex w-full items-center gap-1 py-0.5 text-left text-[12px] text-foreground hover:bg-accent/70',
+        activePath === node.path && 'bg-primary/15 font-medium text-primary dark:bg-primary/20',
       )}
       style={{ paddingLeft: 18 + depth * 10 }}
       onClick={() => onFile(node.path)}
     >
-      <FileCode2 className="size-3.5 shrink-0 text-[#448aff]" />
+      <FileCode2 className="size-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
       <span className="min-w-0 truncate">{node.name}</span>
     </button>
   );
 }
 
 function CodeEditorBody({ path, content }: { path: string; content: string }) {
+  const { resolvedTheme } = useTheme();
   const [html, setHtml] = useState('');
 
   useEffect(() => {
     let cancelled = false;
+    const shikiTheme: BundledTheme = resolvedTheme === 'dark' ? 'github-dark' : 'github-light';
     (async () => {
       try {
         const lang = guessBundledLang(path);
         const out = await codeToHtml(content, {
           lang,
-          theme: 'github-light',
+          theme: shikiTheme,
         });
         if (!cancelled) setHtml(out);
       } catch {
@@ -154,19 +158,21 @@ function CodeEditorBody({ path, content }: { path: string; content: string }) {
     return () => {
       cancelled = true;
     };
-  }, [path, content]);
+  }, [path, content, resolvedTheme]);
 
   const lines = content.split('\n');
+  const lineGutterClass =
+    'select-none border-r border-border bg-muted/70 py-2 pr-3 pl-2 text-right text-muted-foreground dark:bg-zinc-950/70';
 
   if (!html) {
     return (
-      <div className="flex min-h-[200px] font-mono text-[13px] leading-6">
-        <div className="select-none border-r border-[#e5e5e5] bg-[#f6f8fa] py-2 pr-3 pl-2 text-right text-[#656d76]">
+      <div className="flex min-h-[200px] bg-background font-mono text-[13px] leading-6">
+        <div className={lineGutterClass}>
           {lines.map((_, i) => (
             <div key={i}>{i + 1}</div>
           ))}
         </div>
-        <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-words p-2 text-[#24292f]">
+        <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-words bg-background p-2 text-foreground">
           {content}
         </pre>
       </div>
@@ -174,14 +180,14 @@ function CodeEditorBody({ path, content }: { path: string; content: string }) {
   }
 
   return (
-    <div className="flex min-h-[200px] font-mono text-[13px] leading-6">
-      <div className="select-none border-r border-[#e5e5e5] bg-[#f6f8fa] py-2 pr-3 pl-2 text-right text-[#656d76]">
+    <div className="flex min-h-[200px] bg-background font-mono text-[13px] leading-6">
+      <div className={lineGutterClass}>
         {lines.map((_, i) => (
           <div key={i}>{i + 1}</div>
         ))}
       </div>
       <div
-        className="min-w-0 flex-1 overflow-x-auto p-2 [&_pre]:m-0 [&_pre]:bg-transparent [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-[13px]"
+        className="min-w-0 flex-1 overflow-x-auto bg-background p-2 dark:bg-transparent [&_pre]:m-0 [&_pre]:max-w-none [&_pre]:rounded-none [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-[13px] [&_pre]:leading-6 [&_code]:font-mono"
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </div>
@@ -268,6 +274,9 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
 
   const repoUrl = browseWorkspace?.repoUrl?.trim() ?? '';
   const isHttpsRepo = /^https:\/\//i.test(repoUrl);
+  const pushBranchRef =
+    browseWorkspace?.agentBranch?.trim() ||
+    resolvePipelineWorkspaceBranchLabel(task.pipelineMeta, task.requirementId);
 
   const handleGitPushSubmit = async () => {
     if (!browseWorkspace?.id || !sessionId) return;
@@ -347,7 +356,7 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
             <DialogDescription className="text-xs leading-relaxed">
               将在当前 worktree 执行 <span className="font-mono">git add -A</span>、
               <span className="font-mono"> git commit</span>（有变更时）与{' '}
-              <span className="font-mono">git push origin HEAD:refs/heads/{browseWorkspace.agentBranch}</span>
+              <span className="font-mono">git push origin HEAD:refs/heads/{pushBranchRef}</span>
               。请确认已审查差异；推送会更新远程上的 Agent 分支。
             </DialogDescription>
           </DialogHeader>
@@ -414,7 +423,9 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
         </DialogContent>
       </Dialog>
       {treeData?.truncated ? (
-        <p className="text-xs text-amber-800">目录条目较多，已截断展示；可在本地 worktree 查看完整仓库。</p>
+        <p className="text-xs text-amber-800 dark:text-amber-200/90">
+          目录条目较多，已截断展示；可在本地 worktree 查看完整仓库。
+        </p>
       ) : null}
       <div className="flex h-[min(75vh,680px)] min-h-[400px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm md:flex-row">
         <aside className="flex w-full max-h-[38vh] shrink-0 flex-col border-b border-border bg-muted/50 md:h-auto md:max-h-none md:w-56 md:shrink-0 md:border-b-0 md:border-r">
@@ -503,7 +514,7 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
                 ) : fileData ? (
                   <div>
                     {fileData.truncated ? (
-                      <p className="border-b border-amber-200 bg-amber-50 px-3 py-1 text-[11px] text-amber-900">
+                      <p className="border-b border-amber-200 bg-amber-50 px-3 py-1 text-[11px] text-amber-950 dark:border-amber-500/30 dark:bg-amber-950/35 dark:text-amber-50/95">
                         正文已在服务端截断，完整内容请在本地打开该文件。
                       </p>
                     ) : null}

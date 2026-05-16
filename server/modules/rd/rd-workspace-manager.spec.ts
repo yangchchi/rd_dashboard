@@ -80,6 +80,11 @@ describe('RdService workspace manager', () => {
         .mockResolvedValueOnce([{ ...TOOL_CALL_ROW, id: `wtool_${WORKSPACE_ID}_20_fetch_base`, tool_name: 'git.fetch' }])
         .mockResolvedValueOnce([SESSION_ROW])
         .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([
+          { ...TOOL_CALL_ROW, id: `wtool_${WORKSPACE_ID}_25_fetch_workspace_tip`, tool_name: 'git.fetch_workspace_tip' },
+        ])
+        .mockResolvedValueOnce([SESSION_ROW])
+        .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce([{ ...TOOL_CALL_ROW, id: `wtool_${WORKSPACE_ID}_30_add_worktree`, tool_name: 'git.worktree_add' }])
         .mockResolvedValueOnce([SESSION_ROW])
         .mockResolvedValueOnce(undefined)
@@ -103,10 +108,11 @@ describe('RdService workspace manager', () => {
       expect(result.plan.commands.map((command) => command.key)).toEqual([
         'clone_cache',
         'fetch_base',
+        'fetch_workspace_tip',
         'add_worktree',
         'cleanup_worktree',
       ]);
-      expect(result.toolCalls).toHaveLength(4);
+      expect(result.toolCalls).toHaveLength(5);
       expect(result.toolCalls[0].toolName).toBe('git.clone_cache');
     } finally {
       randomSpy.mockRestore();

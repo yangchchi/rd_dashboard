@@ -1,0 +1,29 @@
+{
+  "id": "pipeline_test_case_generator_1",
+  "pluginKey": "@official-plugins/ai-text-summary",
+  "pluginVersion": "1.0.4",
+  "name": "自动化测试用例生成",
+  "description": "基于 FS、TS 与生成代码推导可执行测试用例，流式输出，末尾 JSON。",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "code_content": {
+        "type": "string",
+        "description": "FS/TS 与代码上下文"
+      },
+      "additional_requirements": {
+        "type": "string",
+        "description": "输出格式与条数等补充约束"
+      }
+    },
+    "required": ["code_content"]
+  },
+  "formValue": {
+    "content": "{{input.code_content}}",
+    "requirement": "你是测试架构师。请根据上下文设计自动化测试用例，并遵守补充要求。\n\n补充要求：{{input.additional_requirements}}"
+  },
+  "createdAt": 1775620930085,
+  "updatedAt": 1775620930085,
+  "createdBy": 6944703071284903963
+}

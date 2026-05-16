@@ -27,7 +27,16 @@ import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { Streamdown } from '@/components/ui/streamdown';
 import { capabilityClient } from '@/lib/capability-client';
 import { getCurrentUser } from '@/lib/auth';
-import { useApproveSpec, useDeleteSpec, usePrdsList, useRejectSpec, useSpecsList, useSubmitSpecReview } from '@/lib/rd-hooks';
+import {
+  useApproveSpec,
+  useDeleteSpec,
+  usePrdsList,
+  useProductsList,
+  useRejectSpec,
+  useRequirementsList,
+  useSpecsList,
+  useSubmitSpecReview,
+} from '@/lib/rd-hooks';
 import { mapSpecsToListRows, type ISpecListRow } from '@/lib/spec-list-mapper';
 import { toast } from 'sonner';
 
@@ -42,11 +51,16 @@ const SpecPage: React.FC = () => {
   const router = useRouter();
   const { data: fullSpecs = [], isLoading: loadingSpecs } = useSpecsList();
   const { data: prds = [] } = usePrdsList();
+  const { data: requirements = [] } = useRequirementsList();
+  const { data: products = [] } = useProductsList();
   const approveSpecMutation = useApproveSpec();
   const rejectSpecMutation = useRejectSpec();
   const submitSpecReviewMutation = useSubmitSpecReview();
   const deleteSpecMutation = useDeleteSpec();
-  const specs = React.useMemo(() => mapSpecsToListRows(fullSpecs, prds), [fullSpecs, prds]);
+  const specs = React.useMemo(
+    () => mapSpecsToListRows(fullSpecs, prds, requirements, products),
+    [fullSpecs, prds, requirements, products]
+  );
   const loading = loadingSpecs;
   const [selectedSpec, setSelectedSpec] = useState<ISpecListRow | null>(null);
   const [isReviewDialogOpen, setIsReviewDialogOpen] = useState(false);

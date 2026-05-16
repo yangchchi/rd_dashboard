@@ -84,6 +84,10 @@ import { buildAgentDiffReviewSummary } from '@/lib/agent-review-utils';
 import { fillAiSkillPromptTemplate } from '@/lib/ai-skill-engine';
 import { AGENT_WORKBENCH_PLAN_SKILL_ID, getAiSkill, listAiSkills } from '@/lib/ai-skills';
 import { cn } from '@/lib/utils';
+import {
+  resolvePipelineExplicitAgentBranch,
+  resolvePipelineGitBaseBranch,
+} from '@shared/pipeline-meta-branch';
 
 /** 编码对话内助手气泡的 Markdown 排版（流式与非流式共用） */
 const AGENT_CHAT_MARKDOWN_CLASS =
@@ -1292,6 +1296,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
           contextSnapshot: {
             gitUrl: task.pipelineMeta.gitUrl,
             branch: task.pipelineMeta.branch,
+            gitBaseBranch: task.pipelineMeta.gitBaseBranch,
             sandboxUrl: task.pipelineMeta.sandboxUrl,
             pipelineTaskId: task.id,
             workspaceProductSlug: task.pipelineMeta.workspaceProductSlug,
@@ -1321,7 +1326,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         title: `${task.requirementTitle} · Agent`,
         status: 'awaiting_approval',
         runtimeAdapter,
-        baseBranch: task.pipelineMeta.branch || 'main',
+        baseBranch: resolvePipelineGitBaseBranch(task.pipelineMeta),
         planMarkdown,
         riskLevel: 'medium',
         metadata: { instruction, contextPackChecksum: contextPack.checksum },
@@ -1399,7 +1404,8 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         const result = await provisionWorkspace.mutateAsync({
           sessionId: activeSession.id,
           repoUrl: task.pipelineMeta.gitUrl,
-          baseBranch: task.pipelineMeta.branch || activeSession.baseBranch || 'main',
+          baseBranch: resolvePipelineGitBaseBranch(task.pipelineMeta),
+          agentBranch: resolvePipelineExplicitAgentBranch(task.pipelineMeta, task.requirementId),
           createdBy: operatorName,
           kind: 'worktree',
           productSlug: task.pipelineMeta.workspaceProductSlug,

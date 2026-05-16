@@ -1,4 +1,5 @@
-import type { IPrd, ISpecification } from './rd-types';
+import { formatPrdListTitle } from './prd-display-title';
+import type { IPrd, IProduct, IRequirement, ISpecification } from './rd-types';
 
 /** Spec 列表页展示用结构（由完整规格推导） */
 export interface ISpecListRow {
@@ -63,10 +64,20 @@ export function specificationToListRow(spec: ISpecification, prdTitle: string, r
   };
 }
 
-export function mapSpecsToListRows(specs: ISpecification[], prds: IPrd[]): ISpecListRow[] {
+export function mapSpecsToListRows(
+  specs: ISpecification[],
+  prds: IPrd[],
+  requirements: IRequirement[],
+  products: IProduct[]
+): ISpecListRow[] {
   const byPrd = (pid: string) => prds.find((p) => p.id === pid);
+  const reqById = (rid: string | undefined) =>
+    rid ? requirements.find((r) => r.id === rid) : undefined;
   return specs.map((s) => {
     const prd = byPrd(s.prdId);
-    return specificationToListRow(s, prd?.title || prd?.id || '—', prd?.requirementId);
+    const req = reqById(prd?.requirementId);
+    const prdTitle =
+      formatPrdListTitle(req, products, prd?.title ?? null) || prd?.title || prd?.id || '—';
+    return specificationToListRow(s, prdTitle, prd?.requirementId);
   });
 }

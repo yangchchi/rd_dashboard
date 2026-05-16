@@ -33,14 +33,24 @@ import {
   useSpecsList,
   useAcceptanceRecords,
   usePipelineTasksList,
+  useProductsList,
 } from '@/lib/rd-hooks';
-import type { IRequirement, RequirementStatus } from '@/lib/rd-types';
+import type {
+  IAcceptanceRecord,
+  IPipelineTask,
+  IPrd,
+  IRequirement,
+  IRequirementFlowEvent,
+  ISpecification,
+  RequirementStatus,
+} from '@/lib/rd-types';
 import {
   buildRequirementFlowHistory,
   buildRequirementFlowHistoryFromEvents,
   type IFlowHistoryItem,
 } from '@/lib/requirement-flow-history';
 import { getRequirementStatusPresentation } from '@/lib/requirement-status-present';
+import { formatPrdListTitle } from '@/lib/prd-display-title';
 
 interface IRelatedDoc {
   id: string;
@@ -96,15 +106,28 @@ const formatDateTime = (dateStr: string) => {
 // 获取状态色条颜色
 const getStatusColor = (status: string) => getRequirementStatusPresentation(status).dotColor;
 
+/** React Query 在首次返回前 `data` 为 undefined；解构默认值 `[]` 会在每次渲染产生新引用，导致依赖数组的 useEffect 死循环。 */
+const EMPTY_PRDS: IPrd[] = [];
+const EMPTY_SPECS: ISpecification[] = [];
+const EMPTY_ACCEPTANCE: IAcceptanceRecord[] = [];
+const EMPTY_PIPELINE_TASKS: IPipelineTask[] = [];
+const EMPTY_FLOW_EVENTS: IRequirementFlowEvent[] = [];
+
 const RequirementDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { data: requirement, isLoading: reqLoading } = useRequirement(id);
-  const { data: prds = [] } = usePrdsList();
-  const { data: specs = [] } = useSpecsList();
-  const { data: acceptanceRecords = [] } = useAcceptanceRecords();
-  const { data: pipelineTasks = [] } = usePipelineTasksList();
-  const { data: flowEvents = [] } = useRequirementFlowEvents(id);
+  const { data: prdsData } = usePrdsList();
+  const { data: specsData } = useSpecsList();
+  const { data: acceptanceData } = useAcceptanceRecords();
+  const { data: pipelineTasksData } = usePipelineTasksList();
+  const { data: flowEventsData } = useRequirementFlowEvents(id);
+  const { data: products = [] } = useProductsList();
+  const prds = prdsData ?? EMPTY_PRDS;
+  const specs = specsData ?? EMPTY_SPECS;
+  const acceptanceRecords = acceptanceData ?? EMPTY_ACCEPTANCE;
+  const pipelineTasks = pipelineTasksData ?? EMPTY_PIPELINE_TASKS;
+  const flowEvents = flowEventsData ?? EMPTY_FLOW_EVENTS;
   const [history, setHistory] = useState<IFlowHistoryItem[]>([]);
   const [relatedDocs, setRelatedDocs] = useState<IRelatedDoc[]>([]);
   const [authVersion, setAuthVersion] = useState(0);
@@ -133,7 +156,7 @@ const RequirementDetailPage: React.FC = () => {
       related.push({
         id: prd.id,
         type: 'prd',
-        title: prd.title || `${requirement.title} PRD`,
+        title: formatPrdListTitle(requirement as IRequirement, products, prd.title),
         status: prd.status,
         updatedAt: prd.updatedAt,
       });
@@ -161,7 +184,7 @@ const RequirementDetailPage: React.FC = () => {
           )
     );
     setRelatedDocs(related);
-  }, [id, requirement, prds, specs, pipelineTasks, acceptanceRecords, flowEvents]);
+  }, [id, requirement, prds, specs, pipelineTasks, acceptanceRecords, flowEvents, products]);
 
   const handleBack = () => {
     router.push('/requirements');

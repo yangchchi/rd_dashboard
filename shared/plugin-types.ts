@@ -73,6 +73,10 @@ export interface PrdGenerator1Input {
   original_requirement: string;
   /** PRD生成的额外定制要求（可选） */
   additional_requirements?: string;
+  /** 同产品下已有 PRD 正文（Markdown），用于继承术语、结构与编写约束（可选） */
+  related_prd_document?: string;
+  /** 用户上传的补充说明/规范全文（纯文本或 Markdown）（可选） */
+  user_supplementary_document?: string;
 }
 
 export interface PrdGenerator1Output {

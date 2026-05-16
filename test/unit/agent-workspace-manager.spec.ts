@@ -30,11 +30,26 @@ describe('agent workspace manager', () => {
     expect(plan.commands.map((command) => command.key)).toEqual([
       'clone_cache',
       'fetch_base',
+      'fetch_workspace_tip',
       'add_worktree',
       'cleanup_worktree',
     ]);
-    expect(plan.commands[2].command).toContain('worktree add');
-    expect(plan.commands[3].cleanup).toBe(true);
+    expect(plan.commands[2].optional).toBe(true);
+    expect(plan.commands[3].args[0]).toBe('sh');
+    expect(plan.commands[3].command).toContain('worktree add');
+    expect(plan.commands[4].cleanup).toBe(true);
+  });
+
+  it('omits optional workspace fetch when agent branch equals base branch', () => {
+    const plan = buildAgentWorkspaceLifecyclePlan({
+      workspaceId: 'workspace-1',
+      sessionId: 'session-1',
+      requirementId: 'req-1',
+      repoUrl: 'git@example.com:demo/repo.git',
+      baseBranch: 'main',
+      agentBranch: 'main',
+    });
+    expect(plan.commands.map((c) => c.key)).toEqual(['clone_cache', 'fetch_base', 'add_worktree', 'cleanup_worktree']);
   });
 
   it('supports simple clone mode when worktree cache is not desired', () => {

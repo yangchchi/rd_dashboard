@@ -2,7 +2,14 @@ export type WorkspaceCommandCategory = 'git' | 'file';
 export type WorkspaceCommandRisk = 'low' | 'medium' | 'high';
 
 export interface IWorkspaceLifecycleCommand {
-  key: 'clone_cache' | 'fetch_base' | 'add_worktree' | 'clone_branch' | 'checkout_agent_branch' | 'cleanup_worktree';
+  key:
+    | 'clone_cache'
+    | 'fetch_base'
+    | 'fetch_workspace_tip'
+    | 'add_worktree'
+    | 'clone_branch'
+    | 'checkout_agent_branch'
+    | 'cleanup_worktree';
   toolName: string;
   toolCategory: WorkspaceCommandCategory;
   summary: string;
@@ -10,6 +17,8 @@ export interface IWorkspaceLifecycleCommand {
   args: string[];
   riskLevel: WorkspaceCommandRisk;
   orderIndex: number;
+  /** 为 true 时命令非 0 退出码不中断后续 lifecycle（如远端尚无工作分支时的 fetch） */
+  optional?: boolean;
   cleanup?: boolean;
 }
 
@@ -162,18 +171,73 @@ export function buildAgentWorkspaceLifecyclePlan(
 
   const cloneCacheArgs = ['git', 'clone', '--no-checkout', repoUrl, cachePath];
   const fetchArgs = ['git', '-C', cachePath, 'fetch', 'origin', baseBranch, '--depth', '1'];
-  const worktreeArgs = [
-    'git',
-    '-C',
-    cachePath,
-    'worktree',
-    'add',
-    '-B',
-    agentBranch,
-    worktreePath,
-    `origin/${baseBranch}`,
-  ];
+  /** $1=cachePath $2=baseBranch $3=agentBranch $4=worktreePath — 优先基于远端工作分支 tip，否则基于基准分支 */
+  const addWorktreeFromRemoteTipScript =
+    'START=$(git -C "$1" rev-parse --verify "refs/remotes/origin/$3" 2>/dev/null || git -C "$1" rev-parse "origin/$2") && git -C "$1" worktree add -B "$3" "$4" "$START"';
+  const worktreeArgs = ['sh', '-c', addWorktreeFromRemoteTipScript, '_', cachePath, baseBranch, agentBranch, worktreePath];
   const cleanupArgs = ['git', '-C', cachePath, 'worktree', 'remove', '--force', worktreePath];
+
+  const commands: IWorkspaceLifecycleCommand[] = [
+    {
+      key: 'clone_cache',
+      toolName: 'git.clone_cache',
+      toolCategory: 'git',
+      summary: 'Clone repository cache for isolated worktree',
+      command: renderCommand(cloneCacheArgs),
+      args: cloneCacheArgs,
+      riskLevel: 'medium',
+      orderIndex: 10,
+    },
+    {
+      key: 'fetch_base',
+      toolName: 'git.fetch',
+      toolCategory: 'git',
+      summary: `Fetch base branch ${baseBranch}`,
+      command: renderCommand(fetchArgs),
+      args: fetchArgs,
+      riskLevel: 'low',
+      orderIndex: 20,
+    },
+  ];
+
+  if (agentBranch !== baseBranch) {
+    const fetchTipArgs = ['git', '-C', cachePath, 'fetch', 'origin', agentBranch, '--depth', '1'];
+    commands.push({
+      key: 'fetch_workspace_tip',
+      toolName: 'git.fetch_workspace_tip',
+      toolCategory: 'git',
+      summary: `Fetch workspace branch ${agentBranch} if present on remote (optional)`,
+      command: renderCommand(fetchTipArgs),
+      args: fetchTipArgs,
+      riskLevel: 'low',
+      orderIndex: 25,
+      optional: true,
+    });
+  }
+
+  commands.push(
+    {
+      key: 'add_worktree',
+      toolName: 'git.worktree_add',
+      toolCategory: 'git',
+      summary: `Create worktree on ${agentBranch} from remote tip of same branch, else from origin/${baseBranch}`,
+      command: renderCommand(worktreeArgs),
+      args: worktreeArgs,
+      riskLevel: 'medium',
+      orderIndex: 30,
+    },
+    {
+      key: 'cleanup_worktree',
+      toolName: 'git.worktree_remove',
+      toolCategory: 'git',
+      summary: 'Remove isolated worktree after run completion',
+      command: renderCommand(cleanupArgs),
+      args: cleanupArgs,
+      riskLevel: 'low',
+      orderIndex: 900,
+      cleanup: true,
+    },
+  );
 
   return {
     repoUrl,
@@ -182,49 +246,7 @@ export function buildAgentWorkspaceLifecyclePlan(
     workspaceRoot,
     cachePath,
     worktreePath,
-    commands: [
-      {
-        key: 'clone_cache',
-        toolName: 'git.clone_cache',
-        toolCategory: 'git',
-        summary: 'Clone repository cache for isolated worktree',
-        command: renderCommand(cloneCacheArgs),
-        args: cloneCacheArgs,
-        riskLevel: 'medium',
-        orderIndex: 10,
-      },
-      {
-        key: 'fetch_base',
-        toolName: 'git.fetch',
-        toolCategory: 'git',
-        summary: `Fetch base branch ${baseBranch}`,
-        command: renderCommand(fetchArgs),
-        args: fetchArgs,
-        riskLevel: 'low',
-        orderIndex: 20,
-      },
-      {
-        key: 'add_worktree',
-        toolName: 'git.worktree_add',
-        toolCategory: 'git',
-        summary: `Create isolated worktree on ${agentBranch}`,
-        command: renderCommand(worktreeArgs),
-        args: worktreeArgs,
-        riskLevel: 'medium',
-        orderIndex: 30,
-      },
-      {
-        key: 'cleanup_worktree',
-        toolName: 'git.worktree_remove',
-        toolCategory: 'git',
-        summary: 'Remove isolated worktree after run completion',
-        command: renderCommand(cleanupArgs),
-        args: cleanupArgs,
-        riskLevel: 'low',
-        orderIndex: 900,
-        cleanup: true,
-      },
-    ],
+    commands,
   };
 }
 

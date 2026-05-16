@@ -350,7 +350,13 @@ export interface IPipelineMeta {
   gitUrl?: string;
   /** 沙箱环境访问地址（常从产品目录带入） */
   sandboxUrl?: string;
+  /**
+   * 与 Agent 推送/工作目录一致的分支名（新流水线通常为需求 ID，如 req_xxx）。
+   * 旧数据中本字段表示「远端基准分支」，此时无 `gitBaseBranch`。
+   */
   branch?: string;
+  /** 检出与 fetch 使用的远端基准分支；存在时表示 `branch` 为工作/推送分支 */
+  gitBaseBranch?: string;
   triggerMode?: 'manual' | 'push' | 'schedule';
   priority?: 'P0' | 'P1' | 'P2' | 'P3';
   remarks?: string;

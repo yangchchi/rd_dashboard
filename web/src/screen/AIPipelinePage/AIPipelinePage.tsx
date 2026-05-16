@@ -51,6 +51,7 @@ import { Streamdown } from '@/components/ui/streamdown';
 import { logger } from '@/lib/logger';
 import { rdAuditCreate, rdAuditUpdate } from '@/lib/rd-actor';
 import {
+  useAgentSessionsList,
   useDeletePipelineTask,
   usePipelineTasksList,
   usePrdsList,
@@ -63,12 +64,15 @@ import { gitBlobViewerUrl } from '@/lib/git-web-url';
 import { rdApi } from '@/lib/rd-api';
 import { getAuthToken } from '@/lib/auth';
 import type {
+  IAgentSession,
   IGitCommitRecord,
   IPipelineCodeReviewRecord,
   IPipelineTask,
   IPipelineTestRunRecord,
+  IRequirement,
   PipelineTaskStatus,
 } from '@/lib/rd-types';
+import { formatPrdListTitle, formatProductDashRequirementTitle } from '@/lib/prd-display-title';
 import { cn } from '@/lib/utils';
 import { deriveQualityMetricsFromReview } from '@/lib/pipeline-code-review-metrics';
 import {
@@ -110,6 +114,9 @@ interface ICreatePipelineForm {
   gitUsername: string;
   gitPat: string;
   sandboxUrl: string;
+  /** 检出基准（默认 main），用于拉取 commit 记录与 Agent worktree 的 origin 引用 */
+  gitBaseBranch: string;
+  /** Agent 工作区与推送目标分支（默认与关联需求 ID 一致） */
   branch: string;
   triggerMode: 'manual' | 'push' | 'schedule';
   priority: 'P0' | 'P1' | 'P2' | 'P3';
@@ -134,6 +141,56 @@ const PIPELINE_STATUS_BADGE_SOFT: Record<PipelineTaskStatus, string> = {
   completed: 'border-green-500/30 bg-green-500/10 text-green-900 dark:text-green-100',
   failed: 'border-red-500/30 bg-red-500/10 text-red-900 dark:text-red-100',
 };
+
+/** 看板卡片：当后端未写入 progress 时，用阶段下限避免长期显示 0% */
+const PIPELINE_CARD_PROGRESS_FLOOR: Record<PipelineTaskStatus, number> = {
+  code_generating: 12,
+  self_testing: 40,
+  building: 62,
+  deploying: 84,
+  completed: 100,
+  failed: 0,
+};
+
+const PIPELINE_CARD_STAGE_LABEL: Record<PipelineTaskStatus, string> = {
+  code_generating: '代码生成',
+  self_testing: '自动化测试',
+  building: '构建',
+  deploying: '部署',
+  completed: '交付完成',
+  failed: '已失败',
+};
+
+function displayPipelineCardProgressPct(
+  task: IPipelineTask,
+  opts?: { codingFinishedOnCard?: boolean },
+): number {
+  const raw = Number.isFinite(task.progress) ? Math.min(100, Math.max(0, task.progress)) : 0;
+  let floor = PIPELINE_CARD_PROGRESS_FLOOR[task.status] ?? 0;
+  if (task.status === 'code_generating' && opts?.codingFinishedOnCard) {
+    floor = Math.max(floor, 38);
+  }
+  if (task.status === 'failed') return raw > 0 ? raw : floor;
+  return Math.min(100, Math.max(raw, floor));
+}
+
+function pickLatestAgentSessionForRequirement(
+  requirementId: string,
+  sessions: IAgentSession[],
+): IAgentSession | undefined {
+  const forReq = sessions.filter((s) => s.requirementId === requirementId);
+  if (!forReq.length) return undefined;
+  return [...forReq].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+}
+
+/** 流水线仍为「代码生成」阶段，但 Agent 会话已结束 → 卡片上展示「编码已完成」 */
+function isAgentCodingFinishedWhilePipelineCodeGenerating(
+  task: IPipelineTask,
+  session: IAgentSession | undefined,
+): boolean {
+  if (task.status !== 'code_generating') return false;
+  return session?.status === 'completed';
+}
 
 function authJsonHeaders(): HeadersInit {
   const token = typeof window !== 'undefined' ? getAuthToken() : null;
@@ -164,6 +221,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
   const { data: prds = [] } = usePrdsList();
   const { data: specs = [] } = useSpecsList();
   const { data: tasks = [], isLoading: tasksLoading } = usePipelineTasksList();
+  const { data: agentSessionsForBoard = [] } = useAgentSessionsList(undefined, { enabled: isList });
   const pipelineBoardStats = useMemo(() => {
     let running = 0;
     let completed = 0;
@@ -198,7 +256,8 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
     gitUsername: '',
     gitPat: '',
     sandboxUrl: '',
-    branch: 'main',
+    gitBaseBranch: 'main',
+    branch: '',
     triggerMode: 'manual',
     priority: 'P1',
     remarks: '',
@@ -249,8 +308,23 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
     const activeRequirementId = createForm.requirementId;
     return prds
       .filter((prd) => !activeRequirementId || prd.requirementId === activeRequirementId)
-      .map((prd) => ({ id: prd.id, label: prd.title || prd.id }));
-  }, [createForm.requirementId, prds]);
+      .map((prd) => {
+        const req = requirements.find((r) => r.id === prd.requirementId);
+        return {
+          id: prd.id,
+          label: formatPrdListTitle(req as IRequirement | undefined, products, prd.title) || prd.id,
+        };
+      });
+  }, [createForm.requirementId, prds, requirements, products]);
+  const resolveTaskCardTitle = useCallback(
+    (task: IPipelineTask) =>
+      formatProductDashRequirementTitle(
+        requirements.find((r) => r.id === task.requirementId),
+        products,
+        task.requirementTitle
+      ) || task.requirementTitle,
+    [requirements, products]
+  );
   const specOptions = useMemo<IRelationOption[]>(() => {
     const activeRequirementId = createForm.requirementId;
     const prdIdSet = new Set(prds.filter((p) => p.requirementId === activeRequirementId).map((p) => p.id));
@@ -269,7 +343,8 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
       gitUsername: '',
       gitPat: '',
       sandboxUrl: '',
-      branch: 'main',
+      gitBaseBranch: 'main',
+      branch: '',
       triggerMode: 'manual',
       priority: 'P1',
       remarks: '',
@@ -335,6 +410,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
         ...prev,
         requirementId: nextRequirementId,
         name: shouldApplyDefaultName ? nextDefaultName : prev.name,
+        branch: nextRequirementId.trim(),
         gitUrl: nextGit,
         sandboxUrl: nextSandbox,
       };
@@ -424,15 +500,12 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
     });
   }, [createForm.requirementId, selectedRequirementProductGitUrl, selectedRequirementProductSandboxUrl]);
 
-  const handleAction = async (action: 'pause' | 'retry' | 'rollback', taskId: string) => {
+  const handleAction = async (action: 'retry' | 'rollback', taskId: string) => {
     const task = tasks.find((t) => t.id === taskId);
     if (!task) return;
     try {
       let next: IPipelineTask;
       switch (action) {
-        case 'pause':
-          next = { ...task, status: 'code_generating', stage: '已暂停' };
-          break;
         case 'retry':
           next = { ...task, status: 'code_generating', progress: 0, stage: '重新生成中' };
           break;
@@ -639,7 +712,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
 
       let accumulated = '';
       const stream = await capabilityClient
-        .load('code_review_assistant_1')
+        .load('pipeline_test_case_generator_1')
         .callStream<ICodeReviewResult>('textSummary', {
           code_content: bundle,
           additional_requirements: additionalRequirements,
@@ -725,7 +798,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
 
       let accumulated = '';
       const stream = await capabilityClient
-        .load('code_review_assistant_1')
+        .load('pipeline_test_runner_1')
         .callStream<ICodeReviewResult>('textSummary', {
           code_content: bundle,
           additional_requirements: additionalRequirements,
@@ -913,7 +986,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
       try {
         const commitRecords = await fetchGitCommits(
           createForm.gitUrl.trim(),
-          createForm.branch.trim(),
+          (createForm.gitBaseBranch.trim() || 'main'),
           20,
           createForm.gitAuthMode === 'pat' ? createForm.gitUsername.trim() : undefined,
           createForm.gitAuthMode === 'pat' ? createForm.gitPat.trim() : undefined
@@ -921,7 +994,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
         commitStorePayload = {
           pipelineName: createForm.name.trim(),
           gitUrl: createForm.gitUrl.trim(),
-          branch: createForm.branch.trim(),
+          branch: (createForm.gitBaseBranch.trim() || 'main'),
           records: commitRecords,
           updatedAt: new Date().toISOString(),
         };
@@ -941,7 +1014,12 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
         estimatedEndTime: new Date(now.getTime() + 60 * 60 * 1000).toLocaleString('zh-CN'),
         logs: [
           { id: `log-${Date.now()}-1`, timestamp: now.toLocaleTimeString(), level: 'info', message: `已创建流水线：${createForm.name}` },
-          { id: `log-${Date.now()}-2`, timestamp: now.toLocaleTimeString(), level: 'info', message: `Git仓库：${createForm.gitUrl} (${createForm.branch})` },
+          {
+            id: `log-${Date.now()}-2`,
+            timestamp: now.toLocaleTimeString(),
+            level: 'info',
+            message: `Git仓库：${createForm.gitUrl}（工作分支 ${createForm.branch.trim()}，基准 ${createForm.gitBaseBranch.trim() || 'main'}）`,
+          },
           { id: `log-${Date.now()}-3`, timestamp: now.toLocaleTimeString(), level: 'success', message: `文档已提交到Git，commit: ${publishResult.commitHash || 'unknown'}` },
           {
             id: `log-${Date.now()}-4`,
@@ -971,6 +1049,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
           gitUrl: createForm.gitUrl.trim(),
           sandboxUrl: createForm.sandboxUrl.trim() || undefined,
           branch: createForm.branch.trim(),
+          gitBaseBranch: createForm.gitBaseBranch.trim() || 'main',
           triggerMode: createForm.triggerMode,
           priority: createForm.priority,
           remarks: createForm.remarks.trim(),
@@ -1060,7 +1139,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                   isDetail
                     ? tasksLoading
                       ? '加载交付任务…'
-                      : selectedTask?.requirementTitle || '交付引擎详情'
+                      : selectedTask ? resolveTaskCardTitle(selectedTask) : '交付引擎详情'
                     : '实时监控 AI 代码生成、测试与部署全流程'
                 }
                 leading={
@@ -1139,13 +1218,32 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
               ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 {tasks.map(task => {
-                  const accent = PIPELINE_CARD_ACCENT[task.status] ?? 'bg-slate-400';
+                  const latestSession = pickLatestAgentSessionForRequirement(
+                    task.requirementId,
+                    agentSessionsForBoard,
+                  );
+                  const codingFinishedOnCard = isAgentCodingFinishedWhilePipelineCodeGenerating(
+                    task,
+                    latestSession,
+                  );
+                  const accent =
+                    codingFinishedOnCard
+                      ? 'bg-green-600'
+                      : (PIPELINE_CARD_ACCENT[task.status] ?? 'bg-slate-400');
+                  const cardProgressPct = displayPipelineCardProgressPct(task, { codingFinishedOnCard });
+                  const cardExecLabel =
+                    task.status === 'code_generating'
+                      ? codingFinishedOnCard
+                        ? '已完成'
+                        : '代码生成中'
+                      : (pipelineStatusConfig[task.status]?.label ?? task.stage);
+                  const cardSubtitle = codingFinishedOnCard ? '编码阶段已完成' : task.stage;
                   return (
                     <Card
                       key={task.id}
                       role="link"
                       tabIndex={0}
-                      aria-label={`${task.requirementTitle}，${task.stage}，进度 ${task.progress}%`}
+                      aria-label={`${resolveTaskCardTitle(task)}，${cardExecLabel}，阶段进度 ${cardProgressPct}%`}
                       className={cn(
                         'group relative cursor-pointer overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-all duration-200',
                         'hover:-translate-y-0.5 hover:shadow-md',
@@ -1165,54 +1263,61 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                       />
                       <CardContent className="relative p-4 pl-5">
                         <div className="mb-2 flex items-start justify-between gap-2">
-                          {getStatusBadge(task.status)}
-                          {task.status === 'code_generating' ? (
+                          {task.status === 'code_generating' && codingFinishedOnCard ? (
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                'gap-1.5 border font-medium',
+                                PIPELINE_STATUS_BADGE_SOFT.completed,
+                              )}
+                            >
+                              <span className="size-1.5 shrink-0 rounded-full bg-green-500" aria-hidden />
+                              <CheckCircle2 className="size-3 shrink-0 opacity-90" aria-hidden />
+                              已完成
+                            </Badge>
+                          ) : (
+                            getStatusBadge(task.status)
+                          )}
+                          {task.status === 'code_generating' && !codingFinishedOnCard ? (
                             <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-purple-500/10 ring-1 ring-purple-500/20">
                               <Loader2 className="size-4 animate-spin text-purple-600" aria-hidden />
                             </span>
                           ) : null}
                         </div>
-                        <h3 className="mb-1 line-clamp-1 text-sm font-medium text-foreground" title={task.requirementTitle}>
-                          {task.requirementTitle}
+                        <h3 className="mb-1 line-clamp-1 text-sm font-medium text-foreground" title={resolveTaskCardTitle(task)}>
+                          {resolveTaskCardTitle(task)}
                         </h3>
-                        <p className="mb-3 text-xs text-muted-foreground">{task.stage}</p>
+                        <p className="mb-3 text-xs text-muted-foreground">{cardSubtitle}</p>
                         <div className="space-y-2">
-                          <div className="flex items-baseline justify-between gap-2 text-xs">
-                            <span className="font-medium uppercase tracking-wide text-muted-foreground">
-                              进度
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span className="min-w-0 truncate text-muted-foreground">
+                              <span className="font-medium text-foreground/90">
+                                {PIPELINE_CARD_STAGE_LABEL[task.status]}
+                              </span>
+                              <span className="mx-1.5 text-border">·</span>
+                              <span>阶段进度</span>
                             </span>
-                            <span className="font-mono tabular-nums text-sm font-semibold text-foreground">
-                              {task.progress}%
+                            <span className="shrink-0 font-mono tabular-nums text-sm font-semibold text-foreground">
+                              {cardProgressPct}%
                             </span>
                           </div>
-                          <Progress value={task.progress} className="h-1.5 bg-muted" />
+                          <Progress
+                            value={cardProgressPct}
+                            className="h-2 bg-muted/80 [&_[data-slot=progress-indicator]]:duration-500 [&_[data-slot=progress-indicator]]:ease-out"
+                          />
                         </div>
-                        <div className="mt-3 flex items-center justify-between border-t pt-3">
-                          <div className="flex items-center gap-1">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-2 text-xs text-amber-600 hover:text-amber-700"
-                              disabled={task.status === 'completed' || task.status === 'failed'}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleAction('pause', task.id);
-                              }}
-                            >
-                              暂停
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 px-2 text-xs"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDownloadDocs(task);
-                              }}
-                            >
-                              下载（本地开发）
-                            </Button>
-                          </div>
+                        <div className="mt-3 flex items-center justify-between gap-2 border-t pt-3">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDownloadDocs(task);
+                            }}
+                          >
+                            下载（本地开发）
+                          </Button>
                           <ListRowActionsMenu
                             stopPropagation
                             onView={() => handleViewTask(task.id)}
@@ -1396,7 +1501,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                     <CardContent className="space-y-4">
                       <div>
                         <div className="text-xs text-muted-foreground mb-1">关联需求</div>
-                        <div className="font-medium text-sm">{selectedTask.requirementTitle}</div>
+                        <div className="font-medium text-sm">{resolveTaskCardTitle(selectedTask)}</div>
                       </div>
                       {selectedTask.pipelineMeta?.gitUrl && (
                         <>
@@ -2164,10 +2269,14 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                   <Input
                     id="cp-branch"
                     className="font-mono text-sm"
-                    placeholder="main"
+                    placeholder={createForm.requirementId || 'req_…'}
                     value={createForm.branch}
                     onChange={(e) => setCreateForm((prev) => ({ ...prev, branch: e.target.value }))}
                   />
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    默认与需求 ID 一致，用于 Agent 工作区与推送；仓库检出基准分支固定为{' '}
+                    <span className="font-mono">{createForm.gitBaseBranch.trim() || 'main'}</span>。
+                  </p>
                 </div>
               </div>
             </section>

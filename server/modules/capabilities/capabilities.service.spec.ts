@@ -160,4 +160,132 @@ describe('CapabilitiesService', () => {
     expect(requestBody.tools).toEqual([{ type: 'web_search' }]);
     expect(body).toContain('功能规格正文');
   });
+
+  it('prd_generator_1 流式优先使用数据库中的 prd_auto_generation，而非 prd_generator_1 行', async () => {
+    process.env.ARK_API_KEY = 'server-key';
+    process.env.ARK_API_ENDPOINT = 'https://ark.example.test/responses';
+    const responseBody = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode('data: {"output_text":"正文"}\n\ndata: [DONE]\n\n')
+        );
+        controller.close();
+      },
+    });
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      body: responseBody,
+    })) as jest.Mock;
+    const getAiSkill = jest.fn(async (id: string) => {
+      if (id === 'prd_auto_generation') {
+        return {
+          endpoint: 'https://ark.example.test/custom',
+          model: 'model-a',
+          promptTemplate: 'ONLY_AUTO={{original_requirement}}',
+          tools: [],
+        };
+      }
+      if (id === 'prd_generator_1') {
+        return {
+          endpoint: 'https://ark.example.test/custom',
+          model: 'model-b',
+          promptTemplate: 'WRONG_ROW',
+          tools: [],
+        };
+      }
+      return null;
+    });
+    const service = new CapabilitiesService({ getAiSkill } as never);
+
+    await collectStream(
+      service.stream('prd_generator_1', 'textGenerate', {
+        original_requirement: '权限管理RBAC',
+        additional_requirements: '',
+        related_prd_document: '',
+        user_supplementary_document: '',
+      })
+    );
+
+    expect(getAiSkill.mock.calls[0]?.[0]).toBe('prd_auto_generation');
+    expect(getAiSkill).toHaveBeenCalledTimes(1);
+    const requestBody = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+    expect(requestBody.input[0].content[0].text).toBe('ONLY_AUTO=权限管理RBAC');
+    expect(requestBody.tools).toEqual([]);
+  });
+
+  it('prd_generator 套模板时从 original_requirement 补全 {{title}} / {{description}}', async () => {
+    process.env.ARK_API_KEY = 'server-key';
+    process.env.ARK_API_ENDPOINT = 'https://ark.example.test/responses';
+    const responseBody = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode('data: {"output_text":"ok"}\n\ndata: [DONE]\n\n')
+        );
+        controller.close();
+      },
+    });
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      body: responseBody,
+    })) as jest.Mock;
+    const service = new CapabilitiesService({
+      getAiSkill: jest.fn().mockResolvedValue({
+        endpoint: null,
+        model: 'm',
+        promptTemplate: 'T={{title}}\nD={{description}}',
+        tools: [],
+      }),
+    } as never);
+
+    await collectStream(
+      service.stream('prd_generator_1', 'textGenerate', {
+        original_requirement:
+          '需求标题：权限管理\n需求描述：实现RBAC。\n期望上线时间：2026-01-01\n业务优先级：P1',
+        additional_requirements: '',
+        related_prd_document: '',
+        user_supplementary_document: '',
+      })
+    );
+
+    const requestBody = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+    expect(requestBody.input[0].content[0].text).toBe('T=权限管理\nD=实现RBAC。');
+  });
+
+  it('prd_generator 从 original_requirement 解析 product_name 供模板占位', async () => {
+    process.env.ARK_API_KEY = 'server-key';
+    process.env.ARK_API_ENDPOINT = 'https://ark.example.test/responses';
+    const responseBody = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode('data: {"output_text":"x"}\n\ndata: [DONE]\n\n')
+        );
+        controller.close();
+      },
+    });
+    global.fetch = jest.fn(async () => ({
+      ok: true,
+      body: responseBody,
+    })) as jest.Mock;
+    const service = new CapabilitiesService({
+      getAiSkill: jest.fn().mockResolvedValue({
+        endpoint: null,
+        model: 'm',
+        promptTemplate: 'PROD={{product_name}}',
+        tools: [],
+      }),
+    } as never);
+
+    await collectStream(
+      service.stream('prd_generator_1', 'textGenerate', {
+        original_requirement:
+          '【范围锚定】x\n所属产品：HAI智研平台\n需求标题：权限\n需求描述：RBAC。\n期望上线时间：2026-01-01\n业务优先级：P1',
+        additional_requirements: '',
+        related_prd_document: '',
+        user_supplementary_document: '',
+      })
+    );
+
+    const requestBody = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+    expect(requestBody.input[0].content[0].text).toBe('PROD=HAI智研平台');
+  });
 });

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
-import { DEFAULT_AI_SKILLS } from '../../../shared/ai-skill-defaults';
+import { DEFAULT_AI_SKILLS, PRD_GENERATION_SKILL_ID } from '../../../shared/ai-skill-defaults';
 import { RdService } from '../rd/rd.service';
 
 /** 与 @lark-apaas/client-capability ErrorCodes.SUCCESS 一致 */
@@ -94,7 +94,92 @@ function applyInputTemplate(template: string, params: Record<string, unknown>): 
 }
 
 function applySkillTemplate(template: string, params: Record<string, unknown>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => String(params[key] ?? ''));
+  /** 兼容从插件 JSON 复制的 {{input.xxx}} 与 Skill 表的 {{xxx}} 两种占位 */
+  const merged = applyInputTemplate(template, params);
+  return merged.replace(/\{\{(\w+)\}\}/g, (_, key: string) => String(params[key] ?? ''));
+}
+
+/**
+ * 管理后台里 PRD Skill 常写成 {{title}}、{{description}}，而前端/插件实际传 original_requirement 等。
+ * 若不补齐，占位符会变成空串，模型几乎看不到本条需求。此处从 original_requirement 解析并写入别名键。
+ * 同时解析「所属产品」「产品简介」等行，供 {{product_name}} / {{product_intro}} 等简写占位符使用。
+ */
+function mergePrdGeneratorStreamParams(params: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...params };
+  const orig = String(out.original_requirement ?? '').trim();
+
+  const titleExisting = String(out.title ?? out.requirement_title ?? '').trim();
+  const descExisting = String(out.description ?? out.requirement_description ?? '').trim();
+
+  let title = titleExisting;
+  let description = descExisting;
+
+  if (!title && orig) {
+    const m = orig.match(/^需求标题：\s*(.+)$/m);
+    title = m ? m[1].trim() : (orig.split('\n')[0]?.trim() ?? '');
+  }
+  if (!description && orig) {
+    const m = orig.match(/^需求描述：\s*([\s\S]+?)(?=^期望上线时间：)/m);
+    if (m) {
+      description = m[1].trim();
+    } else {
+      const rest = orig.replace(/^需求标题：[^\n]*\n?/m, '').trim();
+      description = rest || orig;
+    }
+  }
+
+  if (title) {
+    out.title = title;
+    out.requirement_title = title;
+  }
+  if (description) {
+    out.description = description;
+    out.requirement_description = description;
+  }
+
+  const mProduct = orig.match(/^所属产品：\s*(.+)$/m);
+  if (mProduct) {
+    const pn = mProduct[1].trim();
+    out.product_name = pn;
+    out.product = pn;
+    out.current_product = pn;
+  }
+
+  const mIntro = orig.match(/^产品简介（语境对齐，节选）：\s*\n([\s\S]+?)(?=^需求标题：)/m);
+  if (mIntro) {
+    const intro = mIntro[1].trim();
+    out.product_intro = intro;
+    out.product_context = intro;
+    out.product_description = intro;
+  }
+
+  const mExp = orig.match(/^期望上线时间：\s*(.+)$/m);
+  if (mExp) {
+    const ed = mExp[1].trim();
+    out.expected_date = ed;
+    out.expectedDate = ed;
+  }
+  const mPri = orig.match(/^业务优先级：\s*(.+)$/m);
+  if (mPri) {
+    const pr = mPri[1].trim();
+    out.priority = pr;
+    out.business_priority = pr;
+  }
+
+  out.requirement_body = orig;
+
+  if (out.related_prd == null && out.related_prd_document != null) {
+    out.related_prd = out.related_prd_document;
+  }
+  if (out.supplementary == null && out.user_supplementary_document != null) {
+    out.supplementary = out.user_supplementary_document;
+  }
+  if (out.additional == null && out.additional_requirements != null) {
+    out.additional = out.additional_requirements;
+    out.extra_requirements = out.additional_requirements;
+  }
+
+  return out;
 }
 
 function buildPromptFromCapabilityFile(
@@ -170,16 +255,26 @@ export class CapabilitiesService {
       (action === 'textGenerate' || action === 'textSummary' || action === 'textToJson');
 
     if (useArk) {
-      const skill = await this.resolveSkillConfig(capabilityId);
+      const { skill, resolvedSkillId, skillSource } = await this.resolveSkillConfig(capabilityId);
+      const rawParams = (params ?? {}) as Record<string, unknown>;
+      const templateParams =
+        /^prd_generator/.test(capabilityId) && action === 'textGenerate'
+          ? mergePrdGeneratorStreamParams(rawParams)
+          : rawParams;
       const prompt =
         skill && (action === 'textGenerate' || action === 'textSummary')
-          ? applySkillTemplate(skill.promptTemplate, (params ?? {}) as Record<string, unknown>)
+          ? applySkillTemplate(skill.promptTemplate, templateParams)
           : buildPromptFromCapabilityFile(capabilityId, action, params);
       if (prompt) {
+        if (/^prd_generator/.test(capabilityId) && action === 'textGenerate') {
+          this.logger.log(
+            `prd_generator 流式：skillId=${resolvedSkillId ?? '—'}，来源=${skillSource}，提示词约 ${prompt.length} 字`
+          );
+        }
         const deltaField: 'content' | 'summary' =
           action === 'textSummary' ? 'summary' : 'content';
         try {
-          yield* this.streamArkSse(prompt, apiKey, deltaField, skill);
+          yield* this.streamArkSse(prompt, apiKey, deltaField, skill, capabilityId);
           return;
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
@@ -225,11 +320,16 @@ export class CapabilitiesService {
     prompt: string,
     apiKey: string,
     deltaField: 'content' | 'summary',
-    skill?: AiSkillConfig | null
+    skill?: AiSkillConfig | null,
+    capabilityId?: string
   ): AsyncGenerator<string> {
     const model = skill?.model || process.env.ARK_MODEL || DEFAULT_ARK_MODEL;
     const endpoint = skill?.endpoint || process.env.ARK_API_ENDPOINT || DEFAULT_ARK_ENDPOINT;
-    const tools = Array.isArray(skill?.tools) ? skill.tools : [];
+    let tools = Array.isArray(skill?.tools) ? [...skill.tools] : [];
+    /** PRD 插件仅消费请求内材料；禁用 tools（如 web_search），避免模型先输出「将搜索…」类前言污染流式正文 */
+    if (capabilityId && /^prd_generator/.test(capabilityId)) {
+      tools = [];
+    }
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -314,24 +414,73 @@ export class CapabilitiesService {
     yield `data: ${JSON.stringify(end)}\n\n`;
   }
 
-  private async resolveSkillConfig(capabilityId: string): Promise<AiSkillConfig | null> {
-    const defaultSkill = DEFAULT_AI_SKILLS[capabilityId];
-    try {
-      const stored = await this.rdService.getAiSkill(capabilityId);
-      if (stored?.promptTemplate) {
-        return {
-          endpoint: stored.endpoint,
-          model: stored.model,
-          promptTemplate: stored.promptTemplate,
-          tools: stored.tools,
+  /** capability 文件 id 常为 `foo_1`，插件配置 / 种子表 id 常为 `foo`，双向尝试以命中 rd_ai_skill_configs 与 DEFAULT_AI_SKILLS */
+  private capabilitySkillIdVariants(capabilityId: string): string[] {
+    // PRD 插件：始终优先 prd_auto_generation（与种子表、DEFAULT_AI_SKILLS 主键一致），避免误插入的 prd_generator_1 行抢先命中
+    if (/^prd_generator/.test(capabilityId)) {
+      const rest = [capabilityId];
+      if (/_\d+$/.test(capabilityId)) {
+        rest.push(capabilityId.replace(/_\d+$/, ''));
+      }
+      return [PRD_GENERATION_SKILL_ID, ...rest.filter((id) => id !== PRD_GENERATION_SKILL_ID)];
+    }
+    const out = [capabilityId];
+    if (/_\d+$/.test(capabilityId)) {
+      out.push(capabilityId.replace(/_\d+$/, ''));
+    }
+    return out;
+  }
+
+  private async resolveSkillConfig(capabilityId: string): Promise<{
+    skill: AiSkillConfig | null;
+    resolvedSkillId: string | null;
+    skillSource: 'database' | 'code_default' | 'none';
+  }> {
+    const variants = this.capabilitySkillIdVariants(capabilityId);
+    let defaultSkill: AiSkillConfig | null = null;
+    let defaultSkillId: string | null = null;
+    for (const id of variants) {
+      const d = DEFAULT_AI_SKILLS[id as keyof typeof DEFAULT_AI_SKILLS];
+      if (d?.promptTemplate) {
+        defaultSkill = {
+          endpoint: d.endpoint,
+          model: d.model,
+          promptTemplate: d.promptTemplate,
+          tools: d.tools,
         };
+        defaultSkillId = id;
+        break;
+      }
+    }
+    try {
+      for (const id of variants) {
+        const stored = await this.rdService.getAiSkill(id);
+        if (stored?.promptTemplate) {
+          return {
+            skill: {
+              endpoint: stored.endpoint,
+              model: stored.model,
+              promptTemplate: stored.promptTemplate,
+              tools: stored.tools,
+            },
+            resolvedSkillId: id,
+            skillSource: 'database',
+          };
+        }
       }
     } catch (e) {
       this.logger.warn(
         `读取 AI Skill 配置失败，尝试使用内置配置: ${e instanceof Error ? e.message : String(e)}`
       );
     }
-    return defaultSkill ?? null;
+    if (defaultSkill) {
+      return {
+        skill: defaultSkill,
+        resolvedSkillId: defaultSkillId,
+        skillSource: 'code_default',
+      };
+    }
+    return { skill: null, resolvedSkillId: null, skillSource: 'none' };
   }
 
   private canUseDemoOutput(): boolean {

@@ -24,6 +24,7 @@ import {
   type IWorkspaceLifecycleCommand,
 } from '../../../shared/agent-workspace-manager';
 import { resolveWorkspaceProductSlug } from '../../../shared/pipeline-workspace-path';
+import { resolvePipelineGitBaseBranch, resolvePipelineWorkspaceBranchLabel } from '../../../shared/pipeline-meta-branch';
 import { assertToolCallCanStart, prepareToolCallPolicy } from '../../../shared/agent-tool-gateway';
 import { createDefaultOrgSpecConfig } from '../../../shared/org-spec-defaults';
 
@@ -2393,9 +2394,12 @@ export class RdService implements OnModuleInit {
       `- Trigger Mode: ${input.pipelineRun?.triggerMode || 'manual'}`,
     ];
     const gitUrl = meta.gitUrl || meta.repoUrl || meta.repositoryUrl;
-    const branch = meta.branch || meta.baseBranch || meta.targetBranch;
+    const metaBranch = meta as { gitBaseBranch?: string | null; branch?: string | null };
+    const gitBase = resolvePipelineGitBaseBranch(metaBranch);
+    const workspaceBranch = resolvePipelineWorkspaceBranchLabel(metaBranch, input.requirement.id);
     if (gitUrl) lines.push(`- Repository URL: ${String(gitUrl)}`);
-    if (branch) lines.push(`- Base Branch: ${String(branch)}`);
+    lines.push(`- Git Base Branch: ${gitBase}`);
+    lines.push(`- Workspace / Push Branch: ${workspaceBranch}`);
     lines.push('', '## Context Snapshot', '```json', JSON.stringify(meta, null, 2), '```', '');
     return lines.join('\n');
   }
@@ -3895,15 +3899,69 @@ esac
         committed = true;
       }
 
-      const push = await this.runTextCommandWithEnv(
-        'git',
-        ['-C', rootAbs, 'push', '-u', 'origin', `HEAD:refs/heads/${agentBranch}`],
-        rootAbs,
-        env,
-      );
+      const runPush = () =>
+        this.runTextCommandWithEnv(
+          'git',
+          ['-C', rootAbs, 'push', '-u', 'origin', `HEAD:refs/heads/${agentBranch}`],
+          rootAbs,
+          env,
+        );
+
+      /** Git 版本差异：有的写 (non-fast-forward)，有的写 (fetch first)，语义均为「需先集成远端」 */
+      const isPushRejectedNeedRemote = (err: string) =>
+        /non-fast-forward/i.test(err) ||
+        /\(fetch first\)/i.test(err) ||
+        /\(non-fast-forward\)/i.test(err) ||
+        (/Updates were rejected/i.test(err) && /remote contains work/i.test(err));
+
+      let push = await runPush();
       log.push(`[git push] exit=${push.exitCode}`);
       if (push.exitCode !== 0) {
-        throw new BadRequestException(`git push 失败：${push.stderr || push.stdout}`);
+        const pushErr = `${push.stderr || ''}\n${push.stdout || ''}`;
+        if (isPushRejectedNeedRemote(pushErr)) {
+          log.push(
+            '[git push] 远端含本地没有的提交，将 fetch 远端分支并 rebase 后再推送',
+          );
+          const localRemoteRef = `refs/remotes/origin/${agentBranch}`;
+          const fetch = await this.runTextCommandWithEnv(
+            'git',
+            [
+              '-C',
+              rootAbs,
+              'fetch',
+              'origin',
+              `+refs/heads/${agentBranch}:${localRemoteRef}`,
+            ],
+            rootAbs,
+            env,
+          );
+          log.push(`[git fetch origin ${agentBranch}] exit=${fetch.exitCode}`);
+          if (fetch.exitCode !== 0) {
+            throw new BadRequestException(
+              `git push 失败（需先同步远端），且 fetch 失败：${fetch.stderr || fetch.stdout || pushErr}`,
+            );
+          }
+          const rebase = await this.runTextCommandWithEnv(
+            'git',
+            ['-C', rootAbs, 'rebase', `origin/${agentBranch}`],
+            rootAbs,
+            env,
+          );
+          log.push(`[git rebase origin/${agentBranch}] exit=${rebase.exitCode}`);
+          if (rebase.exitCode !== 0) {
+            await this.runTextCommandWithEnv('git', ['-C', rootAbs, 'rebase', '--abort'], rootAbs, env).catch(
+              () => null,
+            );
+            throw new BadRequestException(
+              `git push 失败：远端与本地历史分叉，自动 rebase 未成功（可能存在冲突）。请在 worktree 中手动 git pull --rebase 或解决冲突后再推送。\n${rebase.stderr || rebase.stdout || pushErr}`,
+            );
+          }
+          push = await runPush();
+          log.push(`[git push retry] exit=${push.exitCode}`);
+        }
+        if (push.exitCode !== 0) {
+          throw new BadRequestException(`git push 失败：${push.stderr || push.stdout}`);
+        }
       }
 
       const head = await this.runTextCommandWithEnv('git', ['-C', rootAbs, 'rev-parse', 'HEAD'], rootAbs, env);
@@ -3963,11 +4021,10 @@ esac
     workspace: IAgentWorkspaceRow,
     command: IWorkspaceLifecycleCommand,
   ): Promise<void> {
-    if (command.key !== 'add_worktree' || command.args[0] !== 'git' || command.args[1] !== '-C') {
-      return;
-    }
-    const cachePath = command.args[2];
-    const worktreePath = command.args[7];
+    if (command.key !== 'add_worktree') return;
+    const meta = this.parseJsonObject(workspace.metadata);
+    const cachePath = String(meta.cachePath || '').trim();
+    const worktreePath = (workspace.worktreePath || '').trim();
     if (!cachePath || !worktreePath) return;
     const metaRoot = String(this.parseJsonObject(workspace.metadata).workspaceRoot || '')
       .trim()
@@ -4669,6 +4726,7 @@ esac
           riskLevel: (row.riskLevel as IWorkspaceLifecycleCommand['riskLevel']) || 'low',
           orderIndex: Number(row.orderIndex ?? 0),
           cleanup: Boolean(row.cleanup),
+          optional: Boolean(row.optional),
         });
         return commands;
       }, [])
@@ -4755,21 +4813,25 @@ esac
       });
       const result = await this.runTextCommand(command.args[0], command.args.slice(1), process.cwd());
       const durationMs = Date.now() - startedAt;
+      const optionalIgnored = Boolean(command.optional) && result.exitCode !== 0;
       const finished = await this.upsertAgentToolCall({
         ...started,
-        status: result.exitCode === 0 ? 'succeeded' : 'failed',
-        exitCode: result.exitCode,
+        status: result.exitCode === 0 || optionalIgnored ? 'succeeded' : 'failed',
+        exitCode: optionalIgnored ? 0 : result.exitCode,
         durationMs,
-        outputSummary: (result.stdout || result.stderr).slice(-4000),
+        outputSummary: optionalIgnored
+          ? `（可选步骤：远端尚无该分支或不可达，已忽略）\n${(result.stdout || result.stderr).slice(-4000)}`
+          : (result.stdout || result.stderr).slice(-4000),
         finishedAt: new Date().toISOString(),
         metadata: {
           ...this.parseJsonObject(started.metadata),
           stdout: result.stdout.slice(-20000),
           stderr: result.stderr.slice(-20000),
+          ...(optionalIgnored ? { optionalCommandIgnored: true, ignoredExitCode: result.exitCode } : {}),
         },
       });
       toolCalls.push(finished);
-      if (result.exitCode !== 0) {
+      if (result.exitCode !== 0 && !command.optional) {
         failed = true;
         break;
       }
@@ -4876,6 +4938,7 @@ esac
           orderIndex: command.orderIndex,
           riskLevel: command.riskLevel,
           cleanup: Boolean(command.cleanup),
+          optional: Boolean(command.optional),
         })),
         createdBy: body.createdBy ?? null,
       },

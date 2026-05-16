@@ -38,6 +38,8 @@
 | spec_generator | ai-text-generate | 根据PRD生成技术规格说明书草稿 | stream | 规格定义页 |
 | requirement_classifier | ai-categorization | 对需求进行自动分类和优先级识别 | unary | 需求采集页 |
 | code_review_assistant | ai-text-summary | 分析代码生成结果，提供质量评估摘要 | stream | 流水线页 |
+| pipeline_test_case_generator | ai-text-summary | 基于 FS/TS/生成代码推导自动化测试用例 | stream | 流水线页 |
+| pipeline_test_runner | ai-text-summary | 基于用例与上下文归纳自动化测试执行报告 | stream | 流水线页 |
 | conflict_detector | ai-text-to-json | 检测技术规格与现有系统的逻辑冲突 | unary | 规格定义页 |
 | acceptance_analyzer | ai-text-summary | 分析验收反馈，生成改进建议 | stream | 验收中心页 |
 

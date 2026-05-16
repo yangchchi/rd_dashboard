@@ -41,6 +41,7 @@ import { createDefaultOrgSpecConfig } from '@/lib/org-spec-defaults';
 import {
   useOrgSpecConfig,
   usePrdsList,
+  useProductsList,
   useRequirementsList,
   usePrd,
   useRequirement,
@@ -51,6 +52,8 @@ import {
 } from '@/lib/rd-hooks';
 import { toast } from 'sonner';
 import { formatSpecValidationIssues, validateSpecForReview } from '@shared/spec-validation';
+import type { IRequirement } from '@/lib/rd-types';
+import { formatPrdListTitle, formatProductDashRequirementTitle } from '@/lib/prd-display-title';
 interface IApiDef {
   path: string;
   method: string;
@@ -263,14 +266,14 @@ function stripHtml(html: string): string {
   return div.textContent || div.innerText || '';
 }
 
-function buildPrdDocument(prd: IPrd): string {
+function buildPrdDocument(prd: IPrd, headingTitle?: string): string {
   const features =
     prd.featureList?.map((f) => {
       const ac = (f.acceptanceCriteria || []).join('; ');
       return `- ${f.name}: ${f.description}${ac ? `\n  验收标准: ${ac}` : ''}`;
     }).join('\n') || '（无）';
   return [
-    `标题: ${prd.title || '（未命名）'}`,
+    `标题: ${headingTitle?.trim() || prd.title || '（未命名）'}`,
     `背景:\n${stripHtml(prd.background)}`,
     `目标:\n${stripHtml(prd.objectives)}`,
     `流程图: ${prd.flowchart?.trim() ? stripHtml(prd.flowchart) : '无'}`,
@@ -313,6 +316,7 @@ const SpecEditPage: React.FC = () => {
   const { data: loadedSpec, isLoading: specLoading } = useSpec(isCreateMode ? undefined : id);
   const { data: loadedOrg } = useOrgSpecConfig();
   const { data: allRequirements = [] } = useRequirementsList();
+  const { data: allProducts = [] } = useProductsList();
   const { data: allPrds = [] } = usePrdsList();
   const { data: allSpecs = [] } = useSpecsList();
   const upsertSpecMutation = useUpsertSpec();
@@ -346,6 +350,14 @@ const SpecEditPage: React.FC = () => {
   const [selectedRequirementId, setSelectedRequirementId] = useState('');
   const [selectedPrdId, setSelectedPrdId] = useState('');
   const isReviewLocked = spec.status === 'reviewing' || spec.status === 'approved';
+
+  const linkedPrdDisplayTitle = useMemo(
+    () =>
+      linkedPrd
+        ? formatPrdListTitle(requirement ?? undefined, allProducts, linkedPrd.title)
+        : '',
+    [linkedPrd, requirement, allProducts]
+  );
 
   useEffect(() => {
     if (isCreateMode) return;
@@ -543,7 +555,9 @@ const SpecEditPage: React.FC = () => {
     setGeneratingFs(true);
     setFsStreamText('');
     try {
-      const prdDoc = buildPrdDocument(prd);
+      const reqForPrd = allRequirements.find((r) => r.id === prd.requirementId);
+      const prdHeading = formatPrdListTitle(reqForPrd as IRequirement | undefined, allProducts, prd.title);
+      const prdDoc = buildPrdDocument(prd, prdHeading);
       const stream = capabilityClient
         .load('fs_auto_generation')
         .callStream<SpecGenerateStreamChunk>('textGenerate', {
@@ -568,7 +582,7 @@ const SpecEditPage: React.FC = () => {
     } finally {
       setGeneratingFs(false);
     }
-  }, [linkedPrd, linkedPrdApi, spec.prdId, updateSpec]);
+  }, [linkedPrd, linkedPrdApi, spec.prdId, updateSpec, allRequirements, allProducts]);
 
   const handleGenerateTs = useCallback(async () => {
     const fsBody = (spec.fsMarkdown ?? '').trim();
@@ -794,7 +808,7 @@ const SpecEditPage: React.FC = () => {
                 <option value="">请选择需求</option>
                 {candidateRequirements.map((r) => (
                   <option key={r.id} value={r.id}>
-                    {r.title} ({r.id})
+                    {formatProductDashRequirementTitle(r, allProducts) || r.title} ({r.id})
                   </option>
                 ))}
               </select>
@@ -808,11 +822,18 @@ const SpecEditPage: React.FC = () => {
                 disabled={!selectedRequirementId}
               >
                 <option value="">{selectedRequirementId ? '请选择 PRD' : '请先选择需求'}</option>
-                {candidatePrds.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {(p.title || p.id)} ({p.status})
-                  </option>
-                ))}
+                {candidatePrds.map((p) => {
+                  const reqForP = allRequirements.find((r) => r.id === p.requirementId);
+                  const label =
+                    formatPrdListTitle(reqForP as IRequirement | undefined, allProducts, p.title) ||
+                    p.title ||
+                    p.id;
+                  return (
+                    <option key={p.id} value={p.id}>
+                      {label} ({p.status})
+                    </option>
+                  );
+                })}
               </select>
             </div>
             <div className="pt-2">
@@ -854,9 +875,9 @@ const SpecEditPage: React.FC = () => {
                 <h1 className="text-2xl font-semibold">编辑规格说明书</h1>
                 <p className="text-sm text-muted-foreground">
                   {linkedPrd
-                    ? `关联 PRD: ${linkedPrd.title || linkedPrd.id}`
+                    ? `关联 PRD: ${linkedPrdDisplayTitle || linkedPrd.title || linkedPrd.id}`
                     : requirement
-                      ? `关联需求: ${requirement.title}`
+                      ? `关联需求: ${formatProductDashRequirementTitle(requirement, allProducts) || requirement.title}`
                       : '建议流程：组织编码约束 → FS（参考 PRD）→ TS（参考 FS + 约束）→ CP（参考 FS + TS）'}
                 </p>
               </div>

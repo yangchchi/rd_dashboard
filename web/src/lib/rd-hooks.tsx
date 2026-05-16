@@ -365,7 +365,10 @@ export function useUpsertPipelineStepRun() {
   });
 }
 
-export function useAgentSessionsList(filters?: { pipelineRunId?: string; requirementId?: string }) {
+export function useAgentSessionsList(
+  filters?: { pipelineRunId?: string; requirementId?: string },
+  options?: { enabled?: boolean },
+) {
   return useQuery({
     queryKey: [
       ...rdKeys.agentSessions,
@@ -373,6 +376,7 @@ export function useAgentSessionsList(filters?: { pipelineRunId?: string; require
       filters?.requirementId ?? '',
     ] as const,
     queryFn: () => rdApi.listAgentSessions(filters),
+    enabled: options?.enabled ?? true,
   });
 }
 

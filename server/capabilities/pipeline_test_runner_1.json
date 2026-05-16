@@ -1,0 +1,29 @@
+{
+  "id": "pipeline_test_runner_1",
+  "pluginKey": "@official-plugins/ai-text-summary",
+  "pluginVersion": "1.0.4",
+  "name": "自动化测试执行与报告",
+  "description": "基于测试用例与上下文归纳执行结果，流式输出，末尾 JSON 报告。",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "code_content": {
+        "type": "string",
+        "description": "用例清单与 FS/TS/代码上下文"
+      },
+      "additional_requirements": {
+        "type": "string",
+        "description": "JSON 报告字段与 coverage 等约束"
+      }
+    },
+    "required": ["code_content"]
+  },
+  "formValue": {
+    "content": "{{input.code_content}}",
+    "requirement": "你是测试工程师。请根据用例与上下文给出测试执行结论，并遵守补充要求。\n\n补充要求：{{input.additional_requirements}}"
+  },
+  "createdAt": 1775620930085,
+  "updatedAt": 1775620930085,
+  "createdBy": 6944703071284903963
+}

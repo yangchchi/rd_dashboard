@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useCurrentUserProfile } from '@/hooks/useCurrentUserProfile';
 import { capabilityClient } from '@/lib/capability-client';
@@ -31,8 +31,9 @@ import {
 import { toast } from 'sonner';
 import { getCurrentUser } from '@/lib/auth';
 import { rdAuditUpdate } from '@/lib/rd-actor';
-import { usePrd, useRequirement, useSubmitPrdReview, useUpsertPrd } from '@/lib/rd-hooks';
-// 类型定义
+import { usePrd, useRequirement, useSubmitPrdReview, useUpsertPrd, useProductsList } from '@/lib/rd-hooks';
+import type { IRequirement } from '@/lib/rd-types';
+import { formatPrdListTitle, formatProductDashRequirementTitle } from '@/lib/prd-display-title';
 interface IFeature {
   id: string;
   name: string;
@@ -54,15 +55,6 @@ interface IPRD {
   updatedAt: string;
 }
 
-interface IRequirement {
-  id: string;
-  title: string;
-  description: string;
-  priority: 'P0' | 'P1' | 'P2' | 'P3';
-  status: string;
-  submitter: string;
-}
-
 // 本地存储键名
 const STORAGE_PRD_KEY = '__global_rd_currentPRD';
 const STORAGE_REQ_KEY = '__global_rd_currentRequirement';
@@ -81,6 +73,7 @@ const PRDEditPage: React.FC = () => {
 
   const { data: loadedPrd, isLoading: prdQueryLoading } = usePrd(id);
   const { data: loadedReq } = useRequirement(loadedPrd?.requirementId);
+  const { data: products = [] } = useProductsList();
   const upsertPrd = useUpsertPrd();
   const submitPrdReview = useSubmitPrdReview();
 
@@ -96,6 +89,11 @@ const PRDEditPage: React.FC = () => {
   const [aiPrompt, setAiPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiStreamContent, setAiStreamContent] = useState('');
+
+  const prdHeadingTitle = useMemo(
+    () => (prd ? formatPrdListTitle(requirement ?? undefined, products, prd.title) : ''),
+    [prd, requirement, products]
+  );
 
   useEffect(() => {
     if (!id) {
@@ -115,7 +113,7 @@ const PRDEditPage: React.FC = () => {
 
   useEffect(() => {
     if (loadedReq) {
-      setRequirement(loadedReq as unknown as IRequirement);
+      setRequirement(loadedReq as IRequirement);
     }
   }, [loadedReq]);
 
@@ -300,10 +298,10 @@ const PRDEditPage: React.FC = () => {
                 返回PRD管理
               </Button>
               <h1 className="text-2xl font-semibold text-foreground">
-                编辑PRD
+                {prdHeadingTitle || requirement?.title || 'PRD文档'}
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
-                {requirement?.title || '新建PRD'} · 版本 {prd.version}
+                编辑 PRD · 版本 {prd.version}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -342,7 +340,11 @@ const PRDEditPage: React.FC = () => {
               <CardContent>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-medium">{requirement.title}</p>
+                    <p className="font-medium">
+                      {requirement
+                        ? formatProductDashRequirementTitle(requirement, products) || requirement.title
+                        : ''}
+                    </p>
                     <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
                       {requirement.description}
                     </p>
@@ -374,8 +376,10 @@ const PRDEditPage: React.FC = () => {
                   <CardDescription>
                     完整 PRD 以 Markdown 保存在此；使用「编辑」写源码，「预览」查看排版效果。
                   </CardDescription>
-                  {prd.title && (
-                    <p className="text-xs text-muted-foreground mt-2 font-mono">PRD：{prd.title}</p>
+                  {(prdHeadingTitle || prd.title) && (
+                    <p className="text-xs text-muted-foreground mt-2 font-mono">
+                      PRD：{prdHeadingTitle || prd.title}
+                    </p>
                   )}
                 </div>
                 {!isReadOnly && (

@@ -26,6 +26,8 @@ export const PLUGIN_SKILL_ORDER: string[] = [
   'requirement_optimizer',
   'conflict_detector_tech_spec',
   'code_review_assistant',
+  'pipeline_test_case_generator',
+  'pipeline_test_runner',
   'acceptance_feedback_analyzer',
 ];
 
@@ -34,30 +36,38 @@ export const DEFAULT_AI_SKILLS: Record<string, IDefaultAiSkillConfig> = {
     id: PRD_GENERATION_SKILL_ID,
     name: 'PRD文档自动生成器',
     description:
-      '根据产品原始需求自动生成完整的结构化PRD文档，包含背景、目标、业务流程、功能列表、非功能性需求等，支持流式输出。',
+      'PRD管理页经能力 prd_generator_1 调用。推荐占位符：{{original_requirement}}、{{additional_requirements}}、{{related_prd_document}}、{{user_supplementary_document}}。服务端会从 original_requirement 解析并注入 {{title}}、{{description}}、{{product_name}}、{{product_intro}}、{{requirement_body}} 等别名，兼容旧模板。',
     provider: 'ark',
     model: 'deepseek-v3-2-251201',
     stream: true,
-    tools: [{ type: 'web_search', max_keyword: 3 }],
-    promptTemplate: `你是一位资深产品经理，请基于以下需求生成一份 PRD 文档（必须使用中文）。
+    /** PRD 须完全基于下方已给材料；勿启用联网检索，否则模型易输出「将搜索…」类前言，污染正文。 */
+    tools: [],
+    promptTemplate: `你是一位资深 B 端产品经理。请仅依据下列已给材料用中文撰写 PRD；禁止假设可联网检索；禁止输出思考过程、「我将搜索/查找…」、工具说明、XML/HTML 推理标签及任何套话前言。回复的第一个非空字符必须是 Markdown 的「#」。
 
-原始需求信息：
-- 需求标题：{{title}}
-- 需求描述：{{description}}
-- 期望上线时间：{{expectedDate}}
-- 业务优先级：{{priority}}
+【材料优先级（冲突时从高到低采纳）】
+1) 原始需求（含「需求标题」「需求描述」及文首范围锚定）——定义本条 PRD 必须交付的能力与价值；
+2) 额外生成要求；
+3) 用户上传的补充/规范；
+4) 同产品已有 PRD 参考（术语、标题层级、非功能基线等）。
+若 3) 或 4) 与 1) 冲突：以 1) 为准，并用一两句话说明取舍。禁止用 3)4) 中与「需求标题」无关的整站/其他产品故事顶替本条功能的业务背景或痛点。
 
-【硬性要求】
-1. 禁止输出任何思考过程、推理步骤、草稿、分析说明或 XML/HTML 标签（如 think、redacted_reasoning 等）；只输出最终 PRD 正文。
-2. 第一行必须是且仅为一级标题，格式严格为：# {{title}} 需求 PRD文档
-3. 正文必须使用二级标题且带编号，从 1 到 6，格式为 ## 1. … ## 2. …（以此类推），共 6 节：
-   ## 1. 文档背景（业务痛点、目标用户、问题定义）
-   ## 2. 项目目标（业务目标、产品目标、衡量指标）
-   ## 3. 业务流程（主流程、异常流程、角色分工）
-   ## 4. 功能列表（功能点、功能描述、验收标准）
-   ## 5. 非功能性需求（性能、安全、可用性、兼容性）
-   ## 6. 风险与依赖（技术风险、外部依赖、里程碑建议）
-4. 每节下用 Markdown 列表与短段落组织内容，结论可执行、指标尽量可量化，避免模糊表达。`,
+【原始需求（必填）】
+{{original_requirement}}
+
+【额外生成要求】
+{{additional_requirements}}
+
+【同产品已有 PRD 参考】（空或仅「未提供」等占位则整段忽略）
+{{related_prd_document}}
+
+【用户上传的补充/规范】（空或未提供则整段忽略）
+{{user_supplementary_document}}
+
+【版式与内容硬性要求】
+1. 一级标题有且仅一行，严格为：# {{title}} 需求 PRD文档（其中 title 须与「需求标题：」一致；已由系统从 original_requirement 解析注入 {{title}}，勿改写成泛称「需求」）。
+2. 正文须含二级标题 ## 1. … ## 2. … 至少 6 节：文档背景；项目目标；业务流程；功能列表；非功能性需求；风险与依赖。「文档背景」中的痛点与目标须直接服务于上文的「需求描述」主题，不得偷换成无关领域（如整份产品白皮书里的其他模块）。
+3. 全文 Markdown，列表与短段落为主；能量化的指标请量化；不明确处可合理假设并标注「（假设）」。
+4. 若某参考块为空或未提供，不要在文中写「本块为空」之类元说明，直接省略该来源即可。`,
   },
   prd_to_tech_spec: {
     id: 'prd_to_tech_spec',
@@ -294,8 +304,40 @@ PRD 文档如下：
     stream: true,
     promptTemplate: `你是资深代码审查员。请对下列代码变更做审查摘要：主要风险、风格问题、建议（中文条目列表）。
 
-代码或 diff：
-{{code_or_diff}}`,
+代码或日志与材料：
+{{code_content}}`,
+  },
+  pipeline_test_case_generator: {
+    id: 'pipeline_test_case_generator',
+    name: '自动化测试用例生成',
+    description:
+      '基于 FS、TS 与 Agent Workspace 生成代码摘录，推导可自动化执行的测试用例（流式输出，末尾含 JSON 代码块）。',
+    provider: 'ark',
+    model: 'deepseek-v3-2-251201',
+    stream: true,
+    promptTemplate: `你是资深测试架构师。请仅基于下文「规约与代码上下文」设计可自动化执行的测试用例；全文使用中文。
+
+=== 规约与代码上下文 ===
+{{code_content}}
+
+=== 输出与格式约束（须严格遵守） ===
+{{additional_requirements}}`,
+  },
+  pipeline_test_runner: {
+    id: 'pipeline_test_runner',
+    name: '自动化测试执行与报告',
+    description:
+      '根据已生成的测试用例清单与 FS/TS/代码上下文，归纳或模拟一次自动化测试执行结果（流式输出，末尾含 JSON 报告）。',
+    provider: 'ark',
+    model: 'deepseek-v3-2-251201',
+    stream: true,
+    promptTemplate: `你是资深测试与质量工程师。请基于下文「待执行用例与上下文」给出一次自动化测试执行层面的结论与分析；全文使用中文。
+
+=== 待执行用例与上下文 ===
+{{code_content}}
+
+=== 输出与 JSON 报告约束（须严格遵守） ===
+{{additional_requirements}}`,
   },
   acceptance_feedback_analyzer: {
     id: 'acceptance_feedback_analyzer',

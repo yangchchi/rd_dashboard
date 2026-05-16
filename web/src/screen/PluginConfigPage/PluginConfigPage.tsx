@@ -12,7 +12,15 @@ import { toast } from 'sonner';
 import { Plus, Puzzle, Search, Sparkles, Trash2 } from 'lucide-react';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import type { IAiSkillConfig } from '@/lib/ai-skill-engine';
-import { createAiSkill, deleteAiSkill, getAiSkill, listAiSkills, resetAiSkill, updateAiSkill } from '@/lib/ai-skills';
+import {
+  createAiSkill,
+  deleteAiSkill,
+  getAiSkill,
+  listAiSkills,
+  PRD_GENERATION_SKILL_ID,
+  resetAiSkill,
+  updateAiSkill,
+} from '@/lib/ai-skills';
 
 /** 插件（Skill）配置：大模型 + 提示词，用于研发流程中的各类 AI 任务（与组织级代码规范 Org Spec 无关） */
 const PluginConfigPage: React.FC = () => {
@@ -318,8 +326,22 @@ const PluginConfigPage: React.FC = () => {
                   <div className="space-y-2">
                     <Label htmlFor="plugin-prompt">提示词模板</Label>
                     <p className="text-xs text-muted-foreground">
-                      使用 {'{{变量名}}'} 占位符；各业务页面传入变量（如 PRD 生成中的 title、description 等）。
+                      使用 {'{{变量名}}'} 占位符；由业务页在调用时注入（各插件不同，以接入代码为准）。
                     </p>
+                    {(creating ? draft.id : selectedId) === PRD_GENERATION_SKILL_ID && (
+                      <p className="text-xs text-amber-700/90 dark:text-amber-400/90 leading-relaxed rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2">
+                        <span className="font-medium text-foreground">PRD 生成（prd_auto_generation）</span>
+                        ：PRD 管理页经能力 <code className="rounded bg-muted px-1">prd_generator_1</code> 传入标准变量{' '}
+                        <code className="rounded bg-muted px-1">original_requirement</code>、
+                        <code className="rounded bg-muted px-1">additional_requirements</code>、
+                        <code className="rounded bg-muted px-1">related_prd_document</code>、
+                        <code className="rounded bg-muted px-1">user_supplementary_document</code>
+                        。服务端会从 <code className="rounded bg-muted px-1">original_requirement</code> 解析并补全{' '}
+                        <code className="rounded bg-muted px-1">{'{{title}}'}</code>、
+                        <code className="rounded bg-muted px-1">{'{{description}}'}</code>、
+                        <code className="rounded bg-muted px-1">{'{{product_name}}'}</code> 等别名；新模板建议优先使用上述四个标准名。
+                      </p>
+                    )}
                     <Textarea
                       id="plugin-prompt"
                       value={draft.promptTemplate ?? ''}
