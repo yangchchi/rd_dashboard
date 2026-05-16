@@ -23,6 +23,7 @@ describe('CapabilitiesService', () => {
     delete process.env.VITE_ARK_API_KEY;
     delete process.env.ARK_API_ENDPOINT;
     delete process.env.ARK_MODEL;
+    delete process.env.ARK_STREAM_ALLOW_WEB_SEARCH;
     global.fetch = jest.fn() as jest.Mock;
   });
 
@@ -119,6 +120,7 @@ describe('CapabilitiesService', () => {
   });
 
   it('streams configurable AI skill prompts through server-side Ark key', async () => {
+    process.env.ARK_STREAM_ALLOW_WEB_SEARCH = 'true';
     process.env.ARK_API_KEY = 'server-key';
     process.env.ARK_API_ENDPOINT = 'https://ark.example.test/responses';
     const responseBody = new ReadableStream({
@@ -161,6 +163,7 @@ describe('CapabilitiesService', () => {
     expect(body).toContain('功能规格正文');
   });
 
+<<<<<<< HEAD
   it('prd_generator_1 流式优先使用数据库中的 prd_auto_generation，而非 prd_generator_1 行', async () => {
     process.env.ARK_API_KEY = 'server-key';
     process.env.ARK_API_ENDPOINT = 'https://ark.example.test/responses';
@@ -252,6 +255,10 @@ describe('CapabilitiesService', () => {
   });
 
   it('prd_generator 从 original_requirement 解析 product_name 供模板占位', async () => {
+=======
+  it('omits web_search from Ark tool list unless ARK_STREAM_ALLOW_WEB_SEARCH=true', async () => {
+    delete process.env.ARK_STREAM_ALLOW_WEB_SEARCH;
+>>>>>>> f136ef170cca4ea752e12457b05260afbb327556
     process.env.ARK_API_KEY = 'server-key';
     process.env.ARK_API_ENDPOINT = 'https://ark.example.test/responses';
     const responseBody = new ReadableStream({
@@ -268,6 +275,7 @@ describe('CapabilitiesService', () => {
     })) as jest.Mock;
     const service = new CapabilitiesService({
       getAiSkill: jest.fn().mockResolvedValue({
+<<<<<<< HEAD
         endpoint: null,
         model: 'm',
         promptTemplate: 'PROD={{product_name}}',
@@ -287,5 +295,19 @@ describe('CapabilitiesService', () => {
 
     const requestBody = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
     expect(requestBody.input[0].content[0].text).toBe('PROD=HAI智研平台');
+=======
+        model: 'm',
+        promptTemplate: 'P {{prd_document}}',
+        tools: [{ type: 'web_search' }],
+      }),
+    } as never);
+    await collectStream(
+      service.stream('fs_auto_generation', 'textGenerate', {
+        prd_document: '用户需要一个 AI 研发平台',
+      })
+    );
+    const requestBody = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
+    expect(requestBody.tools).toEqual([]);
+>>>>>>> f136ef170cca4ea752e12457b05260afbb327556
   });
 });

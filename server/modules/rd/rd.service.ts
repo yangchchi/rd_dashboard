@@ -4201,6 +4201,22 @@ esac
     let stdout = '';
     let stderr = '';
     let latestToolCall = started;
+    /** 必须在首个 await/yield 之前注册：ENOENT 等会在同 tick 或 await 间隙触发 'error'，晚注册会拖垮整个 Node 进程 */
+    const queue: IAgentExecutionEvent[] = [];
+    let settled = false;
+    let exitCode: number | null = null;
+    let errorMessage: string | undefined;
+    let firstOutputAt: string | null = null;
+    const waiters: Array<() => void> = [];
+    const notify = () => {
+      const waiter = waiters.shift();
+      waiter?.();
+    };
+    const push = (event: IAgentExecutionEvent) => {
+      queue.push(event);
+      notify();
+    };
+
     const child = spawn(command.command, command.args, {
       cwd: workspacePath,
       env: process.env,
@@ -4208,6 +4224,18 @@ esac
       /** 不设 ignore 时默认 stdin 为 pipe，Codex 会等待 stdin，出现 “Reading additional input from stdin…” 长时间无进展 */
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    child.on('error', (error) => {
+      errorMessage = error instanceof Error ? error.message : String(error);
+      exitCode = 1;
+      settled = true;
+      notify();
+    });
+    child.on('close', (code) => {
+      exitCode = code ?? 0;
+      settled = true;
+      notify();
+    });
+
     const spawnedAt = new Date().toISOString();
     latestToolCall = await this.upsertAgentToolCall({
       ...started,
@@ -4272,21 +4300,6 @@ esac
       executorLogPath = null;
     }
 
-    const queue: IAgentExecutionEvent[] = [];
-    let settled = false;
-    let exitCode: number | null = null;
-    let errorMessage: string | undefined;
-    let firstOutputAt: string | null = null;
-    const waiters: Array<() => void> = [];
-    const notify = () => {
-      const waiter = waiters.shift();
-      waiter?.();
-    };
-    const push = (event: IAgentExecutionEvent) => {
-      queue.push(event);
-      notify();
-    };
-
     child.stdout?.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8');
       firstOutputAt = firstOutputAt || new Date().toISOString();
@@ -4318,17 +4331,6 @@ esac
         stderrBytes: Buffer.byteLength(stderr),
         timestamp: new Date().toISOString(),
       });
-    });
-    child.on('error', (error) => {
-      errorMessage = error instanceof Error ? error.message : String(error);
-      exitCode = 1;
-      settled = true;
-      notify();
-    });
-    child.on('close', (code) => {
-      exitCode = code ?? 0;
-      settled = true;
-      notify();
     });
 
     let heartbeat: ReturnType<typeof setInterval> | undefined;

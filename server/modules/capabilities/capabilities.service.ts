@@ -39,6 +39,16 @@ function isReasoningPayload(data: Record<string, unknown>): boolean {
   return false;
 }
 
+/** 方舟 Responses 在带 web_search 时可能长时间等待；默认不传该工具，需启用时设 ARK_STREAM_ALLOW_WEB_SEARCH=true */
+function filterArkRequestTools(skill: AiSkillConfig | null | undefined): unknown[] {
+  const raw = Array.isArray(skill?.tools) ? skill!.tools! : [];
+  if (process.env.ARK_STREAM_ALLOW_WEB_SEARCH === 'true') return raw;
+  return raw.filter((t) => {
+    if (!t || typeof t !== 'object') return true;
+    return String((t as { type?: string }).type) !== 'web_search';
+  });
+}
+
 function extractArkStreamText(payload: unknown): string {
   const data = payload as Record<string, unknown>;
   if (isReasoningPayload(data)) return '';
@@ -325,11 +335,15 @@ export class CapabilitiesService {
   ): AsyncGenerator<string> {
     const model = skill?.model || process.env.ARK_MODEL || DEFAULT_ARK_MODEL;
     const endpoint = skill?.endpoint || process.env.ARK_API_ENDPOINT || DEFAULT_ARK_ENDPOINT;
+<<<<<<< HEAD
     let tools = Array.isArray(skill?.tools) ? [...skill.tools] : [];
     /** PRD 插件仅消费请求内材料；禁用 tools（如 web_search），避免模型先输出「将搜索…」类前言污染流式正文 */
     if (capabilityId && /^prd_generator/.test(capabilityId)) {
       tools = [];
     }
+=======
+    const tools = filterArkRequestTools(skill);
+>>>>>>> f136ef170cca4ea752e12457b05260afbb327556
 
     const response = await fetch(endpoint, {
       method: 'POST',

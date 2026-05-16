@@ -50,7 +50,11 @@ function createExecutor(
       }
       return data.data?.output as T;
     },
-    callStream: async function* <T>(action: string, params: unknown): AsyncIterable<T> {
+    callStream: async function* <T>(
+      action: string,
+      params: unknown,
+      streamInit?: Pick<RequestInit, 'signal'>
+    ): AsyncIterable<T> {
       const url = `${baseURL}/api/capability/${capabilityId}/stream`;
       const response = await fetch(url, {
         method: 'POST',
@@ -58,6 +62,7 @@ function createExecutor(
         body: JSON.stringify({ action, params }),
         credentials: 'include',
         ...fetchOptions,
+        ...streamInit,
       });
       if (!response.ok || !response.body) {
         throw new CapabilityError(`Stream HTTP ${response.status}`);
@@ -72,9 +77,11 @@ function createExecutor(
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
           buffer = lines.pop() ?? '';
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const raw = line.slice(6);
+          for (const rawLine of lines) {
+            const line = rawLine.replace(/\r$/, '');
+            if (!line.startsWith('data:')) continue;
+            const raw = (line.startsWith('data: ') ? line.slice(6) : line.slice(5)).trim();
+            if (!raw) continue;
             let parsed: {
               status_code?: string;
               data?: { type?: string; delta?: T; finished?: boolean };
@@ -89,9 +96,12 @@ function createExecutor(
               throw new CapabilityError(parsed.error_msg || 'Capability stream failed', parsed.status_code);
             }
             if (!parsed.data) continue;
-            if (parsed.data.type === 'content' && parsed.data.delta !== undefined) {
-              yield parsed.data.delta as T;
-              if (parsed.data.finished) return;
+            const d = parsed.data;
+            if (d.type === 'content') {
+              if (d.delta !== undefined) {
+                yield d.delta as T;
+              }
+              if (d.finished) return;
             }
           }
         }
