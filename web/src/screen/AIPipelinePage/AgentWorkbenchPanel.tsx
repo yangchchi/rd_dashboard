@@ -88,6 +88,13 @@ import {
   resolvePipelineExplicitAgentBranch,
   resolvePipelineGitBaseBranch,
 } from '@shared/pipeline-meta-branch';
+import {
+  CODEX_CHAT_ONLY_MARKER,
+  deriveCodexAnswerHeadline,
+  isCodexShortChatAnswer,
+  polishCodexBubbleForUi,
+  stripLeadingLineIfMatchesTitle,
+} from './agentCodexBubblePolish';
 
 /** 编码对话内助手气泡的 Markdown 排版（流式与非流式共用） */
 const AGENT_CHAT_MARKDOWN_CLASS =
@@ -124,11 +131,63 @@ const initialCodexRuntimeState: ICodexRuntimeState = {
 
 type ICodingToolChoice = 'codex_cli' | 'cursor_cli' | 'claude_code';
 
-const CODING_TOOL_OPTIONS: Array<{ id: ICodingToolChoice; label: string; description: string; enabled: boolean }> = [
-  { id: 'codex_cli', label: 'Codex CLI', description: '本机/服务端已安装 codex', enabled: true },
-  { id: 'cursor_cli', label: 'Cursor', description: '即将支持', enabled: false },
-  { id: 'claude_code', label: 'Claude Code', description: '即将支持', enabled: false },
-];
+const CODING_TOOL_CONFIG: Record<
+  ICodingToolChoice,
+  {
+    toolName: string;
+    label: string;
+    description: string;
+    enabled: boolean;
+    prepareSummary: string;
+    prepareCommand: string;
+    logTag: string;
+  }
+> = {
+  codex_cli: {
+    toolName: 'codex.exec',
+    label: 'Codex CLI',
+    description: '本机/服务端已安装 codex',
+    enabled: true,
+    prepareSummary: '在隔离 workspace 中执行编码任务（Codex CLI）',
+    prepareCommand: 'codex exec --cd <workspace> --sandbox workspace-write <prompt>',
+    logTag: 'Codex',
+  },
+  cursor_cli: {
+    toolName: 'cursor.exec',
+    label: 'Cursor',
+    description: '本机/服务端已安装 agent（Cursor CLI）',
+    enabled: true,
+    prepareSummary: '在隔离 workspace 中执行编码任务（Cursor CLI）',
+    prepareCommand: 'agent -p --force --output-format stream-json <prompt>',
+    logTag: 'Cursor',
+  },
+  claude_code: {
+    toolName: 'claude.exec',
+    label: 'Claude Code',
+    description: '即将支持',
+    enabled: false,
+    prepareSummary: '在隔离 workspace 中执行编码任务（Claude Code）',
+    prepareCommand: 'claude <prompt>',
+    logTag: 'Claude',
+  },
+};
+
+const CODING_TOOL_OPTIONS = (Object.keys(CODING_TOOL_CONFIG) as ICodingToolChoice[]).map((id) => {
+  const cfg = CODING_TOOL_CONFIG[id];
+  return { id, label: cfg.label, description: cfg.description, enabled: cfg.enabled };
+});
+
+function codingToolExecName(choice: ICodingToolChoice): string {
+  return CODING_TOOL_CONFIG[choice].toolName;
+}
+
+function codingToolLogTag(choice: ICodingToolChoice): string {
+  return CODING_TOOL_CONFIG[choice].logTag;
+}
+
+function isCodingToolRunnable(choice: ICodingToolChoice): boolean {
+  return CODING_TOOL_CONFIG[choice].enabled;
+}
 
 function latestByTime<T extends { createdAt: string }>(items: T[]): T | undefined {
   return [...items].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
@@ -163,9 +222,6 @@ function newChatMessageId(): string {
 }
 
 const MAX_PRIOR_ASSISTANT_CHARS = 3200;
-
-/** 与 rd.service Codex 后缀逻辑对齐：以此开头的 prompt 走「简短问答」短后缀，避免强编码授权刷屏 */
-const CODEX_CHAT_ONLY_MARKER = '【本轮为简短问答，非编码任务】';
 
 /** 判断是否为闲聊 / 身份类短问句，避免把整份 Plan + 超长历史塞进 Codex */
 function isLikelyConversationalCodexTurn(text: string): boolean {
@@ -232,35 +288,21 @@ function formatCodexCompletedAtSubtitle(iso: string, exitCode: number | null | u
   return `${dayPart} ${hm} · ${tail}`;
 }
 
-/** 从 Codex 正文中取卡片标题（首条非空行，去 exit 页脚，限长） */
 function deriveCodexSummaryCardTitle(full: string): string {
-  const body = stripPersistedCodexExitFooter(full).trim();
-  const first =
-    body
-      .split(/\n/)
-      .map((l) => l.trim())
-      .find((l) => l.length > 0) ?? body;
-  const t = first.replace(/\s+/g, ' ').trim();
-  if (!t) return '本轮输出';
-  if (t.length <= 72) return t;
-  return `${t.slice(0, 71)}…`;
+  return deriveCodexAnswerHeadline(polishCodexBubbleForUi(full));
 }
 
-/** 若首行与卡片标题一致则去掉，避免正文重复首句 */
-function stripLeadingLineIfMatchesTitle(full: string, title: string): string {
-  const raw = stripPersistedCodexExitFooter(full).trimStart();
-  const lines = raw.split(/\n/);
-  const idx = lines.findIndex((l) => l.trim().length > 0);
-  if (idx < 0) return raw;
-  const first = lines[idx]!.trim().replace(/\s+/g, ' ');
-  const t = title.replace(/\s+/g, ' ').trim();
-  if (first === t || first.startsWith(t) || t.startsWith(first.slice(0, Math.min(48, first.length)))) {
-    return lines
-      .slice(idx + 1)
-      .join('\n')
-      .trimStart();
-  }
-  return raw;
+function getCodexBubbleDisplayContent(raw: string): {
+  polished: string;
+  title: string;
+  bodyForMarkdown: string;
+  shortChat: boolean;
+} {
+  const polished = polishCodexBubbleForUi(raw);
+  const title = deriveCodexAnswerHeadline(polished);
+  const bodyForMarkdown = stripLeadingLineIfMatchesTitle(polished, title);
+  const shortChat = isCodexShortChatAnswer(polished);
+  return { polished, title, bodyForMarkdown, shortChat };
 }
 
 /** 对话输入框内 `/` 技能菜单：单行摘要 */
@@ -383,210 +425,6 @@ function draftContainsAtPathReference(draft: string): boolean {
     if (r && r.end > r.start + 1) return true;
   }
   return false;
-}
-
-/** 对话气泡：去掉 ANSI；去掉 Codex CLI 常见启动横幅；简短问答轮可再去掉与系统注入提示重复的前缀行（底部 exit 页脚保留） */
-function stripAnsiFromText(text: string): string {
-  return text
-    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
-    .replace(/\x1b\][0-9;]*\x07/g, '')
-    .replace(/\x1b\][\s\S]*?\x1b\\/g, '');
-}
-
-function splitAssistantBubbleBodyAndExitFooter(body: string): { main: string; footer: string } {
-  const marker = '\n\n---\nexit=';
-  const idx = body.lastIndexOf(marker);
-  if (idx === -1) return { main: body, footer: '' };
-  return { main: body.slice(0, idx), footer: body.slice(idx) };
-}
-
-function stripLeadingCodexCliChromeLinesFromText(text: string): string {
-  const lines = text.split('\n');
-  let i = 0;
-  while (i < lines.length) {
-    const t = lines[i]!.trim();
-    if (t === '') {
-      i++;
-      continue;
-    }
-    if (t.startsWith('Reading additional input')) {
-      i++;
-      continue;
-    }
-    if (/^openai codex v[\d.]+/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^working directory:/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^workdir:/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^cwd:/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^model:/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^provider:/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^approval:/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^sandbox:/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^reasoning\b/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^session\b/i.test(t) && /id/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^api\b/i.test(t) && /(key|base)/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^using\b/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^\/tmp\/rd-agent/i.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^(?:[─━═=._]){4,}\s*$/.test(t)) {
-      i++;
-      continue;
-    }
-    break;
-  }
-  return lines.slice(i).join('\n').replace(/^\n+/, '');
-}
-
-function stripLeadingChatOnlyPromptEchoLines(text: string): string {
-  const lines = text.split('\n');
-  let i = 0;
-  while (i < lines.length) {
-    const t = lines[i]!.trim();
-    if (t === '') {
-      i++;
-      continue;
-    }
-    if (/^【/.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^用户：/.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^user\s/i.test(t) && (/简短问答|非编码/.test(t) || /【本轮/.test(t))) {
-      i++;
-      continue;
-    }
-    if (/^请用/.test(t) && /(简短|简要)?中文/.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^不要/.test(t) && /(复述|粘贴|Plan|系统|上文)/.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^禁止/.test(t)) {
-      i++;
-      continue;
-    }
-    if (/^---+\s*$/.test(t)) {
-      i++;
-      continue;
-    }
-    break;
-  }
-  return lines.slice(i).join('\n').replace(/^\n+/, '');
-}
-
-/** 末尾是否存在「连续两段完全相同的正文块」（Codex CLI 偶发整段复读） */
-function longestSuffixDuplicateBlockLen(t: string, minLen: number): number {
-  const n = t.length;
-  let lo = minLen;
-  let hi = Math.floor(n / 2);
-  let best = 0;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const a = t.slice(n - mid, n);
-    const b = t.slice(n - 2 * mid, n - mid);
-    if (a === b) {
-      best = mid;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  return best;
-}
-
-function stripTrailingConsecutiveDuplicateRun(text: string, minLen = 280): string {
-  let t = text.replace(/\r\n/g, '\n').trimEnd();
-  for (let g = 0; g < 8; g++) {
-    if (t.length < minLen * 2) break;
-    const L = longestSuffixDuplicateBlockLen(t, minLen);
-    if (!L) break;
-    t = t.slice(0, -L).trimEnd();
-  }
-  return t;
-}
-
-/**
- * Codex 常在正文后输出 `tokens used …`，再把同一篇回答贴一遍；保留 tokens 行、去掉其后重复块。
- */
-function dedupeRepeatedAnswerAfterTokensUsedLine(text: string): string {
-  const t = text.replace(/\r\n/g, '\n');
-  const re = /\n+(?:tokens used|token usage)\b[^\n]*/i;
-  const m = re.exec(t);
-  if (!m || m.index === undefined) return text;
-  const head = t.slice(0, m.index).trimEnd();
-  const rest = t.slice(m.index + m[0].length).replace(/^\n+/, '').trimEnd();
-  if (rest.length < 160) return text;
-  if (head.endsWith(rest)) {
-    return `${head}\n\n${m[0].trim()}`;
-  }
-  const hn = head.replace(/\s+/g, ' ').trim();
-  const rn = rest.replace(/\s+/g, ' ').trim();
-  if (rn.length >= 160 && hn.endsWith(rn)) {
-    return `${head}\n\n${m[0].trim()}`;
-  }
-  return text;
-}
-
-function polishCodexAssistantBubbleDisplay(
-  body: string,
-  opts: { chatOnlyStripEcho: boolean },
-): string {
-  if (/(?:^|\n)【(?:错误|异常|已取消)】/.test(body)) {
-    return stripLeadingCodexCliChromeLinesFromText(stripAnsiFromText(body)).trimEnd();
-  }
-  const { main, footer } = splitAssistantBubbleBodyAndExitFooter(body);
-  let m = stripLeadingCodexCliChromeLinesFromText(stripAnsiFromText(main));
-  if (opts.chatOnlyStripEcho) {
-    m = stripLeadingChatOnlyPromptEchoLines(m);
-  }
-  m = m.trimEnd();
-  m = stripTrailingConsecutiveDuplicateRun(m);
-  m = dedupeRepeatedAnswerAfterTokensUsedLine(m);
-  m = m.trimEnd();
-  const out = (m ? m : main.trimEnd()) + footer;
-  return out.trimEnd();
 }
 
 function charIsSlashMark(d: string, i: number): boolean {
@@ -804,13 +642,14 @@ function buildSingleTurnCodexPrompt(
   return body;
 }
 
-function pickReusablePendingCodex(
+function pickReusablePendingCodingTool(
   rows: IAgentToolCall[],
   workspaceId: string,
+  toolName: string,
 ): IAgentToolCall | undefined {
   const list = rows.filter(
     (tc) =>
-      tc.toolName === 'codex.exec' &&
+      tc.toolName === toolName &&
       tc.workspaceId === workspaceId &&
       (tc.status === 'pending' || tc.status === 'awaiting_approval'),
   );
@@ -1109,6 +948,16 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     else setComposerMode('agent');
   }, [activeSession]);
 
+  useEffect(() => {
+    if (!activeSession?.id) return;
+    const raw = activeSession.metadata?.codingTool;
+    if (raw === 'codex_cli' || raw === 'cursor_cli' || raw === 'claude_code') {
+      setCodingTool(raw);
+    } else if (activeSession.runtimeAdapter === 'codex_cli') {
+      setCodingTool('codex_cli');
+    }
+  }, [activeSession?.id, activeSession?.metadata?.codingTool, activeSession?.runtimeAdapter]);
+
   const isBusy =
     createPipelineRun.isPending ||
     createContextPack.isPending ||
@@ -1119,27 +968,29 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     prepareToolCall.isPending ||
     approveToolCall.isPending;
 
-  const latestCodexToolCall = useMemo(
+  const activeCodingToolName = useMemo(() => codingToolExecName(codingTool), [codingTool]);
+
+  const latestCodingToolCall = useMemo(
     () =>
       [...toolCalls]
-        .filter((tc) => tc.toolName === 'codex.exec')
+        .filter((tc) => tc.toolName === activeCodingToolName)
         .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0],
-    [toolCalls],
+    [toolCalls, activeCodingToolName],
   );
-  const runningCodexToolCall = useMemo(
-    () => toolCalls.find((tc) => tc.toolName === 'codex.exec' && tc.status === 'running'),
-    [toolCalls],
+  const runningCodingToolCall = useMemo(
+    () => toolCalls.find((tc) => tc.toolName === activeCodingToolName && tc.status === 'running'),
+    [toolCalls, activeCodingToolName],
   );
-  const isCodexRunning =
-    Boolean(runningCodexToolCall) || runCodexToolCall.isPending || prepareToolCall.isPending;
+  const isCodingToolRunning =
+    Boolean(runningCodingToolCall) || runCodexToolCall.isPending || prepareToolCall.isPending;
 
   useEffect(() => {
     const busy =
-      Boolean(runningCodexToolCall) || runCodexToolCall.isPending || prepareToolCall.isPending;
+      Boolean(runningCodingToolCall) || runCodexToolCall.isPending || prepareToolCall.isPending;
     if (!busy) return;
     const id = window.setInterval(() => bumpStreamingClock(), 1000);
     return () => window.clearInterval(id);
-  }, [runningCodexToolCall, runCodexToolCall.isPending, prepareToolCall.isPending]);
+  }, [runningCodingToolCall, runCodexToolCall.isPending, prepareToolCall.isPending]);
 
   const readyWorkspace = useMemo(
     () => workspaces.find((w) => w.status === 'ready' && Boolean(w.worktreePath?.trim())),
@@ -1159,21 +1010,21 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     setWorkbenchSetupTab(workbenchSetupTabForProgress(step1Done, step2Done));
   }, [task.id, activeSession?.id, step1Done, step2Done]);
 
-  const step3LatestCodexRound = useMemo(() => {
-    const tc = latestCodexToolCall;
-    if (!tc || tc.toolName !== 'codex.exec') return null;
+  const step3LatestCodingRound = useMemo(() => {
+    const tc = latestCodingToolCall;
+    if (!tc || tc.toolName !== activeCodingToolName) return null;
     return tc;
-  }, [latestCodexToolCall]);
+  }, [latestCodingToolCall, activeCodingToolName]);
 
   const step3TabStatus = useMemo(() => {
     if (!step2Done) return 'blocked' as const;
-    if (isCodexRunning) return 'running' as const;
-    const tc = step3LatestCodexRound;
+    if (isCodingToolRunning) return 'running' as const;
+    const tc = step3LatestCodingRound;
     if (!tc) return 'idle' as const;
     if (tc.status === 'succeeded') return 'succeeded' as const;
     if (tc.status === 'failed' || tc.status === 'cancelled') return 'stopped' as const;
     return 'idle' as const;
-  }, [step2Done, isCodexRunning, step3LatestCodexRound]);
+  }, [step2Done, isCodingToolRunning, step3LatestCodingRound]);
 
   const pendingApprovals = useMemo(
     () => toolCalls.filter((tc) => tc.approvalStatus === 'pending'),
@@ -1196,8 +1047,8 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     setAtMenu(null);
   };
 
-  const codexServerSyncKey = latestCodexToolCall
-    ? `${latestCodexToolCall.id}:${latestCodexToolCall.status}:${String(latestCodexToolCall.metadata?.lastOutputAt ?? '')}:${String(latestCodexToolCall.metadata?.executorLogPath ?? '')}:${String(latestCodexToolCall.updatedAt ?? '')}`
+  const codingServerSyncKey = latestCodingToolCall
+    ? `${latestCodingToolCall.id}:${latestCodingToolCall.status}:${String(latestCodingToolCall.metadata?.lastOutputAt ?? '')}:${String(latestCodingToolCall.metadata?.executorLogPath ?? '')}:${String(latestCodingToolCall.updatedAt ?? '')}`
     : '';
 
   /** 切换会话时从服务端 metadata 恢复对话（妙搭式历史） */
@@ -1265,24 +1116,25 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
 
   useEffect(() => {
     if (runCodexToolCall.isPending) return;
-    if (!latestCodexToolCall || latestCodexToolCall.toolName !== 'codex.exec') return;
-    const m = latestCodexToolCall.metadata;
+    if (!latestCodingToolCall || latestCodingToolCall.toolName !== activeCodingToolName) return;
+    const m = latestCodingToolCall.metadata;
     const logPath = typeof m.executorLogPath === 'string' ? m.executorLogPath : '';
     const stdout = typeof m.stdout === 'string' ? m.stdout : '';
     const stderr = typeof m.stderr === 'string' ? m.stderr : '';
     if (!logPath && !stdout && !stderr) return;
+    const toolLabel = codingToolLogTag(codingTool);
     const header = [
       logPath
         ? `【服务端完整日志文件】${logPath}\n（全文落盘；数据库仅保留末尾约 20KB 摘要。离开页面后请用该文件或下方摘要排查。）\n`
         : '',
-      latestCodexToolCall.status === 'running'
-        ? '【执行状态】running：Codex 可能仍在服务端执行；本页每 2.5s 拉取一次数据库中的输出摘要。\n'
-        : `【执行状态】${latestCodexToolCall.status} exit=${latestCodexToolCall.exitCode ?? '—'}\n`,
+      latestCodingToolCall.status === 'running'
+        ? `【执行状态】running：${toolLabel} 可能仍在服务端执行；本页每 2.5s 拉取一次数据库中的输出摘要。\n`
+        : `【执行状态】${latestCodingToolCall.status} exit=${latestCodingToolCall.exitCode ?? '—'}\n`,
       '---\n',
     ].join('');
     const body = [stdout, stderr ? `\n--- stderr（尾部） ---\n${stderr}` : ''].join('');
     setRuntimeOutput(`${header}${body}`);
-  }, [codexServerSyncKey, runCodexToolCall.isPending, latestCodexToolCall]);
+  }, [codingServerSyncKey, runCodexToolCall.isPending, latestCodingToolCall, activeCodingToolName, codingTool]);
 
   const handleCreateThread = async () => {
     try {
@@ -1329,7 +1181,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         baseBranch: resolvePipelineGitBaseBranch(task.pipelineMeta),
         planMarkdown,
         riskLevel: 'medium',
-        metadata: { instruction, contextPackChecksum: contextPack.checksum },
+        metadata: { instruction, contextPackChecksum: contextPack.checksum, codingTool },
         createdBy: operatorName,
       });
       await upsertAgentTask.mutateAsync({
@@ -1366,17 +1218,23 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     });
   };
 
-  const ensureCodexToolPrepared = async (session: IAgentSession, workspaceId: string) => {
+  const ensureCodingToolPrepared = async (
+    session: IAgentSession,
+    workspaceId: string,
+    tool: ICodingToolChoice,
+  ) => {
+    const cfg = CODING_TOOL_CONFIG[tool];
     await prepareToolCall.mutateAsync({
       sessionId: session.id,
       workspaceId,
-      toolName: 'codex.exec',
+      toolName: cfg.toolName,
       toolCategory: 'ai',
-      inputSummary: '在隔离 workspace 中执行编码任务（Codex CLI）',
-      command: 'codex exec --cd <workspace> --sandbox workspace-write <prompt>',
+      inputSummary: cfg.prepareSummary,
+      command: cfg.prepareCommand,
       metadata: {
         stage: 'workspace-ready',
         prompt: session.planMarkdown || instruction,
+        codingTool: tool,
       },
     });
   };
@@ -1413,14 +1271,15 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         });
         workspace = result.workspace;
         appendLog(`[步骤2] Workspace 已登记：${workspace.id}`);
-        await ensureCodexToolPrepared(activeSession, workspace.id);
+        await ensureCodingToolPrepared(activeSession, workspace.id, codingTool);
       } else {
-        const hasCodexForWs = toolCalls.some(
-          (tc) => tc.toolName === 'codex.exec' && tc.workspaceId === workspace!.id,
+        const execName = codingToolExecName(codingTool);
+        const hasCodingToolForWs = toolCalls.some(
+          (tc) => tc.toolName === execName && tc.workspaceId === workspace!.id,
         );
-        if (!hasCodexForWs) {
-          appendLog('[步骤2] 补充 Codex 工具调用记录…');
-          await ensureCodexToolPrepared(activeSession, workspace!.id);
+        if (!hasCodingToolForWs) {
+          appendLog(`[步骤2] 补充 ${codingToolLogTag(codingTool)} 工具调用记录…`);
+          await ensureCodingToolPrepared(activeSession, workspace!.id, codingTool);
         }
       }
 
@@ -1497,12 +1356,14 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     }
   };
 
-  /** 每轮独立 Codex：复用尚未执行的 pending 行，否则新建 tool call；stdout 流式写入对话气泡与底部输出流 */
+  /** 每轮独立编码工具：复用尚未执行的 pending 行，否则新建 tool call；stdout 流式写入对话气泡与底部输出流 */
   const executeCodexRound = async (opts: { appendUserFromDraft: boolean }) => {
-    if (codingTool !== 'codex_cli') {
-      toast.message('该编码工具尚未接入', { description: '请暂时选择 Codex CLI' });
+    if (!isCodingToolRunnable(codingTool)) {
+      toast.message('该编码工具尚未接入', { description: '请选择已启用的 Codex CLI 或 Cursor' });
       return;
     }
+    const toolCfg = CODING_TOOL_CONFIG[codingTool];
+    const logTag = toolCfg.logTag;
     if (!activeSession) {
       toast.error('请先完成步骤 1');
       return;
@@ -1543,9 +1404,6 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       return;
     }
 
-    /** 简短问答轮：气泡收尾时去掉 Codex 横幅及系统提示回声，便于只读回答 */
-    const chatOnlyBubblePolish = executionPrompt.trimStart().startsWith(CODEX_CHAT_ONLY_MARKER);
-
     const replyAssistantId = newChatMessageId();
     const assistantBubble: IAgentChatMessage = {
       id: replyAssistantId,
@@ -1558,7 +1416,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     setChatMessages(() => [...snapshotForPrior, assistantBubble]);
     if (opts.appendUserFromDraft) setChatDraft('');
 
-    appendLog('[Codex] 启动本轮执行…');
+    appendLog(`[${logTag}] 启动本轮执行…`);
     setRuntimeOutput((prev) => `${prev}\n--- 新轮次 ---\n`);
     setRuntimeState({
       ...initialCodexRuntimeState,
@@ -1615,9 +1473,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               nextContent = `${merged.trim()}\n${tail}`;
             }
           }
-          nextContent = polishCodexAssistantBubbleDisplay(nextContent, {
-            chatOnlyStripEcho: chatOnlyBubblePolish,
-          });
+          nextContent = polishCodexBubbleForUi(nextContent);
           const changed =
             meta?.changedFilesCount != null
               ? meta.changedFilesCount
@@ -1647,10 +1503,10 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
 
     let runnableToolCall: IAgentToolCall;
     try {
-      const pending = pickReusablePendingCodex(toolCalls, workspaceId);
+      const pending = pickReusablePendingCodingTool(toolCalls, workspaceId, toolCfg.toolName);
       if (pending) {
         if (pending.approvalStatus === 'pending') {
-          toast.error('请先在工作台批准待审的 Codex 工具调用');
+          toast.error(`请先在工作台批准待审的 ${logTag} 工具调用`);
           closeAssistantOnce('\n\n【已取消】存在待审批工具调用。', false);
           return;
         }
@@ -1659,11 +1515,11 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         runnableToolCall = await prepareToolCall.mutateAsync({
           sessionId: activeSession.id,
           workspaceId,
-          toolName: 'codex.exec',
+          toolName: toolCfg.toolName,
           toolCategory: 'ai',
-          inputSummary: 'Codex — 对话中一轮',
-          command: 'codex exec --cd <workspace> --sandbox workspace-write <prompt>',
-          metadata: { prompt: executionPrompt, chatReplyId: replyAssistantId },
+          inputSummary: `${logTag} — 对话中一轮`,
+          command: toolCfg.prepareCommand,
+          metadata: { prompt: executionPrompt, chatReplyId: replyAssistantId, codingTool },
         });
       }
 
@@ -1685,7 +1541,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               status: event.status || prev.status,
               lastEventAt: new Date().toISOString(),
             }));
-            appendLog('[Codex] 已启动');
+            appendLog(`[${logTag}] 已启动`);
           }
           if (event.type === 'spawned') {
             setRuntimeState((prev) => ({
@@ -1698,7 +1554,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               status: event.status || prev.status,
               lastEventAt: event.timestamp || new Date().toISOString(),
             }));
-            appendLog(`[Codex] pid=${event.pid ?? '?'} cwd=${event.cwd || '-'}`);
+            appendLog(`[${logTag}] pid=${event.pid ?? '?'} cwd=${event.cwd || '-'}`);
           }
           if (event.type === 'stdout' && event.chunk) {
             setRuntimeState((prev) => ({
@@ -1755,7 +1611,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               message: event.message || '执行失败',
               lastEventAt: event.timestamp || new Date().toISOString(),
             }));
-            appendLog(`[Codex][错误] ${event.message || '执行失败'}`);
+            appendLog(`[${logTag}][错误] ${event.message || '执行失败'}`);
             closeAssistantOnce(`\n\n【错误】${event.message || '执行失败'}`, true);
           }
           if (event.type === 'finished') {
@@ -1772,7 +1628,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               lastEventAt: event.timestamp || new Date().toISOString(),
             }));
             appendLog(
-              `[Codex] 结束 exit=${event.exitCode ?? '?'} 耗时=${event.durationMs ?? 0}ms 变更文件≈${event.changedFilesCount ?? 0}`,
+              `[${logTag}] 结束 exit=${event.exitCode ?? '?'} 耗时=${event.durationMs ?? 0}ms 变更文件≈${event.changedFilesCount ?? 0}`,
             );
             closeAssistantOnce(
               `\n\n---\nexit=${event.exitCode ?? '—'} · ${event.durationMs ?? 0}ms · 变更≈${event.changedFilesCount ?? 0}`,
@@ -1811,13 +1667,13 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   };
 
   const handleCancelCodex = async () => {
-    if (!activeSession || !runningCodexToolCall) return;
+    if (!activeSession || !runningCodingToolCall) return;
     try {
       await cancelCodexExecution.mutateAsync({
-        id: runningCodexToolCall.id,
+        id: runningCodingToolCall.id,
         sessionId: activeSession.id,
       });
-      appendLog('[Codex] 已请求停止当前进程');
+      appendLog(`[${codingToolLogTag(codingTool)}] 已请求停止当前进程`);
       toast.success('已请求停止');
     } catch (error) {
       logger.error('停止失败', error);
@@ -1831,8 +1687,8 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   const canComposerRunCodex =
     step2Done &&
     Boolean(readyWorkspace) &&
-    !isCodexRunning &&
-    codingTool === 'codex_cli' &&
+    !isCodingToolRunning &&
+    isCodingToolRunnable(codingTool) &&
     !runCodexToolCall.isPending;
 
   const canComposerSendAsk = step1Done && Boolean(chatDraft.trim());
@@ -2206,7 +2062,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               <div className="flex flex-wrap gap-2">
                 <Button
                   onClick={() => void handleRunCoding()}
-                  disabled={!step2Done || !readyWorkspace || isCodexRunning || codingTool !== 'codex_cli'}
+                  disabled={!step2Done || !readyWorkspace || isCodingToolRunning || !isCodingToolRunnable(codingTool)}
                 >
                   {runCodexToolCall.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Terminal className="mr-2 size-4" />}
                   开始编码
@@ -2214,7 +2070,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                 <Button
                   variant="outline"
                   onClick={handleCancelCodex}
-                  disabled={!runningCodexToolCall || !isCodexRunning || cancelCodexExecution.isPending}
+                  disabled={!runningCodingToolCall || !isCodingToolRunning || cancelCodexExecution.isPending}
                 >
                   {cancelCodexExecution.isPending ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Square className="mr-2 size-4" />}
                   停止
@@ -2301,7 +2157,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                 onClick={() => setLogsDialogOpen(true)}
               >
                 <ScrollText className="size-4" />
-                {runtimeOutput.trim() || isCodexRunning ? (
+                {runtimeOutput.trim() || isCodingToolRunning ? (
                   <span
                     className="absolute right-1 top-1 size-1.5 rounded-full bg-primary"
                     aria-hidden
@@ -2312,7 +2168,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
             <Badge variant={runtimeState.phase === 'error' ? 'destructive' : 'outline'}>{runtimeState.phase}</Badge>
           </div>
         </div>
-        {(runCodexToolCall.isPending || Boolean(runningCodexToolCall)) && (
+        {(runCodexToolCall.isPending || Boolean(runningCodingToolCall)) && (
           <Alert variant="warning" className="mb-3">
             <Terminal className="size-4" />
             <AlertTitle>编码任务与连接状态</AlertTitle>
@@ -2328,7 +2184,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
           <div className="mb-3 flex min-h-0 min-w-0 max-h-[min(92vh,800px)] flex-col overflow-x-hidden overflow-y-visible rounded-xl bg-card/80 text-sm ring-1 ring-border/25">
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 bg-muted/45 px-3 py-2.5">
               <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
-                {runCodexToolCall.isPending || Boolean(runningCodexToolCall) ? (
+                {runCodexToolCall.isPending || Boolean(runningCodingToolCall) ? (
                   <>
                     <Sparkles className="size-3.5 shrink-0 text-purple-600 animate-pulse" />
                     <span>工作中…</span>
@@ -2364,7 +2220,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                   onClick={() => setLogsDialogOpen(true)}
                 >
                   <ScrollText className="size-4" />
-                  {runtimeOutput.trim() || isCodexRunning ? (
+                  {runtimeOutput.trim() || isCodingToolRunning ? (
                     <span
                       className="absolute right-1 top-1 size-1.5 rounded-full bg-primary"
                       aria-hidden
@@ -2490,12 +2346,13 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                               <div className="min-w-0 space-y-2">
                                 {m.content.trim() ? (
                                   <div className="max-h-[min(400px,50vh)] min-h-0 overflow-y-auto overflow-x-auto rounded-lg px-0.5 py-1">
-                                    <Streamdown className={AGENT_CHAT_MARKDOWN_CLASS}>{m.content}</Streamdown>
+                                    <Streamdown className={AGENT_CHAT_MARKDOWN_CLASS}>
+                                      {polishCodexBubbleForUi(m.content)}
+                                    </Streamdown>
                                   </div>
                                 ) : (
                                   <span className="text-xs leading-relaxed text-muted-foreground">
-                                    Codex 已启动，正在等待终端输出（stdout 与 stderr
-                                    均会显示在此）。部分场景下会先缓冲数秒至数十秒；完整日志可点上方「文档」图标查看。
+                                    Agent 已启动，正在等待终端输出。部分场景下会先缓冲数秒；完整日志可点上方「文档」图标查看。
                                   </span>
                                 )}
                               </div>
@@ -2507,21 +2364,30 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                                   </div>
                                   <div className="min-w-0 flex-1 space-y-1">
                                     <p className="text-sm font-semibold leading-snug text-foreground">
-                                      {deriveCodexSummaryCardTitle(m.content)}
+                                      {(() => {
+                                        const d = getCodexBubbleDisplayContent(m.content);
+                                        return d.shortChat
+                                          ? d.bodyForMarkdown.trim() || d.title
+                                          : d.title;
+                                      })()}
                                     </p>
                                     <p className="text-[11px] leading-relaxed text-muted-foreground">
                                       {formatCodexCompletedAtSubtitle(m.createdAt, m.exitCode ?? null)}
                                     </p>
                                   </div>
                                 </div>
-                                <div className="min-w-0 max-w-full overflow-x-auto overflow-y-visible">
-                                  <Streamdown className={AGENT_CHAT_MARKDOWN_CLASS}>
-                                    {stripLeadingLineIfMatchesTitle(
-                                      m.content,
-                                      deriveCodexSummaryCardTitle(m.content),
-                                    )}
-                                  </Streamdown>
-                                </div>
+                                {(() => {
+                                  const display = getCodexBubbleDisplayContent(m.content);
+                                  if (display.shortChat) return null;
+                                  if (!display.bodyForMarkdown.trim()) return null;
+                                  return (
+                                    <div className="min-w-0 max-w-full overflow-x-auto overflow-y-visible">
+                                      <Streamdown className={AGENT_CHAT_MARKDOWN_CLASS}>
+                                        {display.bodyForMarkdown}
+                                      </Streamdown>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             ) : m.content.trim() ? (
                               <div className="min-w-0 max-w-full overflow-x-auto overflow-y-visible">
@@ -2838,7 +2704,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant="outline" className="hidden font-mono text-[10px] font-normal text-muted-foreground sm:inline-flex">
-                        Codex CLI
+                        {CODING_TOOL_CONFIG[codingTool].label}
                       </Badge>
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -2868,7 +2734,9 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                               void handleChatSendAndExecute();
                             }}
                             aria-label={
-                              composerMode === 'ask' ? '发送（Ask，仅对话）' : '发送并执行 Codex（Agent）'
+                              composerMode === 'ask'
+                                ? '发送（Ask，仅对话）'
+                                : `发送并执行 ${CODING_TOOL_CONFIG[codingTool].label}（Agent）`
                             }
                           >
                             {composerMode === 'agent' && runCodexToolCall.isPending ? (
@@ -2880,8 +2748,8 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                         </TooltipTrigger>
                         <TooltipContent side="top">
                           {composerMode === 'ask'
-                            ? 'Ask：仅写入对话，不执行 Codex'
-                            : 'Agent：发送并执行本轮 Codex（Workspace 就绪时）'}
+                            ? 'Ask：仅写入对话，不执行编码工具'
+                            : `Agent：发送并执行本轮 ${CODING_TOOL_CONFIG[codingTool].label}（Workspace 就绪时）`}
                         </TooltipContent>
                       </Tooltip>
                     </div>

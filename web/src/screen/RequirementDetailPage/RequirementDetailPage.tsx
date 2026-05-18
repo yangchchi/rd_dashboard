@@ -151,7 +151,10 @@ const RequirementDetailPage: React.FC = () => {
       return;
     }
     const related: IRelatedDoc[] = [];
-    const prd = prds.find((p) => p.requirementId === id);
+    const prd = prds.find(
+      (p) =>
+        p.requirementId === id || (p.linkedRequirementIds ?? []).includes(id)
+    );
     if (prd) {
       related.push({
         id: prd.id,

@@ -452,8 +452,11 @@ export function useAgentToolCalls(
       if (!pollMs) return false;
       const rows = query.state.data as IAgentToolCall[] | undefined;
       if (!rows?.length) return false;
-      const codexRunning = rows.some((row) => row.toolName === 'codex.exec' && row.status === 'running');
-      return codexRunning ? pollMs : false;
+      const codingRunning = rows.some(
+        (row) =>
+          (row.toolName === 'codex.exec' || row.toolName === 'cursor.exec') && row.status === 'running',
+      );
+      return codingRunning ? pollMs : false;
     },
   });
 }

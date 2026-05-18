@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
+import { defaultGitPatFormFields } from '@/lib/git-pat-storage';
 import { codeToHtml } from '@/lib/shiki';
 import type { BundledLanguage, BundledTheme } from '@/lib/shiki';
 import {
@@ -277,6 +278,14 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
   const pushBranchRef =
     browseWorkspace?.agentBranch?.trim() ||
     resolvePipelineWorkspaceBranchLabel(task.pipelineMeta, task.requirementId);
+
+  useEffect(() => {
+    if (!gitDialogOpen) return;
+    const stored = defaultGitPatFormFields();
+    if (!stored.username && !stored.pat) return;
+    setGitUsername((prev) => (prev.trim() ? prev : stored.username));
+    setGitPat((prev) => (prev.trim() ? prev : stored.pat));
+  }, [gitDialogOpen]);
 
   const handleGitPushSubmit = async () => {
     if (!browseWorkspace?.id || !sessionId) return;

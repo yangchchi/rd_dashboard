@@ -12,6 +12,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { getCurrentUser, updateStoredCurrentUser } from '@/lib/auth';
+import {
+  clearStoredGitPatCredentials,
+  getStoredGitPatCredentials,
+  saveStoredGitPatCredentials,
+} from '@/lib/git-pat-storage';
 
 const MAX_AVATAR_FILE_BYTES = 512 * 1024;
 
@@ -92,9 +97,18 @@ export default function AccountSettingsPage() {
   const [phone, setPhone] = useState(user?.phone ?? '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatarUrl?.trim() ?? '');
   const [saving, setSaving] = useState(false);
+  const [gitUsername, setGitUsername] = useState('');
+  const [gitPat, setGitPat] = useState('');
+  const [savingGitPat, setSavingGitPat] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const username = user?.username ?? '';
+
+  useEffect(() => {
+    const stored = getStoredGitPatCredentials();
+    setGitUsername(stored?.username ?? '');
+    setGitPat(stored?.pat ?? '');
+  }, []);
 
   const handleAvatarFile: ChangeEventHandler<HTMLInputElement> = (e) => {
     const file = e.target.files?.[0];
@@ -115,6 +129,33 @@ export default function AccountSettingsPage() {
     };
     reader.onerror = () => toast.error('读取图片失败');
     reader.readAsDataURL(file);
+  };
+
+  const handleSaveGitPat = () => {
+    const trimmedUsername = gitUsername.trim();
+    const trimmedPat = gitPat.trim();
+    if (!trimmedUsername && !trimmedPat) {
+      toast.error('请至少填写 Git 用户名或 PAT');
+      return;
+    }
+    if (trimmedPat && trimmedPat.length < 8) {
+      toast.error('PAT 长度过短，请检查是否填写完整');
+      return;
+    }
+    setSavingGitPat(true);
+    try {
+      saveStoredGitPatCredentials({ username: trimmedUsername, pat: trimmedPat });
+      toast.success('Git PAT 已保存，创建流水线时将自动填充');
+    } finally {
+      setSavingGitPat(false);
+    }
+  };
+
+  const handleClearGitPat = () => {
+    clearStoredGitPatCredentials();
+    setGitUsername('');
+    setGitPat('');
+    toast.success('已清除本机保存的 Git PAT');
   };
 
   const handleSaveProfile = () => {
@@ -150,7 +191,7 @@ export default function AccountSettingsPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-semibold leading-tight tracking-tight">个人设置</h1>
-        <p className="mt-1 text-sm text-muted-foreground">管理显示信息与界面主题</p>
+        <p className="mt-1 text-sm text-muted-foreground">管理显示信息、Git 凭据与界面主题</p>
       </div>
 
       <Card className="rounded-xl border-border">
@@ -269,6 +310,56 @@ export default function AccountSettingsPage() {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-sm font-medium text-foreground">主题</span>
             <ThemeSegmentedControl />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-xl border-border">
+        <CardHeader className="space-y-1">
+          <CardTitle className="text-lg font-semibold">Git PAT 配置</CardTitle>
+          <CardDescription>
+            用于 HTTPS 仓库克隆与推送；凭据仅保存在本机浏览器，创建流水线时自动填入
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid gap-6 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="settings-git-username">Git 用户名</Label>
+              <Input
+                id="settings-git-username"
+                value={gitUsername}
+                onChange={(e) => setGitUsername(e.target.value)}
+                placeholder="例如：your-github-username"
+                autoComplete="username"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="settings-git-pat">Personal Access Token</Label>
+              <Input
+                id="settings-git-pat"
+                type="password"
+                value={gitPat}
+                onChange={(e) => setGitPat(e.target.value)}
+                placeholder="ghp_xxxx 或 glpat-xxxx"
+                autoComplete="new-password"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            不会写入流水线任务元数据或服务端数据库；请勿在公共设备上保存。推送代码时 Agent 工作台也会优先使用此处配置。
+          </p>
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-6">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClearGitPat}
+              disabled={!gitUsername.trim() && !gitPat.trim()}
+            >
+              清除
+            </Button>
+            <Button type="button" onClick={handleSaveGitPat} disabled={savingGitPat}>
+              {savingGitPat ? '保存中…' : '保存'}
+            </Button>
           </div>
         </CardContent>
       </Card>

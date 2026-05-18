@@ -138,6 +138,7 @@ export interface IReviewRecord {
 export interface IPrdRow {
   id: string;
   requirementId: string;
+  linkedRequirementIds?: string[];
   title?: string | null;
   background: string;
   objectives: string;
@@ -994,6 +995,7 @@ export class RdService implements OnModuleInit {
       ALTER TABLE rd_requirements ADD COLUMN IF NOT EXISTS updated_by TEXT;
     `);
     await this.db.execute(sql`
+      ALTER TABLE rd_prds ADD COLUMN IF NOT EXISTS linked_requirement_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
       ALTER TABLE rd_prds ADD COLUMN IF NOT EXISTS created_by TEXT;
     `);
     await this.db.execute(sql`
@@ -1520,9 +1522,16 @@ export class RdService implements OnModuleInit {
 
   private rowToPrd(r: Record<string, unknown>): IPrdRow {
     const t = this.tsFromRow(r);
+    const linkedRaw =
+      (r.linked_requirement_ids as string[] | undefined) ??
+      (r.linkedRequirementIds as string[] | undefined);
+    const linkedRequirementIds = Array.isArray(linkedRaw)
+      ? linkedRaw.filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [];
     return {
       id: r.id as string,
       requirementId: ((r.requirement_id as string) || (r.requirementId as string)),
+      linkedRequirementIds,
       title: (r.title as string) || undefined,
       background: (r.background as string) || '',
       objectives: (r.objectives as string) || '',
@@ -2252,11 +2261,8 @@ export class RdService implements OnModuleInit {
   }
 
   async getPrdByRequirementId(requirementId: string): Promise<IPrdRow | null> {
-    const result = await this.db.execute(
-      sql`SELECT * FROM rd_prds WHERE requirement_id = ${requirementId} LIMIT 1;`,
-    );
-    const rows = this.rowsFromExecute(result);
-    return rows[0] ? this.rowToPrd(rows[0]) : null;
+    const all = await this.listPrds();
+    return all.find((p) => this.prdCoversRequirementId(p, requirementId)) ?? null;
   }
 
   async listPrdsByRequirementId(requirementId: string): Promise<IPrdRow[]> {
@@ -2593,17 +2599,49 @@ export class RdService implements OnModuleInit {
     return (await this.getContextPack(id))!;
   }
 
+  private prdCoversRequirementId(prd: IPrdRow, requirementId: string): boolean {
+    if (prd.requirementId === requirementId) return true;
+    return (prd.linkedRequirementIds ?? []).includes(requirementId);
+  }
+
+  private async assertPrdRequirementSlotsAvailable(
+    prdId: string,
+    primaryRequirementId: string,
+    linkedRequirementIds: string[],
+  ): Promise<void> {
+    const linked = linkedRequirementIds.filter((id) => id && id !== primaryRequirementId);
+    const allIds = [primaryRequirementId, ...linked];
+    if (new Set(allIds).size !== allIds.length) {
+      throw new BadRequestException('PRD 关联需求列表存在重复项');
+    }
+    const allPrds = await this.listPrds();
+    for (const reqId of allIds) {
+      const conflict = allPrds.find(
+        (p) => p.id !== prdId && this.prdCoversRequirementId(p, reqId),
+      );
+      if (conflict) {
+        throw new BadRequestException('所选需求中已有条目关联其他 PRD，不允许重复创建');
+      }
+    }
+  }
+
   async upsertPrd(body: Partial<IPrdRow> & { id: string; requirementId: string }): Promise<IPrdRow> {
     const existing = await this.getPrd(body.id);
-    const sameRequirementPrd = await this.getPrdByRequirementId(body.requirementId);
-    if (sameRequirementPrd && sameRequirementPrd.id !== body.id) {
-      throw new BadRequestException('该需求已存在PRD，不允许重复创建');
-    }
+    const linkedRequirementIds =
+      body.linkedRequirementIds !== undefined
+        ? body.linkedRequirementIds.filter((id) => id && id !== body.requirementId)
+        : existing?.linkedRequirementIds ?? [];
+    await this.assertPrdRequirementSlotsAvailable(
+      body.id,
+      body.requirementId,
+      linkedRequirementIds,
+    );
     const now = new Date().toISOString();
     const merged: IPrdRow = existing
       ? {
           ...existing,
           ...body,
+          linkedRequirementIds,
           featureList: body.featureList ?? existing.featureList,
           reviews: body.reviews ?? existing.reviews,
           createdAt: existing.createdAt,
@@ -2614,6 +2652,7 @@ export class RdService implements OnModuleInit {
       : {
           id: body.id,
           requirementId: body.requirementId,
+          linkedRequirementIds,
           title: body.title,
           background: body.background || '',
           objectives: body.objectives || '',
@@ -2631,12 +2670,13 @@ export class RdService implements OnModuleInit {
         };
     await this.db.execute(sql`
       INSERT INTO rd_prds (
-        id, requirement_id, title, background, objectives, flowchart,
+        id, requirement_id, linked_requirement_ids, title, background, objectives, flowchart,
         feature_list, non_functional, status, version, author, reviews,
         created_by, updated_by, created_at, updated_at
       ) VALUES (
         ${merged.id},
         ${merged.requirementId},
+        ${JSON.stringify(merged.linkedRequirementIds ?? [])}::jsonb,
         ${merged.title ?? null},
         ${merged.background},
         ${merged.objectives},
@@ -2654,6 +2694,7 @@ export class RdService implements OnModuleInit {
       )
       ON CONFLICT (id) DO UPDATE SET
         requirement_id = EXCLUDED.requirement_id,
+        linked_requirement_ids = EXCLUDED.linked_requirement_ids,
         title = EXCLUDED.title,
         background = EXCLUDED.background,
         objectives = EXCLUDED.objectives,
@@ -3700,6 +3741,13 @@ export class RdService implements OnModuleInit {
     });
   }
 
+  private resolveCodingExecutor(toolName: string): 'codex_cli' | 'cursor_cli' | null {
+    const name = toolName.trim();
+    if (name === 'codex.exec') return 'codex_cli';
+    if (name === 'cursor.exec') return 'cursor_cli';
+    return null;
+  }
+
   private buildCodexExecCommand(input: {
     prompt: string;
     workspacePath: string;
@@ -3719,6 +3767,75 @@ export class RdService implements OnModuleInit {
     }
     args.push(input.prompt);
     return { command: codexBin, args };
+  }
+
+  /** Cursor CLI headless：`agent -p --force` + stream-json，cwd 为 worktree */
+  private buildCursorAgentCommand(input: {
+    prompt: string;
+    model?: string | null;
+  }): { command: string; args: string[] } {
+    const agentBin = String(process.env.CURSOR_CLI_BIN || 'agent').trim() || 'agent';
+    const args = ['-p', '--force', '--output-format', 'stream-json', '--stream-partial-output'];
+    const model = input.model?.trim() || process.env.CURSOR_CLI_MODEL?.trim();
+    if (model) {
+      args.push('--model', model);
+    }
+    args.push(input.prompt);
+    return { command: agentBin, args };
+  }
+
+  /** 从 Cursor `stream-json` 行中提取可展示给用户的增量文本 */
+  private extractCursorStreamJsonDisplayChunk(line: string): string {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{')) return '';
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        type?: string;
+        subtype?: string;
+        timestamp_ms?: number;
+        model_call_id?: string;
+        message?: { content?: Array<{ type?: string; text?: string }> };
+        tool_call?: {
+          writeToolCall?: { args?: { path?: string } };
+          readToolCall?: { args?: { path?: string } };
+        };
+      };
+      if (parsed.type === 'assistant') {
+        const hasTs = typeof parsed.timestamp_ms === 'number';
+        const hasModelCall = Boolean(parsed.model_call_id);
+        if (hasTs && !hasModelCall) {
+          const text = parsed.message?.content?.find((c) => c?.type === 'text')?.text;
+          return typeof text === 'string' ? text : '';
+        }
+        return '';
+      }
+      if (parsed.type === 'tool_call' && parsed.subtype === 'started') {
+        const writePath = parsed.tool_call?.writeToolCall?.args?.path;
+        if (writePath) return `\n[工具] 写入 ${writePath}\n`;
+        const readPath = parsed.tool_call?.readToolCall?.args?.path;
+        if (readPath) return `\n[工具] 读取 ${readPath}\n`;
+      }
+    } catch {
+      return '';
+    }
+    return '';
+  }
+
+  private buildAgentExecPostamble(
+    executor: 'codex_cli' | 'cursor_cli',
+    isChatOnlyRound: boolean,
+    docsPath: string,
+  ): string {
+    const cliLabel = executor === 'cursor_cli' ? 'Cursor CLI（agent）' : 'Codex CLI';
+    const agentExecCodingPostamble =
+      '\n\n---\n【系统执行授权】当前为 RD Agent 已准备的 Git worktree（产品目录为代码生成根，可含 backend、frontend、Dockerfile 等），Workspace 与计划在网页侧已就绪。\n' +
+      '你必须在本仓库内**实际改文件**（分支、实现、测试或类型检查至少其一），不得以「等待技术经理批准」结束且无变更。\n' +
+      `规格与 PRD 位于本 worktree 下 \`${docsPath}\`（相对仓库根；勿使用已废弃的 docs/ai-pipeline/），勿依赖不存在的 \`context/\` 路径。` +
+      '\n\n【回复约束】若用户本轮只是询问身份、所用模型或简短确认，请用一两句中文作答，勿复述上文 Plan 或本段授权全文。';
+    const agentExecChatOnlyPostamble =
+      `\n\n---\n【环境】当前在 RD Agent 准备的仓库 worktree 中执行 ${cliLabel}。\n` +
+      '【回复要求】仅用简短中文直接回答用户问题；禁止复述 Plan、禁止复述长篇系统说明、禁止罗列此前对话全文；除非用户明确要求改代码或执行命令，否则不要主动发起仓库修改。';
+    return isChatOnlyRound ? agentExecChatOnlyPostamble : agentExecCodingPostamble;
   }
 
   private runTextCommand(command: string, args: string[], cwd: string): Promise<ICommandTextResult> {
@@ -4120,9 +4237,16 @@ esac
     body?: { prompt?: string | null; model?: string | null }
   ): AsyncGenerator<IAgentExecutionEvent> {
     const current = await this.startAgentToolCall(id);
+    const executor = this.resolveCodingExecutor(current.toolName);
+    if (!executor) {
+      const message = `不支持的 AI 编码工具：${current.toolName}`;
+      const failed = await this.finishAgentToolCall(id, { exitCode: 1, errorMessage: message });
+      yield { type: 'error', toolCallId: id, status: failed.status, message, toolCall: failed };
+      return;
+    }
     const workspaceId = current.workspaceId?.trim();
     if (!workspaceId) {
-      const message = 'Codex 执行需要绑定 AgentWorkspace';
+      const message = '编码工具执行需要绑定 AgentWorkspace';
       const failed = await this.finishAgentToolCall(id, { exitCode: 1, errorMessage: message });
       yield { type: 'error', toolCallId: id, status: failed.status, message, toolCall: failed };
       return;
@@ -4163,24 +4287,25 @@ esac
     /** 简短问答（工作台识别后）不再拼接长篇编码授权，避免模型复述刷屏 */
     const chatOnlyLead = '【本轮为简短问答，非编码任务】';
     const isChatOnlyRound = rawPrompt.startsWith(chatOnlyLead);
-    /** 旧版 plan 含「等待 TM 批准」时，模型会只读分析后 exit=0 不落盘；注入硬性执行授权 */
-    const agentExecCodingPostamble =
-      '\n\n---\n【系统执行授权】当前为 RD Agent 已准备的 Git worktree（产品目录为代码生成根，可含 backend、frontend、Dockerfile 等），Workspace 与计划在网页侧已就绪。\n' +
-      '你必须在本仓库内**实际改文件**（分支、实现、测试或类型检查至少其一），不得以「等待技术经理批准」结束且无变更。\n' +
-      `规格与 PRD 位于本 worktree 下 \`${docsPath}\`（相对仓库根；勿使用已废弃的 docs/ai-pipeline/），勿依赖不存在的 \`context/\` 路径。` +
-      '\n\n【回复约束】若用户本轮只是询问身份、所用模型或简短确认，请用一两句中文作答，勿复述上文 Plan 或本段授权全文。';
-    const agentExecChatOnlyPostamble =
-      '\n\n---\n【环境】当前在 RD Agent 准备的仓库 worktree 中执行 Codex CLI。\n' +
-      '【回复要求】仅用简短中文直接回答用户问题；禁止复述 Plan、禁止复述长篇系统说明、禁止罗列此前对话全文；除非用户明确要求改代码或执行命令，否则不要主动发起仓库修改。';
-    const agentExecPostamble = isChatOnlyRound ? agentExecChatOnlyPostamble : agentExecCodingPostamble;
+    const agentExecPostamble = this.buildAgentExecPostamble(executor, isChatOnlyRound, docsPath);
     const prompt = `${rawPrompt}${agentExecPostamble}`;
     if (!rawPrompt) {
-      const message = 'Codex 执行缺少 prompt';
+      const message = '编码执行缺少 prompt';
       const failed = await this.finishAgentToolCall(id, { exitCode: 1, errorMessage: message });
       yield { type: 'error', toolCallId: id, status: failed.status, message, toolCall: failed };
       return;
     }
-    const command = this.buildCodexExecCommand({ prompt, workspacePath, model: body?.model ?? current.metadata.model as string | null });
+    const command =
+      executor === 'cursor_cli'
+        ? this.buildCursorAgentCommand({
+            prompt,
+            model: body?.model ?? (current.metadata.model as string | null),
+          })
+        : this.buildCodexExecCommand({
+            prompt,
+            workspacePath,
+            model: body?.model ?? (current.metadata.model as string | null),
+          });
     const started = await this.upsertAgentToolCall({
       ...current,
       status: 'running',
@@ -4188,7 +4313,7 @@ esac
       startedAt: current.startedAt || new Date(startedAt).toISOString(),
       metadata: {
         ...metadata,
-        executor: 'codex_cli',
+        executor,
         prompt,
         cwd: workspacePath,
         stdout: '',
@@ -4200,6 +4325,7 @@ esac
 
     let stdout = '';
     let stderr = '';
+    let cursorStdoutLineBuf = '';
     let latestToolCall = started;
     /** 必须在首个 await/yield 之前注册：ENOENT 等会在同 tick 或 await 间隙触发 'error'，晚注册会拖垮整个 Node 进程 */
     const queue: IAgentExecutionEvent[] = [];
@@ -4243,6 +4369,7 @@ esac
         ...this.parseJsonObject(started.metadata),
         pid: child.pid ?? null,
         spawnedAt,
+        executorCommand: [command.command, ...command.args].join(' '),
         codexCommand: [command.command, ...command.args].join(' '),
         spawnVerified: Boolean(child.pid),
       },
@@ -4306,6 +4433,25 @@ esac
       stdout += text;
       execution.stdout = stdout;
       appendCodexLog('out', text);
+      if (executor === 'cursor_cli') {
+        cursorStdoutLineBuf += text;
+        const lines = cursorStdoutLineBuf.split('\n');
+        cursorStdoutLineBuf = lines.pop() ?? '';
+        for (const line of lines) {
+          const displayChunk = this.extractCursorStreamJsonDisplayChunk(line);
+          if (!displayChunk) continue;
+          push({
+            type: 'stdout',
+            toolCallId: id,
+            chunk: displayChunk,
+            status: 'running',
+            stdoutBytes: Buffer.byteLength(stdout),
+            stderrBytes: Buffer.byteLength(stderr),
+            timestamp: new Date().toISOString(),
+          });
+        }
+        return;
+      }
       push({
         type: 'stdout',
         toolCallId: id,
@@ -4388,7 +4534,7 @@ esac
     });
     const mergedMetadata = {
       ...this.parseJsonObject(finished.metadata),
-      executor: 'codex_cli',
+      executor,
       prompt,
       cwd: workspacePath,
       stdout: stdout.slice(-20000),

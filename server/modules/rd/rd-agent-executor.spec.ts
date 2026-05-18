@@ -290,6 +290,53 @@ describe('RdService agent executor', () => {
     ]);
   });
 
+  it('runs Cursor CLI in the workspace and streams parsed stdout from stream-json', async () => {
+    const child = createMockChild();
+    mockSpawnWithGitReview(child, [
+      'M\tserver/modules/rd/rd.service.ts\n',
+      ' server/modules/rd/rd.service.ts | 12 ++++++\n',
+      ' M server/modules/rd/rd.service.ts\n',
+    ]);
+    const { service, getCurrentToolCall } = createServiceHarness();
+    const current = getCurrentToolCall();
+    current.toolName = 'cursor.exec';
+    const eventsPromise = (async () => {
+      const events = [];
+      for await (const event of service.runAgentToolCallStream('tool-1')) {
+        events.push(event);
+      }
+      return events;
+    })();
+
+    await waitForSpawnCall();
+    child.stdout.emit(
+      'data',
+      Buffer.from(
+        `${JSON.stringify({
+          type: 'assistant',
+          timestamp_ms: 1,
+          message: { content: [{ type: 'text', text: '正在修改 ' }] },
+        })}\n${JSON.stringify({
+          type: 'assistant',
+          timestamp_ms: 2,
+          message: { content: [{ type: 'text', text: 'rd.service.ts' }] },
+        })}\n`,
+      ),
+    );
+    child.emit('close', 0);
+
+    const events = await eventsPromise;
+
+    expect(spawn).toHaveBeenCalledWith(
+      'agent',
+      expect.arrayContaining(['-p', '--force', '--output-format', 'stream-json', '--stream-partial-output']),
+      expect.objectContaining({ cwd: '/tmp/rd-agent-workspaces/session-1/workspace-1' }),
+    );
+    const stdoutChunks = events.filter((event) => event.type === 'stdout').map((event) => event.chunk);
+    expect(stdoutChunks.join('')).toBe('正在修改 rd.service.ts');
+    expect(getCurrentToolCall().metadata.executor).toBe('cursor_cli');
+  });
+
   it('does not spawn Codex CLI when the workspace path is missing on disk', async () => {
     (stat as jest.Mock).mockRejectedValue(new Error('missing'));
     const { service } = createServiceHarness('ready');

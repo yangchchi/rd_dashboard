@@ -63,6 +63,7 @@ import {
 import { gitBlobViewerUrl } from '@/lib/git-web-url';
 import { rdApi } from '@/lib/rd-api';
 import { getAuthToken } from '@/lib/auth';
+import { defaultGitPatFormFields } from '@/lib/git-pat-storage';
 import type {
   IAgentSession,
   IGitCommitRecord,
@@ -249,19 +250,22 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
   const [isPublishingDocs, setIsPublishingDocs] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmActionState | null>(null);
   const [promptAction, setPromptAction] = useState<PromptActionState | null>(null);
-  const [createForm, setCreateForm] = useState<ICreatePipelineForm>({
-    name: '',
-    gitUrl: '',
-    gitAuthMode: 'pat',
-    gitUsername: '',
-    gitPat: '',
-    sandboxUrl: '',
-    gitBaseBranch: 'main',
-    branch: '',
-    triggerMode: 'manual',
-    priority: 'P1',
-    remarks: '',
-    requirementId: '',
+  const [createForm, setCreateForm] = useState<ICreatePipelineForm>(() => {
+    const gitPatDefaults = defaultGitPatFormFields();
+    return {
+      name: '',
+      gitUrl: '',
+      gitAuthMode: 'pat',
+      gitUsername: gitPatDefaults.username,
+      gitPat: gitPatDefaults.pat,
+      sandboxUrl: '',
+      gitBaseBranch: 'main',
+      branch: '',
+      triggerMode: 'manual',
+      priority: 'P1',
+      remarks: '',
+      requirementId: '',
+    };
   });
   const logsEndRef = useRef<HTMLDivElement>(null);
   const testStreamEndRef = useRef<HTMLDivElement>(null);
@@ -336,12 +340,13 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
   const selectedTaskCommitStore = selectedTask?.commitStore;
 
   const resetCreateForm = () => {
+    const gitPatDefaults = defaultGitPatFormFields();
     setCreateForm({
       name: '',
       gitUrl: '',
       gitAuthMode: 'pat',
-      gitUsername: '',
-      gitPat: '',
+      gitUsername: gitPatDefaults.username,
+      gitPat: gitPatDefaults.pat,
       sandboxUrl: '',
       gitBaseBranch: 'main',
       branch: '',
@@ -416,6 +421,20 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
       };
     });
   }, [requirements, products]);
+
+  /** 创建弹窗打开时，用个人设置中保存的 Git PAT 补全空字段 */
+  useEffect(() => {
+    if (!isCreateDialogOpen) return;
+    const stored = defaultGitPatFormFields();
+    if (!stored.username && !stored.pat) return;
+    setCreateForm((prev) => {
+      if (prev.gitAuthMode !== 'pat') return prev;
+      const nextUsername = prev.gitUsername.trim() ? prev.gitUsername : stored.username;
+      const nextPat = prev.gitPat.trim() ? prev.gitPat : stored.pat;
+      if (nextUsername === prev.gitUsername && nextPat === prev.gitPat) return prev;
+      return { ...prev, gitUsername: nextUsername, gitPat: nextPat };
+    });
+  }, [isCreateDialogOpen]);
 
   /** 创建弹窗打开且未选需求时，列表有数据则默认选中第一项（含名称与产品 Git/沙箱同步） */
   useEffect(() => {
@@ -2233,7 +2252,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                     <Input
                       id="cp-git-pat"
                       type="password"
-                      placeholder="仅 HTTPS 生效；不会写入流水线持久化元数据"
+                      placeholder="可在「个人设置」保存默认 PAT；不会写入流水线持久化元数据"
                       value={createForm.gitPat}
                       onChange={(e) => setCreateForm((prev) => ({ ...prev, gitPat: e.target.value }))}
                     />

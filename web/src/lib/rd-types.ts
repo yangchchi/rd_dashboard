@@ -147,6 +147,8 @@ export interface IFeature {
 export interface IPrd {
   id: string;
   requirementId: string;
+  /** 与主需求合并为同一份 PRD 的其它需求 id */
+  linkedRequirementIds?: string[];
   title?: string;
   background: string;
   objectives: string;

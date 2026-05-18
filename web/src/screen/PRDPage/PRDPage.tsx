@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -27,6 +29,7 @@ import {
   Paperclip,
   Link2,
   X,
+  ChevronsUpDown,
 } from 'lucide-react';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import { toast } from 'sonner';
@@ -48,7 +51,17 @@ import { cn } from '@/lib/utils';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { Label } from '@/components/ui/label';
 import type { IPrd, IRequirement } from '@/lib/rd-types';
-import { buildNewPrdStoredTitle, formatPrdListTitle } from '@/lib/prd-display-title';
+import { formatPrdListTitle } from '@/lib/prd-display-title';
+import {
+  buildMultiPrdGenerationHints,
+  buildMultiPrdStoredTitle,
+  buildMultiRequirementOriginalBlock,
+  formatPrdListRequirementSummary,
+  getPrdCoveredRequirementIds,
+  isRequirementCoveredByAnyPrd,
+  requirementsMatchProduct,
+  requirementProductKey,
+} from '@/lib/prd-multi-requirement';
 
 /** 单段上下文上限，避免超出模型窗口 */
 const PRD_GEN_CONTEXT_MAX_CHARS = 28000;
@@ -227,6 +240,7 @@ const PRDPage: React.FC = () => {
     return prds.map((prd) => {
       const latest = prd.reviews?.[prd.reviews.length - 1];
       const req = requirements.find((r) => r.id === prd.requirementId);
+      const reqSummary = formatPrdListRequirementSummary(prd, requirements);
       return {
         latestReviewComment: latest?.comment,
         latestReviewMeta: latest
@@ -235,8 +249,11 @@ const PRDPage: React.FC = () => {
         id: prd.id,
         requirementId: prd.requirementId,
         title: prd.title || 'PRD文档',
-        displayTitle: formatPrdListTitle(req as IRequirement | undefined, products, prd.title),
-        requirementTitle: req?.title || '未关联需求',
+        displayTitle:
+          (prd.linkedRequirementIds?.length ?? 0) > 0
+            ? prd.title?.trim() || formatPrdListTitle(req as IRequirement | undefined, products, prd.title)
+            : formatPrdListTitle(req as IRequirement | undefined, products, prd.title),
+        requirementTitle: reqSummary,
         status: prd.status,
         version: prd.version,
         author: prd.author || '未知',
@@ -259,7 +276,7 @@ const PRDPage: React.FC = () => {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showGenerateDialog, setShowGenerateDialog] = useState(false);
-  const [selectedRequirement, setSelectedRequirement] = useState<string>('');
+  const [selectedRequirementIds, setSelectedRequirementIds] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [generatedContent, setGeneratedContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -272,12 +289,16 @@ const PRDPage: React.FC = () => {
   const [pastedSupplementary, setPastedSupplementary] = useState('');
   const supplementaryFileInputRef = useRef<HTMLInputElement>(null);
 
-  const selectedRequirementEntity = useMemo(
-    () => requirements.find((r) => r.id === selectedRequirement),
-    [requirements, selectedRequirement]
+  const selectedRequirements = useMemo(
+    () =>
+      selectedRequirementIds
+        .map((id) => requirements.find((r) => r.id === id))
+        .filter((r): r is IRequirement => Boolean(r)),
+    [requirements, selectedRequirementIds]
   );
 
-  const productKey = (selectedRequirementEntity?.product ?? '').trim();
+  const anchorRequirement = selectedRequirements[0];
+  const productKey = requirementProductKey(anchorRequirement);
   const productLabel = useMemo(() => {
     if (!productKey) return '';
     const p = products.find((x) => x.id === productKey);
@@ -286,12 +307,13 @@ const PRDPage: React.FC = () => {
 
   const siblingPrdOptions = useMemo(() => {
     if (!productKey) return [];
+    const selectedSet = new Set(selectedRequirementIds);
     return prds.filter((prd) => {
-      if (prd.requirementId === selectedRequirement) return false;
+      if (getPrdCoveredRequirementIds(prd).some((id) => selectedSet.has(id))) return false;
       const r = requirements.find((x) => x.id === prd.requirementId);
-      return (r?.product ?? '').trim() === productKey;
+      return requirementProductKey(r) === productKey;
     });
-  }, [prds, requirements, selectedRequirement, productKey]);
+  }, [prds, requirements, selectedRequirementIds, productKey]);
 
   useEffect(() => {
     if (!referencePrdId) return;
@@ -309,37 +331,83 @@ const PRDPage: React.FC = () => {
   });
 
   const availableRequirements = useMemo(() => {
-    const linkedRequirementIds = new Set(prds.map((prd) => prd.requirementId));
     return requirements.filter(
       (req) =>
         (req.status === 'backlog' || req.status === 'prd_writing') &&
-        !linkedRequirementIds.has(req.id)
+        !isRequirementCoveredByAnyPrd(req.id, prds)
     );
   }, [prds, requirements]);
 
-  /** 弹窗打开时默认选中列表第一项；异步加载后或当前项不再可用时同步 */
+  /** 已选首个需求后，仅展示同产品下的其它可选需求 */
+  const selectableRequirements = useMemo(() => {
+    if (!anchorRequirement) return availableRequirements;
+    return availableRequirements.filter((req) =>
+      requirementsMatchProduct(anchorRequirement, req)
+    );
+  }, [availableRequirements, anchorRequirement]);
+
+  /** 弹窗打开时默认选中列表第一项；异步加载后剔除不可用项 */
   useEffect(() => {
     if (!showGenerateDialog) return;
     const firstId = availableRequirements[0]?.id ?? '';
     if (!firstId) {
-      if (selectedRequirement !== '') setSelectedRequirement('');
+      if (selectedRequirementIds.length > 0) setSelectedRequirementIds([]);
       return;
     }
-    const stillValid = availableRequirements.some((r) => r.id === selectedRequirement);
-    if (!stillValid) setSelectedRequirement(firstId);
-  }, [showGenerateDialog, availableRequirements, selectedRequirement]);
+    const validIds = selectedRequirementIds.filter((id) =>
+      availableRequirements.some((r) => r.id === id)
+    );
+    if (validIds.length === 0) {
+      setSelectedRequirementIds([firstId]);
+      return;
+    }
+    if (validIds.length !== selectedRequirementIds.length) {
+      setSelectedRequirementIds(validIds);
+    }
+  }, [showGenerateDialog, availableRequirements, selectedRequirementIds]);
+
+  const toggleRequirementSelection = (reqId: string) => {
+    const req = requirements.find((r) => r.id === reqId);
+    if (!req) return;
+    setSelectedRequirementIds((prev) => {
+      if (prev.includes(reqId)) {
+        return prev.filter((id) => id !== reqId);
+      }
+      if (prev.length === 0) return [reqId];
+      const anchor = requirements.find((r) => r.id === prev[0]);
+      if (!requirementsMatchProduct(anchor, req)) {
+        toast.error('仅可选择与首个需求相同「所属产品」的需求');
+        return prev;
+      }
+      return [...prev, reqId];
+    });
+  };
 
   const handleGeneratePRD = async () => {
-    if (!selectedRequirement) {
-      toast.error('请选择要生成PRD的需求');
+    if (selectedRequirementIds.length === 0) {
+      toast.error('请至少选择一条要生成 PRD 的需求');
       return;
     }
 
-    const requirement = requirements.find(r => r.id === selectedRequirement);
-    if (!requirement) return;
-    const existingPrd = prds.find((item) => item.requirementId === selectedRequirement);
-    if (existingPrd) {
-      toast.error('该需求已存在PRD，不能重复生成');
+    const selectedReqs = selectedRequirementIds
+      .map((id) => requirements.find((r) => r.id === id))
+      .filter((r): r is IRequirement => Boolean(r));
+    if (selectedReqs.length === 0) return;
+
+    const anchor = selectedReqs[0];
+    const productMismatch = selectedReqs.some(
+      (r) => !requirementsMatchProduct(anchor, r)
+    );
+    if (productMismatch) {
+      toast.error('所选需求须属于同一产品');
+      return;
+    }
+
+    const alreadyLinked = selectedRequirementIds.filter((id) =>
+      isRequirementCoveredByAnyPrd(id, prds)
+    );
+    if (alreadyLinked.length > 0) {
+      toast.error('部分需求已关联 PRD，不能重复生成');
       return;
     }
 
@@ -366,18 +434,10 @@ const PRDPage: React.FC = () => {
         productLines.push('所属产品：未绑定（需求未关联产品目录）');
       }
 
-      const originalRequirement = [
-        '【范围锚定】「需求标题 / 需求描述」定义本条 PRD 必须交付的功能与价值；产品信息与参考文档仅用于术语、定位与约束对齐，禁止用参考材料中的其他独立功能主题替代本条需求。',
-        ...productLines,
-        `需求标题：${requirement.title}`,
-        `需求描述：${stripHtmlTags(requirement.description || '')}`,
-        `期望上线时间：${requirement.expectedDate}`,
-        `业务优先级：${requirement.priority}`,
-        requirement.sketchUrl ? `草图/附件链接：${requirement.sketchUrl}` : '',
-        requirement.aiCategory ? `AI 预分类：${requirement.aiCategory}` : '',
-      ]
-        .filter((x) => String(x).trim().length > 0)
-        .join('\n');
+      const originalRequirement = buildMultiRequirementOriginalBlock(
+        selectedReqs,
+        productLines
+      );
 
       const refPrd = referencePrdId ? prds.find((p) => p.id === referencePrdId) : undefined;
       const refReqTitle = refPrd
@@ -406,9 +466,7 @@ const PRDPage: React.FC = () => {
           {
             original_requirement: originalRequirement,
             additional_requirements: [
-              '请生成完整的 PRD（背景、目标、业务流程、功能列表、非功能性需求等），结构清晰、可评审。',
-              '业务范围必须与上文「需求标题」「需求描述」一致；产品简介与用户上传文档不得喧宾夺主，不得编造未在材料中出现且与需求无关的大段“行业故事”。',
-              '若提供了同产品参考 PRD 或用户上传文档：继承术语、结构习惯与产品级约束，并与本条需求自洽；冲突处以本条需求为准。',
+              buildMultiPrdGenerationHints(selectedReqs.length),
               uploadCount > 0
                 ? `用户已上传 ${uploadCount} 份参考文档，生成时须综合引用每一份中的有效信息，不得只采用其中一份而忽略其余。`
                 : '',
@@ -435,10 +493,13 @@ const PRDPage: React.FC = () => {
       const actor = getCurrentUser();
       const authorLabel = (actor?.name?.trim() || actor?.username?.trim() || '').trim() || '匿名';
 
+      const [primaryRequirement, ...linkedIds] = selectedRequirementIds;
+
       await upsertPrd.mutateAsync({
         id: newId,
-        requirementId: requirement.id,
-        title: buildNewPrdStoredTitle(requirement as IRequirement, products),
+        requirementId: primaryRequirement,
+        linkedRequirementIds: linkedIds,
+        title: buildMultiPrdStoredTitle(selectedReqs, products),
         background: fullContent,
         objectives: '',
         flowchart: '',
@@ -451,17 +512,19 @@ const PRDPage: React.FC = () => {
         updatedAt: now,
         ...rdAuditCreate(),
       });
-      await upsertRequirement.mutateAsync({
-        ...requirement,
-        status: 'prd_writing',
-        updatedAt: now,
-        ...rdAuditUpdate(),
-      });
+      for (const req of selectedReqs) {
+        await upsertRequirement.mutateAsync({
+          ...req,
+          status: 'prd_writing',
+          updatedAt: now,
+          ...rdAuditUpdate(),
+        });
+      }
 
       toast.success('PRD生成成功');
       setShowGenerateDialog(false);
       setGeneratedContent('');
-      setSelectedRequirement('');
+      setSelectedRequirementIds([]);
       setReferencePrdId('');
       resetPrdSupplementaryState(
         setUploadedSupplementaryDocs,
@@ -866,7 +929,7 @@ const PRDPage: React.FC = () => {
             setShowGenerateDialog(open);
             if (!open) {
               setGeneratedContent('');
-              setSelectedRequirement('');
+              setSelectedRequirementIds([]);
               setPrdPreviewTab('edit');
               setReferencePrdId('');
               resetPrdSupplementaryState(
@@ -884,46 +947,97 @@ const PRDPage: React.FC = () => {
                 AI生成PRD
               </DialogTitle>
               <DialogDescription>
-                选择待编写 PRD 的需求；可选引用同产品已有 PRD，并上传多份参考文档（.txt / .md），生成时将综合引用全部材料。
+                可多选同一产品下的多条需求，合并生成一份 PRD（各需求功能分段落区分，产品公共设计合并）；可选引用同产品已有 PRD，并上传参考文档（.txt / .md）。
               </DialogDescription>
             </DialogHeader>
 
             <div className="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto py-3 sm:py-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">选择需求</label>
-                <Select 
-                  value={selectedRequirement} 
-                  onValueChange={setSelectedRequirement}
-                  disabled={generating}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="请选择要生成PRD的需求" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableRequirements.map((req) => (
-                      <SelectItem key={req.id} value={req.id}>
-                        <div className="flex items-center gap-2">
-                          <span>{req.title}</span>
-                          <Badge variant="outline" className="text-xs">
-                            {req.priority}
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
-                    {availableRequirements.length === 0 && (
-                      <SelectItem value="" disabled>
-                        暂无可用需求
-                      </SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-                {selectedRequirement && (
-                  <p className="line-clamp-2 text-xs text-muted-foreground leading-relaxed">
-                    {stripHtmlTags(
-                      requirements.find((r) => r.id === selectedRequirement)?.description ?? ''
-                    )}
+                <label className="text-sm font-medium">选择需求（可多选，须同一产品）</label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      disabled={generating || selectableRequirements.length === 0}
+                      className="h-auto min-h-10 w-full justify-between font-normal"
+                    >
+                      <span className="flex flex-1 flex-wrap items-center gap-1.5 text-left">
+                        {selectedRequirements.length === 0 ? (
+                          <span className="text-muted-foreground">
+                            {selectableRequirements.length === 0
+                              ? '暂无可用需求'
+                              : '请选择要生成 PRD 的需求'}
+                          </span>
+                        ) : (
+                          selectedRequirements.map((req) => (
+                            <Badge key={req.id} variant="secondary" className="font-normal">
+                              {req.title}
+                              <span className="ml-1 text-muted-foreground">{req.priority}</span>
+                            </Badge>
+                          ))
+                        )}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                    <ScrollArea className="max-h-64">
+                      <ul className="p-1">
+                        {selectableRequirements.map((req) => {
+                          const checked = selectedRequirementIds.includes(req.id);
+                          return (
+                            <li key={req.id}>
+                              <button
+                                type="button"
+                                className={cn(
+                                  'flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent',
+                                  checked && 'bg-accent/60'
+                                )}
+                                disabled={generating}
+                                onClick={() => toggleRequirementSelection(req.id)}
+                              >
+                                <Checkbox
+                                  checked={checked}
+                                  className="mt-0.5"
+                                  tabIndex={-1}
+                                  aria-hidden
+                                />
+                                <span className="min-w-0 flex-1">
+                                  <span className="font-medium">{req.title}</span>
+                                  <Badge variant="outline" className="ml-2 text-xs">
+                                    {req.priority}
+                                  </Badge>
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                        {selectableRequirements.length === 0 && (
+                          <li className="px-3 py-4 text-center text-sm text-muted-foreground">
+                            暂无可用需求
+                          </li>
+                        )}
+                      </ul>
+                    </ScrollArea>
+                  </PopoverContent>
+                </Popover>
+                {selectedRequirements.length > 0 && (
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    已选 {selectedRequirements.length} 条
+                    {productKey ? ` · 产品：${productLabel || productKey}` : ' · 未绑定产品'}
                   </p>
                 )}
+                {selectedRequirements.map((req) => (
+                  <p
+                    key={req.id}
+                    className="line-clamp-2 border-l-2 border-primary/30 pl-2 text-xs leading-relaxed text-muted-foreground"
+                  >
+                    <span className="font-medium text-foreground/90">{req.title}：</span>
+                    {stripHtmlTags(req.description ?? '')}
+                  </p>
+                ))}
               </div>
 
               <div className="space-y-3 rounded-lg border border-border bg-muted/15 p-3 sm:p-4">
@@ -935,13 +1049,13 @@ const PRDPage: React.FC = () => {
                   引用同产品已有 PRD 的正文，或上传多份参考文档 / 粘贴补充说明；所有材料将随原始需求一并送入模型，生成时须综合引用。
                 </p>
 
-                {selectedRequirement && !productKey && (
+                {selectedRequirementIds.length > 0 && !productKey && (
                   <p className="text-xs text-amber-700 dark:text-amber-400/90 leading-relaxed">
                     当前需求未设置「所属产品」，无法列出同产品 PRD。可在需求详情中补充产品后重试；您仍可仅使用下方用户文档作为补充输入。
                   </p>
                 )}
 
-                {selectedRequirement && productKey && (
+                {selectedRequirementIds.length > 0 && productKey && (
                   <p className="text-xs text-muted-foreground">
                     当前产品：{productLabel || productKey}
                   </p>
@@ -1124,7 +1238,7 @@ const PRDPage: React.FC = () => {
                 onClick={() => {
                   setShowGenerateDialog(false);
                   setGeneratedContent('');
-                  setSelectedRequirement('');
+                  setSelectedRequirementIds([]);
                   setPrdPreviewTab('edit');
                   setReferencePrdId('');
                   resetPrdSupplementaryState(
@@ -1139,7 +1253,7 @@ const PRDPage: React.FC = () => {
               </Button>
               <Button
                 onClick={handleGeneratePRD}
-                disabled={!selectedRequirement || generating}
+                disabled={selectedRequirementIds.length === 0 || generating}
               >
                 {generating ? (
                   <>
