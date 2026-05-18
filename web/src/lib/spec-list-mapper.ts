@@ -22,6 +22,10 @@ export interface ISpecListRow {
     completedIntegrations: number;
   };
   machineReadableJson: boolean;
+  /** 无结构化 FS 条目时，用 Markdown 正文推断列表进度 */
+  fsMarkdownPresent: boolean;
+  /** 无结构化 TS 字段时，用 Markdown 正文推断列表进度 */
+  tsMarkdownPresent: boolean;
   status: ISpecification['status'];
   updatedAt: string;
   reviews?: ISpecification['reviews'];
@@ -58,6 +62,8 @@ export function specificationToListRow(spec: ISpecification, prdTitle: string, r
       completedIntegrations: tp,
     },
     machineReadableJson: Boolean(spec.machineReadableJson?.trim()),
+    fsMarkdownPresent: Boolean(spec.fsMarkdown?.trim()),
+    tsMarkdownPresent: Boolean(spec.tsMarkdown?.trim()),
     status: spec.status,
     updatedAt: spec.updatedAt,
     reviews: spec.reviews,

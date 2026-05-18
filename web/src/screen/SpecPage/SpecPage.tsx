@@ -69,17 +69,27 @@ const SpecPage: React.FC = () => {
   const [conflicts, setConflicts] = useState<IConflictResult[]>([]);
 
   const getFSProgress = (spec: ISpecListRow) => {
-    const total = spec.functionalSpec.apis + spec.functionalSpec.uiComponents + spec.functionalSpec.interactions;
-    const completed = spec.functionalSpec.completedApis + spec.functionalSpec.completedUi + spec.functionalSpec.completedInteractions;
+    const total =
+      spec.functionalSpec.apis +
+      spec.functionalSpec.uiComponents +
+      spec.functionalSpec.interactions;
+    if (total === 0) {
+      return spec.fsMarkdownPresent ? 100 : 0;
+    }
+    const completed =
+      spec.functionalSpec.completedApis +
+      spec.functionalSpec.completedUi +
+      spec.functionalSpec.completedInteractions;
     return Math.round((completed / total) * 100);
   };
 
   const getTSProgress = (spec: ISpecListRow) => {
     let completed = 0;
-    let total = 3;
+    const total = 3;
     if (spec.technicalSpec.databaseSchema) completed++;
     if (spec.technicalSpec.architecture) completed++;
-    completed += spec.technicalSpec.completedIntegrations > 0 ? 1 : 0;
+    if (spec.technicalSpec.completedIntegrations > 0) completed++;
+    if (completed === 0 && spec.tsMarkdownPresent) return 100;
     return Math.round((completed / total) * 100);
   };
 
