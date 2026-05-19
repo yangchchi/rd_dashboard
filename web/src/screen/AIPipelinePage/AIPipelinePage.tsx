@@ -1174,37 +1174,31 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                     </Button>
                   ) : undefined
                 }
-                footer={
-                  isDetail && !tasksLoading && selectedTask ? (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      返回交付引擎可查看或创建其他流水线。
-                    </p>
-                  ) : undefined
-                }
+                
               />
             </div>
-            <div className="flex shrink-0 flex-col items-stretch gap-3 sm:items-end">
-              {isList ? (
+            {isList ? (
+              <div className="flex shrink-0 flex-col items-stretch gap-3 sm:items-end">
                 <Button onClick={() => setIsCreateDialogOpen(true)} className="shrink-0 shadow-sm sm:mt-0">
                   <Plus className="size-4 mr-2" />
                   创建流水线
                 </Button>
-              ) : null}
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-                <div className="flex items-center gap-1">
-                  <div className="h-2 w-2 animate-pulse-dot rounded-full bg-purple-500" />
-                  <span>运行中: {pipelineBoardStats.running}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="h-2 w-2 rounded-full bg-green-500" />
-                  <span>已完成: {pipelineBoardStats.completed}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="h-2 w-2 rounded-full bg-red-500" />
-                  <span>失败: {pipelineBoardStats.failed}</span>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-1">
+                    <div className="h-2 w-2 animate-pulse-dot rounded-full bg-purple-500" />
+                    <span>运行中: {pipelineBoardStats.running}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="h-2 w-2 rounded-full bg-green-500" />
+                    <span>已完成: {pipelineBoardStats.completed}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="h-2 w-2 rounded-full bg-red-500" />
+                    <span>失败: {pipelineBoardStats.failed}</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : null}
           </div>
         </section>
 
@@ -1627,7 +1621,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                 </div>
               </TabsContent>
 
-              <TabsContent value="agent" className="mt-4">
+              <TabsContent value="agent" className={cn('mt-4', activeTab !== 'agent' && 'hidden')} forceMount>
                 <AgentWorkbenchPanel
                   task={selectedTask}
                   operatorName={currentProfile?.name || currentProfile?.email || 'unknown'}

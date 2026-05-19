@@ -338,33 +338,40 @@ const PRDPage: React.FC = () => {
     );
   }, [prds, requirements]);
 
-  /** 已选首个需求后，仅展示同产品下的其它可选需求 */
-  const selectableRequirements = useMemo(() => {
-    if (!anchorRequirement) return availableRequirements;
-    return availableRequirements.filter((req) =>
-      requirementsMatchProduct(anchorRequirement, req)
-    );
-  }, [availableRequirements, anchorRequirement]);
+  const formatRequirementProductLabel = (req: IRequirement) => {
+    const key = requirementProductKey(req);
+    if (!key) return '未绑定产品';
+    const p = products.find((x) => x.id === key);
+    return p ? `${p.name}（${p.identifier || p.code || p.id}）` : key;
+  };
 
-  /** 弹窗打开时默认选中列表第一项；异步加载后剔除不可用项 */
+  const isRequirementSelectableInDialog = (req: IRequirement) => {
+    if (!anchorRequirement) return true;
+    return requirementsMatchProduct(anchorRequirement, req);
+  };
+
+  /** 弹窗首次打开时默认选中第一项；异步加载后仅剔除不可用项，不强制回填已清空的选择 */
+  const generateDialogBootstrappedRef = useRef(false);
   useEffect(() => {
-    if (!showGenerateDialog) return;
-    const firstId = availableRequirements[0]?.id ?? '';
-    if (!firstId) {
-      if (selectedRequirementIds.length > 0) setSelectedRequirementIds([]);
+    if (!showGenerateDialog) {
+      generateDialogBootstrappedRef.current = false;
       return;
     }
-    const validIds = selectedRequirementIds.filter((id) =>
-      availableRequirements.some((r) => r.id === id)
-    );
-    if (validIds.length === 0) {
-      setSelectedRequirementIds([firstId]);
-      return;
-    }
-    if (validIds.length !== selectedRequirementIds.length) {
-      setSelectedRequirementIds(validIds);
-    }
-  }, [showGenerateDialog, availableRequirements, selectedRequirementIds]);
+    setSelectedRequirementIds((prev) => {
+      const validIds = prev.filter((id) =>
+        availableRequirements.some((r) => r.id === id)
+      );
+      if (validIds.length > 0) {
+        return validIds.length !== prev.length ? validIds : prev;
+      }
+      if (!generateDialogBootstrappedRef.current) {
+        generateDialogBootstrappedRef.current = true;
+        const firstId = availableRequirements[0]?.id;
+        return firstId ? [firstId] : [];
+      }
+      return prev;
+    });
+  }, [showGenerateDialog, availableRequirements]);
 
   const toggleRequirementSelection = (reqId: string) => {
     const req = requirements.find((r) => r.id === reqId);
@@ -960,21 +967,39 @@ const PRDPage: React.FC = () => {
                       type="button"
                       variant="outline"
                       role="combobox"
-                      disabled={generating || selectableRequirements.length === 0}
+                      disabled={generating || availableRequirements.length === 0}
                       className="h-auto min-h-10 w-full justify-between font-normal"
                     >
                       <span className="flex flex-1 flex-wrap items-center gap-1.5 text-left">
                         {selectedRequirements.length === 0 ? (
                           <span className="text-muted-foreground">
-                            {selectableRequirements.length === 0
+                            {availableRequirements.length === 0
                               ? '暂无可用需求'
                               : '请选择要生成 PRD 的需求'}
                           </span>
                         ) : (
                           selectedRequirements.map((req) => (
-                            <Badge key={req.id} variant="secondary" className="font-normal">
+                            <Badge
+                              key={req.id}
+                              variant="secondary"
+                              className="gap-1 pr-1 font-normal"
+                            >
                               {req.title}
-                              <span className="ml-1 text-muted-foreground">{req.priority}</span>
+                              <span className="text-muted-foreground">{req.priority}</span>
+                              <button
+                                type="button"
+                                className="rounded-sm p-0.5 hover:bg-muted-foreground/20"
+                                disabled={generating}
+                                aria-label={`取消选择 ${req.title}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedRequirementIds((prev) =>
+                                    prev.filter((id) => id !== req.id)
+                                  );
+                                }}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
                             </Badge>
                           ))
                         )}
@@ -985,22 +1010,26 @@ const PRDPage: React.FC = () => {
                   <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
                     <ScrollArea className="max-h-64">
                       <ul className="p-1">
-                        {selectableRequirements.map((req) => {
+                        {availableRequirements.map((req) => {
                           const checked = selectedRequirementIds.includes(req.id);
+                          const selectable = isRequirementSelectableInDialog(req);
+                          const rowDisabled = generating || (!selectable && !checked);
                           return (
                             <li key={req.id}>
                               <button
                                 type="button"
                                 className={cn(
                                   'flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent',
-                                  checked && 'bg-accent/60'
+                                  checked && 'bg-accent/60',
+                                  rowDisabled &&
+                                    'cursor-not-allowed opacity-50 hover:bg-transparent'
                                 )}
-                                disabled={generating}
+                                disabled={rowDisabled}
                                 onClick={() => toggleRequirementSelection(req.id)}
                               >
                                 <Checkbox
                                   checked={checked}
-                                  className="mt-0.5"
+                                  className="mt-0.5 pointer-events-none"
                                   tabIndex={-1}
                                   aria-hidden
                                 />
@@ -1009,12 +1038,16 @@ const PRDPage: React.FC = () => {
                                   <Badge variant="outline" className="ml-2 text-xs">
                                     {req.priority}
                                   </Badge>
+                                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                                    {formatRequirementProductLabel(req)}
+                                    {!selectable && !checked ? ' · 与已选需求产品不一致' : ''}
+                                  </span>
                                 </span>
                               </button>
                             </li>
                           );
                         })}
-                        {selectableRequirements.length === 0 && (
+                        {availableRequirements.length === 0 && (
                           <li className="px-3 py-4 text-center text-sm text-muted-foreground">
                             暂无可用需求
                           </li>
