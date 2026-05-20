@@ -23,7 +23,11 @@ import type {
   IPipelineTestRunRecord,
   IPrd,
   IProduct,
+  IProductBaseline,
+  IProductCapability,
   IRequirement,
+  IRequirementImpactPreview,
+  RequirementChangeType,
   IRequirementFlowEvent,
   ITaskAcceptanceRecord,
   ISpecification,
@@ -31,6 +35,7 @@ import type {
   ISiteMessage,
 } from './rd-types';
 import { getAuthToken } from './auth';
+import { normalizeRequirementChangeType } from '@shared/product-baseline';
 
 const BASE = '/api/rd';
 
@@ -90,6 +95,61 @@ function mapProduct(p: Record<string, unknown>): IProduct {
   };
 }
 
+function mapProductCapability(c: Record<string, unknown>): IProductCapability {
+  const ifaceRaw = c.interfaces;
+  let interfaces: IProductCapability['interfaces'] = [];
+  if (Array.isArray(ifaceRaw)) {
+    interfaces = ifaceRaw
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const row = item as Record<string, unknown>;
+        const kind = row.kind;
+        const ref = row.ref;
+        if (
+          (kind === 'api' || kind === 'route' || kind === 'event') &&
+          typeof ref === 'string' &&
+          ref.trim()
+        ) {
+          return { kind: kind as 'api' | 'route' | 'event', ref: ref.trim() };
+        }
+        return null;
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+  }
+  return {
+    id: String(c.id),
+    productId: String(c.productId || c.product_id),
+    baselineId: String(c.baselineId || c.baseline_id),
+    baselineVersion: String(c.baselineVersion || c.baseline_version || ''),
+    domain: String(c.domain || ''),
+    name: String(c.name || ''),
+    description: String(c.description || ''),
+    interfaces,
+    source: (String(c.source || 'manual') as IProductCapability['source']) || 'manual',
+    sourceRef: (c.sourceRef as string) || (c.source_ref as string) || undefined,
+    sortOrder: Number(c.sortOrder ?? c.sort_order ?? 0),
+  };
+}
+
+function mapProductBaseline(b: Record<string, unknown>): IProductBaseline {
+  const capsRaw = b.capabilities;
+  const capabilities = Array.isArray(capsRaw)
+    ? capsRaw.map((c) => mapProductCapability(c as Record<string, unknown>))
+    : undefined;
+  return {
+    id: String(b.id),
+    productId: String(b.productId || b.product_id),
+    version: String(b.version),
+    gitRef: String(b.gitRef || b.git_ref),
+    gitUrl: (b.gitUrl as string) || (b.git_url as string) || undefined,
+    asBuiltMarkdown: String(b.asBuiltMarkdown || b.as_built_markdown || ''),
+    notes: (b.notes as string) || undefined,
+    capabilities,
+    frozenAt: String(b.frozenAt || b.frozen_at),
+    frozenBy: (b.frozenBy as string) || (b.frozen_by as string) || undefined,
+  };
+}
+
 function mapRequirement(r: Record<string, unknown>): IRequirement {
   const bountyRaw = r.bountyPoints ?? r.bounty_points;
   const bountyNum =
@@ -125,6 +185,9 @@ function mapRequirement(r: Record<string, unknown>): IRequirement {
       const p = r.product != null ? String(r.product).trim() : '';
       return p || undefined;
     })(),
+    productId: (r.productId as string) || (r.product_id as string) || undefined,
+    changeType: normalizeRequirementChangeType(r.changeType ?? r.change_type),
+    baselineId: (r.baselineId as string) || (r.baseline_id as string) || undefined,
     bountyPoints,
     pmCoins,
     tmCoins,
@@ -845,6 +908,7 @@ export const rdApi = {
     prdId?: string | null;
     specId?: string | null;
     pipelineRunId?: string | null;
+    baselineId?: string | null;
     createdBy?: string | null;
   }): Promise<IContextPack> {
     const raw = await json<Record<string, unknown>>('/context-packs', {
@@ -886,6 +950,54 @@ export const rdApi = {
 
   async deleteProduct(id: string): Promise<void> {
     await json(`/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+
+  async listProductBaselines(productId: string): Promise<IProductBaseline[]> {
+    const rows = await json<Record<string, unknown>[]>(
+      `/products/${encodeURIComponent(productId)}/baselines`,
+    );
+    return rows.map(mapProductBaseline);
+  },
+
+  async getProductBaseline(productId: string, baselineId: string): Promise<IProductBaseline | null> {
+    const row = await json<Record<string, unknown> | null>(
+      `/products/${encodeURIComponent(productId)}/baselines/${encodeURIComponent(baselineId)}`,
+    );
+    return row ? mapProductBaseline(row) : null;
+  },
+
+  async createProductBaseline(
+    productId: string,
+    body: {
+      id?: string;
+      version: string;
+      gitRef: string;
+      gitUrl?: string | null;
+      asBuiltMarkdown?: string;
+      notes?: string | null;
+      frozenBy?: string | null;
+      capabilities?: Array<{
+        domain?: string;
+        name: string;
+        description?: string;
+        interfaces?: IProductCapability['interfaces'];
+        source?: IProductCapability['source'];
+        sourceRef?: string;
+        sortOrder?: number;
+      }>;
+    },
+  ): Promise<IProductBaseline> {
+    const raw = await json<Record<string, unknown>>(
+      `/products/${encodeURIComponent(productId)}/baselines`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    return mapProductBaseline(raw);
+  },
+
+  async getRequirementImpactPreview(requirementId: string): Promise<IRequirementImpactPreview> {
+    return json<IRequirementImpactPreview>(
+      `/requirements/${encodeURIComponent(requirementId)}/impact-preview`,
+    );
   },
 
   async listBountyTasks(): Promise<IBountyTask[]> {

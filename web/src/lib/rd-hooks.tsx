@@ -1,3 +1,5 @@
+'use client';
+
 import {
   useMutation,
   useQuery,
@@ -20,6 +22,7 @@ import type {
   IPipelineStepRun,
   IPipelineTask,
   IPrd,
+  IProductBaseline,
   IRequirement,
   IRequirementFlowEvent,
   ISpecification,
@@ -52,6 +55,8 @@ export const rdKeys = {
     ['rd', 'agent-workspaces', workspaceId ?? '', 'source-file', path ?? ''] as const,
   contextPacks: ['rd', 'context-packs'] as const,
   products: ['rd', 'products'] as const,
+  productBaselines: (productId: string | undefined) =>
+    ['rd', 'products', productId ?? '', 'baselines'] as const,
   bountyTasks: ['rd', 'bounty-tasks'] as const,
   bountyHuntTasks: ['rd', 'bounty-hunt-tasks'] as const,
 };
@@ -67,6 +72,27 @@ export function useProductsList() {
   return useQuery({
     queryKey: rdKeys.products,
     queryFn: () => rdApi.listProducts(),
+  });
+}
+
+export function useProductBaselinesList(productId: string | undefined) {
+  return useQuery<IProductBaseline[]>({
+    queryKey: rdKeys.productBaselines(productId),
+    queryFn: () => (productId ? rdApi.listProductBaselines(productId) : Promise.resolve([])),
+    enabled: Boolean(productId),
+  });
+}
+
+export function useCreateProductBaseline(productId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Parameters<typeof rdApi.createProductBaseline>[1]) => {
+      if (!productId) throw new Error('productId required');
+      return rdApi.createProductBaseline(productId, body);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rdKeys.productBaselines(productId) });
+    },
   });
 }
 
@@ -746,6 +772,7 @@ export function useCreateContextPack() {
       prdId?: string | null;
       specId?: string | null;
       pipelineRunId?: string | null;
+      baselineId?: string | null;
       createdBy?: string | null;
     }) => rdApi.createContextPack(body),
     onSuccess: (pack: IContextPack) => {

@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useCurrentUserProfile } from '@/hooks/useCurrentUserProfile';
 import { capabilityClient } from '@/lib/capability-client';
 import { toast } from 'sonner';
@@ -41,9 +41,15 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
-import type { IRequirement, IUser, IProduct } from '@/lib/rd-types';
+import type { IRequirement, IUser, IProduct, RequirementChangeType } from '@/lib/rd-types';
+import {
+  isBrownfieldChangeType,
+  REQUIREMENT_CHANGE_TYPE_HINTS,
+  REQUIREMENT_CHANGE_TYPE_LABELS,
+  REQUIREMENT_CHANGE_TYPE_OPTIONS,
+} from '@/lib/rd-types';
+import { useProductBaselinesList, useUpsertRequirement } from '@/lib/rd-hooks';
 import { authApi } from '@/lib/auth-api';
-import { useUpsertRequirement } from '@/lib/rd-hooks';
 import { rdAuditCreate } from '@/lib/rd-actor';
 import { rdApi } from '@/lib/rd-api';
 import {
@@ -98,6 +104,7 @@ function difficultyFromCoins(coins: number): 'normal' | 'hard' | 'epic' {
 
 const RequirementInputPage: React.FC = () => {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const userInfo = useCurrentUserProfile();
   const upsertRequirement = useUpsertRequirement();
@@ -106,18 +113,27 @@ const RequirementInputPage: React.FC = () => {
   const [description, setDescription] = useState('');
   const [expectedDate, setExpectedDate] = useState<Date>(() => defaultExpectedDate());
   const [priority, setPriority] = useState<string>('P1');
+  const [changeType, setChangeType] = useState<RequirementChangeType>(
+    () => (searchParams.get('changeType') as RequirementChangeType) || 'greenfield',
+  );
   const [product, setProduct] = useState('');
+  const [productId, setProductId] = useState(() => searchParams.get('productId') || '');
+  const [baselineId, setBaselineId] = useState(() => searchParams.get('baselineId') || '');
   const [pmCandidateUserId, setPmCandidateUserId] = useState<string>('');
   const [tmCandidateUserId, setTmCandidateUserId] = useState<string>('');
   const [users, setUsers] = useState<IUser[]>([]);
   const [products, setProducts] = useState<IProduct[]>([]);
   const [productComboOpen, setProductComboOpen] = useState(false);
   const [productSearch, setProductSearch] = useState('');
+  const [baselineComboOpen, setBaselineComboOpen] = useState(false);
+  const [baselineSearch, setBaselineSearch] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAiAssistant, setShowAiAssistant] = useState(false);
   const [rewardCoins, setRewardCoins] = useState<number[]>([PRIORITY_BOUNTY_MAP.P1]);
   const [syncBounty, setSyncBounty] = useState(true);
+
+  const { data: baselines = [] } = useProductBaselinesList(productId || undefined);
   const [bountyEdited, setBountyEdited] = useState(false);
 
   const recommendedBounty = PRIORITY_BOUNTY_MAP[priority] ?? PRIORITY_BOUNTY_MAP.P1;
@@ -140,6 +156,21 @@ const RequirementInputPage: React.FC = () => {
     if (!q) return products;
     return products.filter((p) => p.name.toLowerCase().includes(q));
   }, [products, productSearch]);
+
+  const filteredBaselines = useMemo(() => {
+    const q = baselineSearch.trim().toLowerCase();
+    if (!q) return baselines;
+    return baselines.filter(
+      (b) =>
+        b.version.toLowerCase().includes(q) || b.gitRef.toLowerCase().includes(q),
+    );
+  }, [baselines, baselineSearch]);
+
+  const selectedBaselineLabel = useMemo(() => {
+    const bl = baselines.find((b) => b.id === baselineId);
+    if (!bl) return '';
+    return `${bl.version} (${bl.gitRef.slice(0, 8)})`;
+  }, [baselines, baselineId]);
 
   const pmUsers = useMemo(() => {
     const seen = new Set<string>();
@@ -252,7 +283,17 @@ const RequirementInputPage: React.FC = () => {
     }
   };
 
-  const resolveProductNameForSave = async (): Promise<string | undefined> => {
+  const resolveProductForSave = async (): Promise<{ name: string; id: string } | undefined> => {
+    if (productId.trim()) {
+      const hit = products.find((p) => p.id === productId);
+      if (hit) return { name: hit.name, id: hit.id };
+      try {
+        const p = await rdApi.getProduct(productId);
+        if (p) return { name: p.name, id: p.id };
+      } catch {
+        /* ignore */
+      }
+    }
     const raw = product.trim();
     if (!raw) return undefined;
     let list = products;
@@ -265,9 +306,10 @@ const RequirementInputPage: React.FC = () => {
       }
     }
     const hit = list.find((p) => p.name.trim().toLowerCase() === raw.toLowerCase());
-    if (hit) return hit.name;
+    if (hit) return { name: hit.name, id: hit.id };
+    const newId = newProductId();
     await rdApi.upsertProduct({
-      id: newProductId(),
+      id: newId,
       name: raw,
       identifier: deriveProductIdentifierFromName(raw),
       description: '',
@@ -280,8 +322,18 @@ const RequirementInputPage: React.FC = () => {
     } catch {
       /* ignore */
     }
-    return raw;
+    return { name: raw, id: newId };
   };
+
+  useEffect(() => {
+    const pid = searchParams.get('productId');
+    if (!pid || products.length === 0) return;
+    const hit = products.find((p) => p.id === pid);
+    if (hit) {
+      setProductId(hit.id);
+      setProduct(hit.name);
+    }
+  }, [searchParams, products]);
 
   const handleSubmit = async () => {
     if (!title.trim()) {
@@ -304,18 +356,30 @@ const RequirementInputPage: React.FC = () => {
       toast.error('请选择业务优先级');
       return;
     }
+    if (isBrownfieldChangeType(changeType) && !baselineId.trim()) {
+      toast.error('存量改动类需求须选择产品基线');
+      return;
+    }
     const bounty = syncBounty ? bountyPoints : 0;
 
     setIsSubmitting(true);
 
     try {
-      const productResolved = await resolveProductNameForSave();
+      const productResolved = await resolveProductForSave();
+      if (!productResolved) {
+        toast.error('请选择或填写所属产品');
+        setIsSubmitting(false);
+        return;
+      }
 
       const requirement: IRequirement = {
         id: `req_${Date.now()}`,
         title: title.trim(),
         description: description.trim(),
-        product: productResolved,
+        product: productResolved.name,
+        productId: productResolved.id,
+        changeType,
+        baselineId: isBrownfieldChangeType(changeType) ? baselineId.trim() : undefined,
         bountyPoints: bounty,
         pmCandidateUserId: pmCandidateUserId.trim() || undefined,
         tmCandidateUserId: tmCandidateUserId.trim() || undefined,
@@ -481,6 +545,41 @@ const RequirementInputPage: React.FC = () => {
             <CardContent className="space-y-6">
               <div className="space-y-2">
                 <Label>
+                  变更类型 <RequiredMark />
+                </Label>
+                <Select
+                  value={changeType}
+                  onValueChange={(v) => {
+                    setChangeType(v as RequirementChangeType);
+                    if (v === 'greenfield') setBaselineId('');
+                  }}
+                >
+                  <SelectTrigger className="h-10 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REQUIREMENT_CHANGE_TYPE_OPTIONS.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {REQUIREMENT_CHANGE_TYPE_LABELS[value]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {REQUIREMENT_CHANGE_TYPE_HINTS[changeType]}
+                </p>
+              </div>
+
+              <div
+                className={cn(
+                  'grid gap-4',
+                  isBrownfieldChangeType(changeType) && productId
+                    ? 'grid-cols-1 sm:grid-cols-2'
+                    : 'grid-cols-1',
+                )}
+              >
+              <div className="space-y-2 min-w-0">
+                <Label>
                   所属产品 <RequiredMark />
                 </Label>
                 <Popover
@@ -526,6 +625,7 @@ const RequirementInputPage: React.FC = () => {
                                 value={p.id}
                                 onSelect={() => {
                                   setProduct(p.name);
+                                  setProductId(p.id);
                                   setProductComboOpen(false);
                                   setProductSearch('');
                                 }}
@@ -562,6 +662,92 @@ const RequirementInputPage: React.FC = () => {
                 <p className="text-xs text-muted-foreground">
                   必填：从列表选择或检索；若无匹配项可选用输入的名称，提交时将自动创建对应产品。
                 </p>
+                </div>
+
+                {isBrownfieldChangeType(changeType) && productId ? (
+                  <div className="space-y-2 min-w-0">
+                    <Label>
+                      产品基线 <RequiredMark />
+                    </Label>
+                    <Popover
+                      open={baselineComboOpen}
+                      onOpenChange={(open) => {
+                        setBaselineComboOpen(open);
+                        if (open) setBaselineSearch('');
+                      }}
+                    >
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={baselineComboOpen}
+                          disabled={baselines.length === 0}
+                          className="h-10 w-full justify-between px-3 font-normal"
+                        >
+                          <span
+                            className={cn(
+                              'truncate',
+                              !selectedBaselineLabel && 'text-muted-foreground',
+                            )}
+                          >
+                            {selectedBaselineLabel ||
+                              (baselines.length ? '选择基线版本' : '请先冻结产品基线')}
+                          </span>
+                          <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        className="w-[var(--radix-popover-trigger-width)] p-0"
+                        align="start"
+                      >
+                        <Command shouldFilter={false}>
+                          <CommandInput
+                            placeholder="搜索基线版本或 Git 引用..."
+                            value={baselineSearch}
+                            onValueChange={setBaselineSearch}
+                          />
+                          <CommandList>
+                            <CommandGroup heading="基线列表">
+                              {filteredBaselines.length === 0 ? (
+                                <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+                                  {baselines.length === 0
+                                    ? '暂无基线，请先在产品 Hub 冻结一版'
+                                    : '无匹配结果，请调整搜索'}
+                                </div>
+                              ) : (
+                                filteredBaselines.map((bl) => (
+                                  <CommandItem
+                                    key={bl.id}
+                                    value={bl.id}
+                                    onSelect={() => {
+                                      setBaselineId(bl.id);
+                                      setBaselineComboOpen(false);
+                                      setBaselineSearch('');
+                                    }}
+                                  >
+                                    <Check
+                                      className={cn(
+                                        'mr-2 size-4 shrink-0',
+                                        baselineId === bl.id ? 'opacity-100' : 'opacity-0',
+                                      )}
+                                    />
+                                    <span className="truncate">
+                                      {bl.version} ({bl.gitRef.slice(0, 8)})
+                                    </span>
+                                  </CommandItem>
+                                ))
+                              )}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                    <p className="text-xs text-muted-foreground">
+                      必填：选择该产品已冻结的基线版本。
+                    </p>
+                  </div>
+                ) : null}
               </div>
 
               <div className="space-y-2">

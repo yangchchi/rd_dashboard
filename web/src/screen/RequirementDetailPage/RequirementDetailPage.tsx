@@ -34,7 +34,9 @@ import {
   useAcceptanceRecords,
   usePipelineTasksList,
   useProductsList,
+  useProductBaselinesList,
 } from '@/lib/rd-hooks';
+import { formatRequirementChangeBadge } from '@/lib/requirement-change-present';
 import type {
   IAcceptanceRecord,
   IPipelineTask,
@@ -123,6 +125,11 @@ const RequirementDetailPage: React.FC = () => {
   const { data: pipelineTasksData } = usePipelineTasksList();
   const { data: flowEventsData } = useRequirementFlowEvents(id);
   const { data: products = [] } = useProductsList();
+  const { data: productBaselines = [] } = useProductBaselinesList(requirement?.productId);
+  const linkedBaseline = React.useMemo(
+    () => productBaselines.find((b) => b.id === requirement?.baselineId),
+    [productBaselines, requirement?.baselineId],
+  );
   const prds = prdsData ?? EMPTY_PRDS;
   const specs = specsData ?? EMPTY_SPECS;
   const acceptanceRecords = acceptanceData ?? EMPTY_ACCEPTANCE;
@@ -330,6 +337,9 @@ const RequirementDetailPage: React.FC = () => {
                 <Badge className={`${statusInfo.bgColor} ${statusInfo.color} border-0 flex items-center gap-1`}>
                   <StatusIcon className="size-3" />
                   {statusInfo.label}
+                </Badge>
+                <Badge variant="outline" className="text-xs">
+                  {formatRequirementChangeBadge(requirement, linkedBaseline)}
                 </Badge>
                 {tags?.map((tag) => (
                   <Badge key={tag} variant="secondary" className="text-xs">

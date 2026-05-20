@@ -1,3 +1,5 @@
+import type { RequirementChangeType } from '@shared/product-baseline';
+
 export type RequirementStatus =
   | 'backlog'
   | 'prd_writing'
@@ -11,6 +13,22 @@ export type Role = 'stakeholder' | 'pm' | 'tm';
 export type ReviewStatus = 'draft' | 'reviewing' | 'approved' | 'rejected';
 export type SpecStatus = 'draft' | 'reviewing' | 'approved';
 export type { OrgSpecLanguage, IOrgLanguageSpec, IOrganizationSpecConfig } from '@shared/org-spec-defaults';
+export type {
+  RequirementChangeType,
+  ProductCapabilitySource,
+  ProductCapabilityInterfaceKind,
+  IProductCapability,
+  IProductCapabilityInterface,
+  IProductBaseline,
+  IRequirementImpactPreview,
+} from '@shared/product-baseline';
+export {
+  REQUIREMENT_CHANGE_TYPE_LABELS,
+  REQUIREMENT_CHANGE_TYPE_HINTS,
+  REQUIREMENT_CHANGE_TYPE_OPTIONS,
+  isBrownfieldChangeType,
+  normalizeRequirementChangeType,
+} from '@shared/product-baseline';
 
 export interface IAiSkillConfig {
   id: string;
@@ -98,8 +116,14 @@ export interface IRequirement {
   title: string;
   description: string;
   sketchUrl?: string;
-  /** 所属产品 */
+  /** 所属产品（展示名，与产品主数据 name 对齐） */
   product?: string;
+  /** 所属产品主数据 ID */
+  productId?: string;
+  /** 变更类型：greenfield | enhancement | defect | refactor */
+  changeType?: RequirementChangeType;
+  /** Brownfield 时引用的产品基线 */
+  baselineId?: string;
   /** 金币总数（提交人设定，PM/TM 按份额分配） */
   bountyPoints?: number;
   /** 产品经理份额 */

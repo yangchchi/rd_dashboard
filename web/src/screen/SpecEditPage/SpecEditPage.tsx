@@ -53,6 +53,14 @@ import {
 import { toast } from 'sonner';
 import { formatSpecValidationIssues, validateSpecForReview } from '@shared/spec-validation';
 import type { IRequirement } from '@/lib/rd-types';
+import { isBrownfieldChangeType } from '@/lib/rd-types';
+import { rdApi } from '@/lib/rd-api';
+import {
+  buildDeltaFsTemplate,
+  DELTA_FS_GENERATION_HINT,
+  DELTA_TS_GENERATION_HINT,
+} from '@shared/spec-delta-template';
+import { buildCpDeltaPreamble, CP_DELTA_READ_BASELINE_STEP } from '@shared/cp-delta-template';
 import { formatPrdListTitle, formatProductDashRequirementTitle } from '@/lib/prd-display-title';
 interface IApiDef {
   path: string;
@@ -359,6 +367,26 @@ const SpecEditPage: React.FC = () => {
     [linkedPrd, requirement, allProducts]
   );
 
+  const brownfieldRequirement = linkedReq ?? requirement;
+  const isBrownfieldSpec = Boolean(
+    brownfieldRequirement && isBrownfieldChangeType(brownfieldRequirement.changeType ?? 'greenfield'),
+  );
+
+  const loadBrownfieldBaselineContext = useCallback(async (): Promise<string> => {
+    const req = brownfieldRequirement;
+    if (!req?.productId || !req.baselineId) return '';
+    const bl = await rdApi.getProductBaseline(req.productId, req.baselineId);
+    if (!bl) return '';
+    const md = (bl.asBuiltMarkdown || '').trim();
+    const caps = (bl.capabilities ?? [])
+      .flatMap((c) => (c.interfaces ?? []).map((i) => `${c.domain}/${c.name}: ${i.kind} ${i.ref}`))
+      .slice(0, 40)
+      .join('\n');
+    return [md ? `As-Built:\n${md.slice(0, 5000)}` : '', caps ? `能力接口:\n${caps}` : '']
+      .filter(Boolean)
+      .join('\n\n');
+  }, [brownfieldRequirement]);
+
   useEffect(() => {
     if (isCreateMode) return;
     if (!id) return;
@@ -521,11 +549,40 @@ const SpecEditPage: React.FC = () => {
     setConflictResult('');
     
     try {
+      let existingSystemLogic =
+        '现有系统架构基于微服务设计，使用REST API通信，数据库采用主从架构，支持水平扩展。';
+      if (isBrownfieldSpec && brownfieldRequirement?.productId && brownfieldRequirement.baselineId) {
+        const bl = await rdApi.getProductBaseline(
+          brownfieldRequirement.productId,
+          brownfieldRequirement.baselineId,
+        );
+        const baselineApis = (bl?.capabilities ?? []).flatMap((c) =>
+          (c.interfaces ?? [])
+            .filter((i) => i.kind === 'api' || i.kind === 'route')
+            .map((i) => ({ capability: `${c.domain}/${c.name}`, kind: i.kind, ref: i.ref })),
+        );
+        const deltaApis = (spec.functionalSpec?.apis ?? []).map((a) => ({
+          path: a.path,
+          method: a.method,
+          description: a.description,
+        }));
+        existingSystemLogic = JSON.stringify(
+          {
+            baselineVersion: bl?.version,
+            baselineApis,
+            deltaApis,
+            note: '请检测 Delta 规格与存量基线 API 是否冲突或重复定义',
+          },
+          null,
+          2,
+        );
+      }
+
       const stream = capabilityClient
         .load('conflict_detector_tech_spec_1')
         .callStream('textToJson', {
           tech_spec_content: JSON.stringify(spec, null, 2),
-          existing_system_logic: '现有系统架构基于微服务设计，使用REST API通信，数据库采用主从架构，支持水平扩展。'
+          existing_system_logic: existingSystemLogic,
         });
 
       let result = '';
@@ -544,7 +601,7 @@ const SpecEditPage: React.FC = () => {
     } finally {
       setIsDetectingConflict(false);
     }
-  }, [spec]);
+  }, [spec, isBrownfieldSpec, brownfieldRequirement]);
 
   const handleGenerateFs = useCallback(async () => {
     const prd = linkedPrd ?? (spec.prdId ? ((linkedPrdApi as unknown as IPrd | null) ?? null) : null);
@@ -557,7 +614,13 @@ const SpecEditPage: React.FC = () => {
     try {
       const reqForPrd = allRequirements.find((r) => r.id === prd.requirementId);
       const prdHeading = formatPrdListTitle(reqForPrd as IRequirement | undefined, allProducts, prd.title);
-      const prdDoc = buildPrdDocument(prd, prdHeading);
+      let prdDoc = buildPrdDocument(prd, prdHeading);
+      if (isBrownfieldSpec) {
+        const baselineCtx = await loadBrownfieldBaselineContext();
+        prdDoc = [DELTA_FS_GENERATION_HINT, baselineCtx ? `【产品基线】\n${baselineCtx}` : '', prdDoc]
+          .filter(Boolean)
+          .join('\n\n');
+      }
       const stream = capabilityClient
         .load('fs_auto_generation')
         .callStream<SpecGenerateStreamChunk>('textGenerate', {
@@ -573,6 +636,19 @@ const SpecEditPage: React.FC = () => {
       if (!full.trim()) {
         throw new Error('AI 未返回功能规格内容');
       }
+      if (isBrownfieldSpec && !full.includes('## 基线引用')) {
+        const req = brownfieldRequirement;
+        const bl =
+          req?.productId && req.baselineId
+            ? await rdApi.getProductBaseline(req.productId, req.baselineId)
+            : null;
+        const skeleton = buildDeltaFsTemplate({
+          productName: req?.product || '产品',
+          baselineVersion: bl?.version ?? '—',
+          requirementTitle: req?.title,
+        });
+        full = full.trim() ? `${skeleton}\n\n---\n\n${full.trim()}` : skeleton;
+      }
       updateSpec({ fsMarkdown: full });
       setFsStreamText('');
       toast.success('功能规格（FS）已生成');
@@ -582,7 +658,17 @@ const SpecEditPage: React.FC = () => {
     } finally {
       setGeneratingFs(false);
     }
-  }, [linkedPrd, linkedPrdApi, spec.prdId, updateSpec, allRequirements, allProducts]);
+  }, [
+    linkedPrd,
+    linkedPrdApi,
+    spec.prdId,
+    updateSpec,
+    allRequirements,
+    allProducts,
+    isBrownfieldSpec,
+    brownfieldRequirement,
+    loadBrownfieldBaselineContext,
+  ]);
 
   const handleGenerateTs = useCallback(async () => {
     const fsBody = (spec.fsMarkdown ?? '').trim();
@@ -598,10 +684,17 @@ const SpecEditPage: React.FC = () => {
     setTsStreamText('');
     try {
       const orgText = buildOrgSpecText(orgSpecConfig, selectedLanguages);
+      let functionalSpecInput = fsBody;
+      if (isBrownfieldSpec) {
+        const baselineCtx = await loadBrownfieldBaselineContext();
+        functionalSpecInput = [DELTA_TS_GENERATION_HINT, baselineCtx ? `【产品基线】\n${baselineCtx}` : '', fsBody]
+          .filter(Boolean)
+          .join('\n\n');
+      }
       const stream = capabilityClient
         .load('ts_auto_generation')
         .callStream<SpecGenerateStreamChunk>('textGenerate', {
-          functional_spec: fsBody,
+          functional_spec: functionalSpecInput,
           org_spec: orgText,
         });
       let full = '';
@@ -623,7 +716,14 @@ const SpecEditPage: React.FC = () => {
     } finally {
       setGeneratingTs(false);
     }
-  }, [orgSpecConfig, selectedLanguages, spec.fsMarkdown, updateSpec]);
+  }, [
+    orgSpecConfig,
+    selectedLanguages,
+    spec.fsMarkdown,
+    updateSpec,
+    isBrownfieldSpec,
+    loadBrownfieldBaselineContext,
+  ]);
 
   const handleGenerateCp = useCallback(async () => {
     const fsBody = (spec.fsMarkdown ?? '').trim();
@@ -655,6 +755,14 @@ const SpecEditPage: React.FC = () => {
       if (!full.trim()) {
         throw new Error('AI 未返回编程计划内容');
       }
+      if (isBrownfieldSpec && !full.includes('as-built.md')) {
+        const prdBg = (linkedPrd?.background ?? '').trim();
+        const impactMatch = prdBg.match(/##\s*影响面[\s\S]*?(?=\n##\s|$)/i);
+        const impactSection = impactMatch?.[0];
+        full = `${buildCpDeltaPreamble(impactSection)}\n${full.trim()}`;
+      } else if (!full.includes(CP_DELTA_READ_BASELINE_STEP)) {
+        full = `${buildCpDeltaPreamble()}\n${full.trim()}`;
+      }
       updateSpec({ cpMarkdown: full });
       setCpStreamText('');
       toast.success('编程计划（CP）已生成');
@@ -664,7 +772,7 @@ const SpecEditPage: React.FC = () => {
     } finally {
       setGeneratingCp(false);
     }
-  }, [spec.fsMarkdown, spec.tsMarkdown, updateSpec]);
+  }, [spec.fsMarkdown, spec.tsMarkdown, updateSpec, isBrownfieldSpec, linkedPrd?.background]);
 
   const handleSave = useCallback(() => {
     if (spec.status === 'reviewing' || spec.status === 'approved') {

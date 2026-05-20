@@ -62,6 +62,8 @@ import {
   useCreateAgentSession,
   useCreateContextPack,
   useCreatePipelineRun,
+  useProductBaselinesList,
+  useRequirement,
   useExecuteAgentWorkspaceLifecycle,
   usePatchAgentSessionMetadata,
   usePipelineRunsList,
@@ -85,6 +87,8 @@ import { buildAgentDiffReviewSummary } from '@/lib/agent-review-utils';
 import { fillAiSkillPromptTemplate } from '@/lib/ai-skill-engine';
 import { AGENT_WORKBENCH_PLAN_SKILL_ID, getAiSkill, listAiSkills } from '@/lib/ai-skills';
 import { cn } from '@/lib/utils';
+import { formatRequirementChangeBadge } from '@/lib/requirement-change-present';
+import { isBrownfieldChangeType } from '@/lib/rd-types';
 import {
   resolvePipelineExplicitAgentBranch,
   resolvePipelineGitBaseBranch,
@@ -959,6 +963,20 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   const skipNextChatPersistRef = useRef(false);
   const hydratedChatSessionIdRef = useRef<string | null>(null);
 
+  const { data: linkedRequirement } = useRequirement(task.requirementId);
+  const { data: productBaselines = [] } = useProductBaselinesList(linkedRequirement?.productId);
+  const linkedBaseline = useMemo(
+    () => productBaselines.find((b) => b.id === linkedRequirement?.baselineId),
+    [productBaselines, linkedRequirement?.baselineId],
+  );
+  const requirementChangeBadge = useMemo(
+    () =>
+      linkedRequirement
+        ? formatRequirementChangeBadge(linkedRequirement, linkedBaseline)
+        : null,
+    [linkedRequirement, linkedBaseline],
+  );
+
   const { data: runs = [], isFetched: pipelineRunsFetched } = usePipelineRunsList(task.requirementId);
   const latestRun = latestByTime(runs);
   const {
@@ -1274,6 +1292,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         pipelineRunId: run.id,
         prdId: task.pipelineMeta.prdIds?.[0],
         specId: task.pipelineMeta.specIds?.[0],
+        baselineId: linkedRequirement?.baselineId ?? undefined,
         createdBy: operatorName,
       });
       const planSkill = await getAiSkill(AGENT_WORKBENCH_PLAN_SKILL_ID);
@@ -2282,6 +2301,25 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
               'border-l-[3px] border-l-primary',
             )}
           >
+            {requirementChangeBadge ? (
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <Badge variant="secondary" className="text-xs font-medium">
+                  {requirementChangeBadge}
+                </Badge>
+                {linkedBaseline ? (
+                  <span className="text-xs text-muted-foreground">
+                    ContextPack 将包含产品基线 Layer A（{linkedBaseline.version} ·{' '}
+                    <span className="font-mono">{linkedBaseline.gitRef.slice(0, 8)}</span>
+                    {linkedBaseline.capabilities?.length
+                      ? ` · ${linkedBaseline.capabilities.length} 项能力`
+                      : ''}
+                    ）
+                  </span>
+                ) : isBrownfieldChangeType(linkedRequirement?.changeType ?? 'greenfield') ? (
+                  <span className="text-xs text-amber-700">存量改动须先绑定产品基线，否则无法打包 ContextPack</span>
+                ) : null}
+              </div>
+            ) : null}
             <p className="mb-3 flex items-start gap-1.5 text-xs text-muted-foreground">
               <FileText className="mt-0.5 size-3.5 shrink-0 text-primary" />
               创建流水线后将自动完成本步骤：打包 ContextPack（含 PRD、FS/TS 等）并生成编码提示词；也可在下方调整指令后手动重试。

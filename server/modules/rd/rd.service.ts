@@ -27,6 +27,14 @@ import { resolveWorkspaceProductSlug } from '../../../shared/pipeline-workspace-
 import { resolvePipelineGitBaseBranch, resolvePipelineWorkspaceBranchLabel } from '../../../shared/pipeline-meta-branch';
 import { assertToolCallCanStart, prepareToolCallPolicy } from '../../../shared/agent-tool-gateway';
 import { createDefaultOrgSpecConfig } from '../../../shared/org-spec-defaults';
+import {
+  isBrownfieldChangeType,
+  normalizeRequirementChangeType,
+  type IProductCapabilityInterface,
+  type IRequirementImpactPreview,
+  type ProductCapabilitySource,
+  type RequirementChangeType,
+} from '../../../shared/product-baseline';
 
 /** 与前端 access-policy 内置角色 id 一致（rd_user_access_roles / rd_users.access_role_id 回退） */
 const BUILTIN_ACCESS_ROLE_PM = 'role_pm';
@@ -73,8 +81,14 @@ export interface IRequirementRow {
   title: string;
   description: string;
   sketchUrl?: string | null;
-  /** 所属产品 */
+  /** 所属产品（展示名） */
   product?: string | null;
+  /** 所属产品主数据 ID */
+  productId?: string | null;
+  /** 变更类型 */
+  changeType: RequirementChangeType;
+  /** Brownfield 引用的产品基线 */
+  baselineId?: string | null;
   /** 金币总数（提交人设定，在 PM/TM 间拆分） */
   bountyPoints: number;
   /** 产品经理对应金币份额 */
@@ -554,6 +568,9 @@ export interface IContextPackManifest {
     prdUpdatedAt?: string;
     specUpdatedAt?: string;
     orgSpecVersion?: number;
+    baselineId?: string | null;
+    baselineVersion?: string | null;
+    changeType?: RequirementChangeType;
   };
   files: Array<{
     path: string;
@@ -583,6 +600,35 @@ export interface IPipelineDocsExportItem {
 }
 
 /** 产品目录（与需求「所属产品」可同名关联，此处存结构化元数据） */
+export interface IProductCapabilityRow {
+  id: string;
+  productId: string;
+  baselineId: string;
+  baselineVersion: string;
+  domain: string;
+  name: string;
+  description: string;
+  interfaces: IProductCapabilityInterface[];
+  source: ProductCapabilitySource;
+  sourceRef?: string | null;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface IProductBaselineRow {
+  id: string;
+  productId: string;
+  version: string;
+  gitRef: string;
+  gitUrl?: string | null;
+  asBuiltMarkdown: string;
+  notes?: string | null;
+  capabilities?: IProductCapabilityRow[];
+  frozenAt: string;
+  frozenBy?: string | null;
+  createdAt: string;
+}
+
 export interface IProductRow {
   id: string;
   code?: string | null;
@@ -706,6 +752,7 @@ export class RdService implements OnModuleInit {
     await this.ensurePipelineRunTables();
     await this.ensureAgentTables();
     await this.ensureContextPackTables();
+    await this.ensureProductBaselineTables();
     await this.ensureAiSkillTables();
     await this.ensureAiSkillDefaults();
     await this.ensureDatapaasRoleGrants();
@@ -1116,11 +1163,73 @@ export class RdService implements OnModuleInit {
       ALTER TABLE rd_requirements ADD COLUMN IF NOT EXISTS task_acceptances JSONB NOT NULL DEFAULT '[]'::jsonb;
     `);
     await this.db.execute(sql`
+      ALTER TABLE rd_requirements ADD COLUMN IF NOT EXISTS product_id TEXT REFERENCES rd_products(id) ON DELETE SET NULL;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_requirements ADD COLUMN IF NOT EXISTS change_type TEXT NOT NULL DEFAULT 'greenfield';
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_requirements ADD COLUMN IF NOT EXISTS baseline_id TEXT;
+    `);
+    await this.db.execute(sql`
       UPDATE rd_requirements
       SET
         pm_coins = (bounty_points / 2),
         tm_coins = bounty_points - (bounty_points / 2)
       WHERE bounty_points > 0 AND pm_coins = 0 AND tm_coins = 0;
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_requirements r
+      SET product_id = p.id
+      FROM rd_products p
+      WHERE r.product_id IS NULL
+        AND r.product IS NOT NULL
+        AND trim(r.product) <> ''
+        AND lower(trim(p.name)) = lower(trim(r.product));
+    `);
+    await this.db.execute(sql`
+      UPDATE rd_requirements SET change_type = 'greenfield' WHERE change_type IS NULL OR trim(change_type) = '';
+    `);
+  }
+
+  private async ensureProductBaselineTables(): Promise<void> {
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_product_baselines (
+        id TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL REFERENCES rd_products(id) ON DELETE CASCADE,
+        version TEXT NOT NULL,
+        git_ref TEXT NOT NULL,
+        git_url TEXT,
+        as_built_markdown TEXT NOT NULL DEFAULT '',
+        notes TEXT,
+        frozen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        frozen_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (product_id, version)
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_product_capabilities (
+        id TEXT PRIMARY KEY,
+        baseline_id TEXT NOT NULL REFERENCES rd_product_baselines(id) ON DELETE CASCADE,
+        product_id TEXT NOT NULL REFERENCES rd_products(id) ON DELETE CASCADE,
+        domain TEXT NOT NULL DEFAULT '',
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        interfaces JSONB NOT NULL DEFAULT '[]'::jsonb,
+        source TEXT NOT NULL DEFAULT 'manual',
+        source_ref TEXT,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_product_baselines_product_frozen
+      ON rd_product_baselines (product_id, frozen_at DESC);
+    `);
+    await this.db.execute(sql`
+      CREATE INDEX IF NOT EXISTS idx_rd_product_capabilities_baseline
+      ON rd_product_capabilities (baseline_id, sort_order ASC);
     `);
   }
 
@@ -1467,6 +1576,9 @@ export class RdService implements OnModuleInit {
       description: (r.description as string) || '',
       sketchUrl: (r.sketch_url as string) || (r.sketchUrl as string) || undefined,
       product: (r.product as string) || undefined,
+      productId: (r.product_id as string) || (r.productId as string) || undefined,
+      changeType: normalizeRequirementChangeType(r.change_type ?? r.changeType),
+      baselineId: (r.baseline_id as string) || (r.baselineId as string) || undefined,
       bountyPoints,
       pmCoins,
       tmCoins,
@@ -1937,10 +2049,15 @@ export class RdService implements OnModuleInit {
       Object.entries(body).filter(([, v]) => v !== undefined),
     ) as Partial<IRequirementRow>;
 
+    const changeType = normalizeRequirementChangeType(
+      body.changeType !== undefined ? body.changeType : existing?.changeType,
+    );
+
     const merged: IRequirementRow = existing
       ? {
           ...existing,
           ...definedBody,
+          changeType,
           bountyPoints,
           pmCoins,
           tmCoins,
@@ -1948,6 +2065,14 @@ export class RdService implements OnModuleInit {
             body.product !== undefined
               ? nullIfEmpty(body.product as string | null)
               : existing.product ?? null,
+          productId:
+            body.productId !== undefined
+              ? nullIfEmpty(body.productId as string | null)
+              : existing.productId ?? null,
+          baselineId:
+            body.baselineId !== undefined
+              ? nullIfEmpty(body.baselineId as string | null)
+              : existing.baselineId ?? null,
           pmCandidateUserId:
             body.pmCandidateUserId !== undefined
               ? nullIfEmpty(body.pmCandidateUserId as string | null)
@@ -1969,6 +2094,9 @@ export class RdService implements OnModuleInit {
           description: body.description || '',
           sketchUrl: body.sketchUrl,
           product: nullIfEmpty(body.product as string | null | undefined),
+          productId: nullIfEmpty(body.productId as string | null | undefined),
+          changeType,
+          baselineId: nullIfEmpty(body.baselineId as string | null | undefined),
           bountyPoints,
           pmCoins,
           tmCoins,
@@ -1989,15 +2117,19 @@ export class RdService implements OnModuleInit {
           updatedBy: body.updatedBy ?? body.createdBy ?? body.submitter ?? null,
         };
 
+    await this.resolveRequirementProductFields(merged);
+
     const productTrimmed = (merged.product ?? '').trim();
-    if (!productTrimmed) {
+    if (!productTrimmed && !merged.productId?.trim()) {
       if (!existing) {
         throw new BadRequestException('所属产品不能为空');
       }
-      if (body.product !== undefined) {
+      if (body.product !== undefined || body.productId !== undefined) {
         throw new BadRequestException('所属产品不能为空');
       }
     }
+
+    await this.assertRequirementBaselineRules(merged);
 
     const statusChanged = existing ? existing.status !== merged.status : true;
     if (statusChanged) {
@@ -2006,7 +2138,8 @@ export class RdService implements OnModuleInit {
 
     await this.db.execute(sql`
       INSERT INTO rd_requirements (
-        id, title, description, sketch_url, product, bounty_points, pm_coins, tm_coins,
+        id, title, description, sketch_url, product, product_id, change_type, baseline_id,
+        bounty_points, pm_coins, tm_coins,
         pm_candidate_user_id, tm_candidate_user_id, task_acceptances,
         priority, expected_date, status,
         submitter, pm, tm, submitter_name, ai_category,
@@ -2017,6 +2150,9 @@ export class RdService implements OnModuleInit {
         ${merged.description},
         ${merged.sketchUrl ?? null},
         ${merged.product ?? null},
+        ${merged.productId ?? null},
+        ${merged.changeType},
+        ${merged.baselineId ?? null},
         ${merged.bountyPoints},
         ${merged.pmCoins},
         ${merged.tmCoins},
@@ -2041,6 +2177,9 @@ export class RdService implements OnModuleInit {
         description = EXCLUDED.description,
         sketch_url = EXCLUDED.sketch_url,
         product = EXCLUDED.product,
+        product_id = EXCLUDED.product_id,
+        change_type = EXCLUDED.change_type,
+        baseline_id = EXCLUDED.baseline_id,
         bounty_points = EXCLUDED.bounty_points,
         pm_coins = EXCLUDED.pm_coins,
         tm_coins = EXCLUDED.tm_coins,
@@ -2090,6 +2229,51 @@ export class RdService implements OnModuleInit {
       throw new BadRequestException(
         `非法需求状态流转：${fromLabel} -> ${toLabel}`
       );
+    }
+  }
+
+  private async resolveRequirementProductFields(merged: IRequirementRow): Promise<void> {
+    const productId = merged.productId?.trim();
+    if (productId) {
+      const product = await this.getProduct(productId);
+      if (!product) {
+        throw new BadRequestException('所属产品不存在');
+      }
+      merged.product = product.name;
+      merged.productId = product.id;
+      return;
+    }
+    const productName = merged.product?.trim();
+    if (productName) {
+      const result = await this.db.execute(sql`
+        SELECT id, name FROM rd_products
+        WHERE lower(trim(name)) = lower(trim(${productName}))
+        LIMIT 1;
+      `);
+      const row = this.rowsFromExecute<{ id: string; name: string }>(result)[0];
+      if (row) {
+        merged.productId = row.id;
+        merged.product = row.name;
+      }
+    }
+  }
+
+  private async assertRequirementBaselineRules(merged: IRequirementRow): Promise<void> {
+    if (!isBrownfieldChangeType(merged.changeType)) {
+      return;
+    }
+    if (!merged.productId?.trim()) {
+      throw new BadRequestException('存量改动类需求必须选择所属产品');
+    }
+    if (!merged.baselineId?.trim()) {
+      throw new BadRequestException('存量改动类需求必须选择产品基线');
+    }
+    const baseline = await this.getProductBaseline(merged.baselineId);
+    if (!baseline) {
+      throw new BadRequestException('产品基线不存在');
+    }
+    if (baseline.productId !== merged.productId) {
+      throw new BadRequestException('产品基线与所属产品不一致');
     }
   }
 
@@ -2332,6 +2516,9 @@ export class RdService implements OnModuleInit {
       `- Expected Date: ${requirement.expectedDate}`,
       `- Submitter: ${requirement.submitterName || requirement.submitter}`,
       `- Product: ${requirement.product || '未指定'}`,
+      `- Product ID: ${requirement.productId || '未指定'}`,
+      `- Change Type: ${requirement.changeType}`,
+      `- Baseline ID: ${requirement.baselineId || '无'}`,
       `- Updated At: ${requirement.updatedAt}`,
       '',
       '## 描述',
@@ -2493,11 +2680,18 @@ export class RdService implements OnModuleInit {
     prdId?: string | null;
     specId?: string | null;
     pipelineRunId?: string | null;
+    baselineId?: string | null;
     createdBy?: string | null;
   }): Promise<IContextPackRow> {
     const requirement = await this.getRequirement(body.requirementId);
     if (!requirement) {
       throw new NotFoundException('需求不存在');
+    }
+    if (isBrownfieldChangeType(requirement.changeType)) {
+      const baselineId = (body.baselineId ?? requirement.baselineId)?.trim();
+      if (!baselineId) {
+        throw new BadRequestException('Brownfield 需求创建 ContextPack 前须指定产品基线');
+      }
     }
     const prd = body.prdId
       ? await this.getPrd(body.prdId)
@@ -2541,7 +2735,63 @@ export class RdService implements OnModuleInit {
     const cpContent =
       spec.cpMarkdown?.trim() ||
       '# Implementation Plan\n\n> 当前规格尚未生成 CP，请先补齐编程计划后再执行 Agent 编码。\n';
-    const files: IContextPackFile[] = [
+
+    const baselineId = (body.baselineId ?? requirement.baselineId)?.trim() || null;
+    let baseline: IProductBaselineRow | null = null;
+    if (baselineId) {
+      baseline = await this.getProductBaseline(baselineId);
+      if (!baseline) {
+        throw new NotFoundException('产品基线不存在');
+      }
+      if (requirement.productId && baseline.productId !== requirement.productId) {
+        throw new BadRequestException('ContextPack 基线与需求所属产品不一致');
+      }
+    }
+
+    const files: IContextPackFile[] = [];
+    if (baseline) {
+      files.push(
+        {
+          path: 'context/product/manifest.json',
+          kind: 'json',
+          content: JSON.stringify(
+            {
+              baselineId: baseline.id,
+              productId: baseline.productId,
+              version: baseline.version,
+              gitRef: baseline.gitRef,
+              gitUrl: baseline.gitUrl ?? null,
+              frozenAt: baseline.frozenAt,
+            },
+            null,
+            2,
+          ),
+        },
+        {
+          path: 'context/product/as-built.md',
+          kind: 'markdown',
+          content: this.renderProductAsBuiltMarkdown(baseline),
+        },
+      );
+      const apiSnapshot = (baseline.capabilities ?? [])
+        .flatMap((cap) =>
+          (cap.interfaces ?? [])
+            .filter((iface) => iface.kind === 'api')
+            .map((iface) => ({
+              domain: cap.domain,
+              capability: cap.name,
+              path: iface.ref,
+            })),
+        );
+      if (apiSnapshot.length > 0) {
+        files.push({
+          path: 'context/product/apis.snapshot.json',
+          kind: 'json',
+          content: JSON.stringify({ baselineVersion: baseline.version, apis: apiSnapshot }, null, 2),
+        });
+      }
+    }
+    files.push(
       { path: 'context/requirement.md', kind: 'markdown', content: this.renderRequirementMarkdown(requirement) },
       { path: 'context/prd.md', kind: 'markdown', content: this.renderPrdMarkdown(prd) },
       { path: 'context/fs.json', kind: 'json', content: fsContent },
@@ -2553,7 +2803,7 @@ export class RdService implements OnModuleInit {
         kind: 'markdown',
         content: this.renderRepoSummaryMarkdown({ pipelineRun, requirement, prd, spec }),
       },
-    ];
+    );
     const generatedAt = new Date().toISOString();
     const manifest: IContextPackManifest = {
       requirementId: requirement.id,
@@ -2566,6 +2816,9 @@ export class RdService implements OnModuleInit {
         prdUpdatedAt: prd.updatedAt,
         specUpdatedAt: spec.updatedAt,
         orgSpecVersion: Number(this.parseJsonObject(orgSpec).version ?? 1),
+        baselineId: baseline?.id ?? null,
+        baselineVersion: baseline?.version ?? null,
+        changeType: requirement.changeType,
       },
       files: files.map((file) => ({
         path: file.path,
@@ -3248,6 +3501,9 @@ export class RdService implements OnModuleInit {
     const requirement = await this.getRequirement(body.requirementId);
     if (!requirement) {
       throw new BadRequestException('关联需求不存在或已删除');
+    }
+    if (isBrownfieldChangeType(requirement.changeType) && !requirement.baselineId?.trim()) {
+      throw new BadRequestException('Brownfield 需求创建流水线运行前须绑定产品基线');
     }
     const now = new Date().toISOString();
     const id = body.id?.trim() || `prun_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -5160,6 +5416,258 @@ esac
         commands: [command],
       },
       toolCalls: [toolCall],
+    };
+  }
+
+  private parseCapabilityInterfaces(value: unknown): IProductCapabilityInterface[] {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const row = item as Record<string, unknown>;
+        const kind = row.kind;
+        const ref = row.ref;
+        if (
+          (kind === 'api' || kind === 'route' || kind === 'event') &&
+          typeof ref === 'string' &&
+          ref.trim()
+        ) {
+          return { kind, ref: ref.trim() };
+        }
+        return null;
+      })
+      .filter((item): item is IProductCapabilityInterface => item !== null);
+  }
+
+  private rowToProductCapability(r: Record<string, unknown>, baselineVersion: string): IProductCapabilityRow {
+    return {
+      id: String(r.id),
+      productId: String(r.product_id || r.productId),
+      baselineId: String(r.baseline_id || r.baselineId),
+      baselineVersion,
+      domain: String(r.domain || ''),
+      name: String(r.name || ''),
+      description: String(r.description || ''),
+      interfaces: this.parseCapabilityInterfaces(r.interfaces),
+      source: (String(r.source || 'manual') as ProductCapabilitySource) || 'manual',
+      sourceRef: (r.source_ref as string) || (r.sourceRef as string) || undefined,
+      sortOrder: Number(r.sort_order ?? r.sortOrder ?? 0),
+      createdAt: this.toIso(r.created_at ?? r.createdAt),
+    };
+  }
+
+  private rowToProductBaseline(
+    r: Record<string, unknown>,
+    capabilities: IProductCapabilityRow[] = [],
+  ): IProductBaselineRow {
+    return {
+      id: String(r.id),
+      productId: String(r.product_id || r.productId),
+      version: String(r.version),
+      gitRef: String(r.git_ref || r.gitRef),
+      gitUrl: (r.git_url as string) || (r.gitUrl as string) || undefined,
+      asBuiltMarkdown: String(r.as_built_markdown || r.asBuiltMarkdown || ''),
+      notes: (r.notes as string) || undefined,
+      capabilities,
+      frozenAt: this.toIso(r.frozen_at ?? r.frozenAt),
+      frozenBy: (r.frozen_by as string) || (r.frozenBy as string) || undefined,
+      createdAt: this.toIso(r.created_at ?? r.createdAt),
+    };
+  }
+
+  private renderProductAsBuiltMarkdown(baseline: IProductBaselineRow): string {
+    const lines = [
+      '# Product As-Built',
+      '',
+      `- Product ID: ${baseline.productId}`,
+      `- Baseline Version: ${baseline.version}`,
+      `- Git Ref: ${baseline.gitRef}`,
+    ];
+    if (baseline.gitUrl) lines.push(`- Git URL: ${baseline.gitUrl}`);
+    lines.push(`- Frozen At: ${baseline.frozenAt}`);
+    lines.push('', '## Capability Catalog', '');
+    const caps = baseline.capabilities ?? [];
+    if (!caps.length) {
+      lines.push(baseline.asBuiltMarkdown.trim() || '_（暂无结构化能力条目，见下方备注）_', '');
+      if (baseline.asBuiltMarkdown.trim()) {
+        lines.push('## Notes', '', baseline.asBuiltMarkdown.trim(), '');
+      }
+      return lines.join('\n');
+    }
+    for (const cap of caps) {
+      lines.push(`### ${cap.domain ? `${cap.domain} · ` : ''}${cap.name}`, '');
+      if (cap.description.trim()) lines.push(cap.description.trim(), '');
+      if (cap.interfaces.length) {
+        lines.push('**Interfaces:**');
+        for (const iface of cap.interfaces) {
+          lines.push(`- ${iface.kind}: \`${iface.ref}\``);
+        }
+        lines.push('');
+      }
+    }
+    if (baseline.asBuiltMarkdown.trim()) {
+      lines.push('## Additional Notes', '', baseline.asBuiltMarkdown.trim(), '');
+    }
+    return lines.join('\n');
+  }
+
+  async listProductBaselines(productId: string): Promise<IProductBaselineRow[]> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_product_baselines
+      WHERE product_id = ${productId}
+      ORDER BY frozen_at DESC;
+    `);
+    const rows = this.rowsFromExecute(result);
+    return rows.map((row) => this.rowToProductBaseline(row));
+  }
+
+  async getProductBaseline(id: string): Promise<IProductBaselineRow | null> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_product_baselines WHERE id = ${id} LIMIT 1;
+    `);
+    const row = this.rowsFromExecute(result)[0];
+    if (!row) return null;
+    const caps = await this.listProductCapabilities(id);
+    return this.rowToProductBaseline(row, caps);
+  }
+
+  async listProductCapabilities(baselineId: string): Promise<IProductCapabilityRow[]> {
+    const baselineResult = await this.db.execute(sql`
+      SELECT version FROM rd_product_baselines WHERE id = ${baselineId} LIMIT 1;
+    `);
+    const version =
+      this.rowsFromExecute<{ version: string }>(baselineResult)[0]?.version ?? '';
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_product_capabilities
+      WHERE baseline_id = ${baselineId}
+      ORDER BY sort_order ASC, created_at ASC;
+    `);
+    return this.rowsFromExecute(result).map((row) => this.rowToProductCapability(row, version));
+  }
+
+  async createProductBaseline(body: {
+    id?: string;
+    productId: string;
+    version: string;
+    gitRef: string;
+    gitUrl?: string | null;
+    asBuiltMarkdown?: string;
+    notes?: string | null;
+    frozenBy?: string | null;
+    capabilities?: Array<{
+      id?: string;
+      domain?: string;
+      name: string;
+      description?: string;
+      interfaces?: IProductCapabilityInterface[];
+      source?: ProductCapabilitySource;
+      sourceRef?: string | null;
+      sortOrder?: number;
+    }>;
+  }): Promise<IProductBaselineRow> {
+    const productId = body.productId.trim();
+    const product = await this.getProduct(productId);
+    if (!product) {
+      throw new NotFoundException('产品不存在');
+    }
+    const version = body.version.trim();
+    const gitRef = body.gitRef.trim();
+    if (!version || !gitRef) {
+      throw new BadRequestException('基线版本与 Git 引用不能为空');
+    }
+    const id = body.id?.trim() || `bl_${productId}_${Date.now()}`;
+    const frozenAt = new Date().toISOString();
+    const gitUrl = (body.gitUrl ?? product.gitUrl ?? null)?.trim() || null;
+    const asBuiltMarkdown = body.asBuiltMarkdown?.trim() ?? '';
+
+    await this.db.execute(sql`
+      INSERT INTO rd_product_baselines (
+        id, product_id, version, git_ref, git_url, as_built_markdown, notes, frozen_at, frozen_by, created_at
+      ) VALUES (
+        ${id},
+        ${productId},
+        ${version},
+        ${gitRef},
+        ${gitUrl},
+        ${asBuiltMarkdown},
+        ${body.notes?.trim() || null},
+        ${frozenAt}::timestamptz,
+        ${body.frozenBy ?? null},
+        ${frozenAt}::timestamptz
+      );
+    `);
+
+    const caps = body.capabilities ?? [];
+    for (let i = 0; i < caps.length; i++) {
+      const cap = caps[i];
+      const capId = cap.id?.trim() || `cap_${id}_${i}`;
+      await this.db.execute(sql`
+        INSERT INTO rd_product_capabilities (
+          id, baseline_id, product_id, domain, name, description, interfaces, source, source_ref, sort_order, created_at
+        ) VALUES (
+          ${capId},
+          ${id},
+          ${productId},
+          ${cap.domain?.trim() || ''},
+          ${cap.name.trim()},
+          ${cap.description?.trim() || ''},
+          ${JSON.stringify(cap.interfaces ?? [])}::jsonb,
+          ${cap.source ?? 'manual'},
+          ${cap.sourceRef ?? null},
+          ${cap.sortOrder ?? i},
+          ${frozenAt}::timestamptz
+        );
+      `);
+    }
+
+    return (await this.getProductBaseline(id))!;
+  }
+
+  async getRequirementImpactPreview(requirementId: string): Promise<IRequirementImpactPreview> {
+    const requirement = await this.getRequirement(requirementId);
+    if (!requirement) {
+      throw new NotFoundException('需求不存在');
+    }
+    const modules: string[] = [];
+    const apis: string[] = [];
+    const risks: string[] = [];
+
+    let baselineVersion: string | undefined;
+    if (requirement.baselineId) {
+      const baseline = await this.getProductBaseline(requirement.baselineId);
+      if (baseline) {
+        baselineVersion = baseline.version;
+        for (const cap of baseline.capabilities ?? []) {
+          if (cap.domain.trim()) modules.push(cap.domain.trim());
+          for (const iface of cap.interfaces) {
+            if (iface.kind === 'api') apis.push(iface.ref);
+          }
+        }
+      }
+    }
+
+    const prd = await this.getPrdByRequirementId(requirementId);
+    if (prd) {
+      for (const feat of prd.featureList ?? []) {
+        if (feat.name?.trim()) modules.push(`[变更] ${feat.name.trim()}`);
+      }
+    }
+
+    if (isBrownfieldChangeType(requirement.changeType) && !requirement.baselineId) {
+      risks.push('未绑定产品基线，Agent 可能不了解存量系统');
+    }
+    if (requirement.changeType === 'enhancement') {
+      risks.push('请确认 PRD 中已声明「不变更」范围，避免全量重写');
+    }
+
+    return {
+      requirementId: requirement.id,
+      changeType: requirement.changeType,
+      baselineId: requirement.baselineId ?? undefined,
+      baselineVersion,
+      modules: [...new Set(modules)],
+      apis: [...new Set(apis)],
+      risks,
     };
   }
 

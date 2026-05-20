@@ -30,6 +30,7 @@ import { logger } from '@/lib/logger';
 import { useDeleteRequirement, useRequirementsList } from '@/lib/rd-hooks';
 import type { IRequirement } from '@/lib/rd-types';
 import { getRequirementStatusPresentation, REQUIREMENT_KANBAN_COLUMNS } from '@/lib/requirement-status-present';
+import { formatRequirementChangeBadge } from '@/lib/requirement-change-present';
 
 const priorityMap: Record<string, { label: string; textColor: string; bg: string; dotColor: string }> = {
   P0: { label: 'P0', textColor: 'text-red-700 dark:text-red-400', bg: 'bg-red-500/10', dotColor: 'bg-red-500' },
@@ -345,6 +346,11 @@ const RequirementsPage: React.FC = () => {
                                     >
                                       {record.title}
                                     </button>
+                                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                      <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-medium">
+                                        {formatRequirementChangeBadge(record)}
+                                      </Badge>
+                                    </div>
                                     <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
                                       {record.description}
                                     </div>

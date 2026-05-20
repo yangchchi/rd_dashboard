@@ -36,6 +36,7 @@ import { rdAuditCreate, rdAuditUpdate } from '@/lib/rd-actor';
 import { rdApi } from '@/lib/rd-api';
 import type { IProduct } from '@/lib/rd-types';
 import { toast } from 'sonner';
+import Link from 'next/link';
 import { ExternalLink, Package, Pencil, Plus, Trash2 } from 'lucide-react';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { cn } from '@/lib/utils';
@@ -273,7 +274,12 @@ const ProductManagementPage: React.FC = () => {
                       )}
                     </TableCell>
                     <TableCell className="max-w-[220px]">
-                      <div className="font-medium text-foreground">{p.name}</div>
+                      <Link
+                        href={`/products/${encodeURIComponent(p.id)}`}
+                        className="font-medium text-foreground hover:underline"
+                      >
+                        {p.name}
+                      </Link>
                       {p.description ? (
                         <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{p.description}</p>
                       ) : null}

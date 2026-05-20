@@ -32,7 +32,10 @@ import { toast } from 'sonner';
 import { getCurrentUser } from '@/lib/auth';
 import { rdAuditUpdate } from '@/lib/rd-actor';
 import { usePrd, useRequirement, useSubmitPrdReview, useUpsertPrd, useProductsList } from '@/lib/rd-hooks';
-import type { IRequirement } from '@/lib/rd-types';
+import { rdApi } from '@/lib/rd-api';
+import type { IProductBaseline, IRequirement } from '@/lib/rd-types';
+import { isBrownfieldChangeType } from '@/lib/rd-types';
+import Link from 'next/link';
 import { formatPrdListTitle, formatProductDashRequirementTitle } from '@/lib/prd-display-title';
 interface IFeature {
   id: string;
@@ -80,7 +83,29 @@ const PRDEditPage: React.FC = () => {
   // PRD状态
   const [prd, setPrd] = useState<IPRD | null>(null);
   const [requirement, setRequirement] = useState<IRequirement | null>(null);
+  const reqForBaseline = requirement ?? loadedReq ?? null;
+  const [linkedBaseline, setLinkedBaseline] = useState<IProductBaseline | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const req = requirement ?? loadedReq;
+    if (!req?.productId || !req?.baselineId) {
+      setLinkedBaseline(null);
+      return;
+    }
+    let cancelled = false;
+    void rdApi
+      .getProductBaseline(req.productId, req.baselineId)
+      .then((bl) => {
+        if (!cancelled) setLinkedBaseline(bl);
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedBaseline(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [requirement, loadedReq]);
   /** 全文 Markdown：编辑源码 / 渲染预览 */
   const [prdMdMode, setPrdMdMode] = useState<'edit' | 'preview'>('edit');
 
@@ -365,6 +390,38 @@ const PRDEditPage: React.FC = () => {
             </Card>
           </section>
         )}
+
+        {reqForBaseline &&
+        isBrownfieldChangeType(reqForBaseline.changeType ?? 'greenfield') &&
+        reqForBaseline.baselineId ? (
+          <section className="w-full">
+            <Card className="border-indigo-500/25 bg-indigo-500/[0.06]">
+              <CardContent className="py-4 text-sm">
+                <p className="font-medium text-foreground">Delta PRD · 相对产品基线修订</p>
+                <p className="mt-1 text-muted-foreground">
+                  引用基线：{linkedBaseline?.version ?? '—'}
+                  {linkedBaseline?.gitRef ? (
+                    <span className="ml-1 font-mono text-xs">({linkedBaseline.gitRef.slice(0, 12)})</span>
+                  ) : null}
+                  {reqForBaseline.productId ? (
+                    <>
+                      {' '}
+                      ·{' '}
+                      <Link href={`/products/${reqForBaseline.productId}`} className="text-primary hover:underline">
+                        打开产品 Hub
+                      </Link>
+                    </>
+                  ) : null}
+                </p>
+                {reqForBaseline.status === 'prd_writing' ? (
+                  <p className="mt-2 text-xs text-amber-700">
+                    若由 RFC 回退，请仅修改「本次变更」与「影响面」，勿覆盖基线已有能力描述。
+                  </p>
+                ) : null}
+              </CardContent>
+            </Card>
+          </section>
+        ) : null}
 
         {/* PRD 编辑主体：全文 Markdown，编辑 / 预览 */}
         <section className="flex min-h-0 w-full flex-1 flex-col space-y-4">

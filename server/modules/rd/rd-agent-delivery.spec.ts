@@ -5,6 +5,7 @@ const REQUIREMENT_ROW: IRequirementRow = {
   id: 'req-1',
   title: '需求',
   description: '',
+  changeType: 'greenfield',
   bountyPoints: 0,
   pmCoins: 0,
   tmCoins: 0,

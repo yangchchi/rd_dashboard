@@ -19,6 +19,8 @@ import {
   type IPipelineTaskRow,
   type IPipelineRunRow,
   type IPipelineStepRunRow,
+  type IProductBaselineRow,
+  type IProductCapabilityRow,
   type IProductRow,
   type IRequirementFlowEventRow,
   type IRequirementRow,
@@ -56,6 +58,12 @@ export class RdController {
   @RequirePermissions('page.requirements')
   listRequirementFlowEvents(@Param('id') id: string): Promise<IRequirementFlowEventRow[]> {
     return this.rd.listRequirementFlowEvents(id);
+  }
+
+  @Get('requirements/:id/impact-preview')
+  @RequirePermissions('page.requirements')
+  getRequirementImpactPreview(@Param('id') id: string) {
+    return this.rd.getRequirementImpactPreview(id);
   }
 
   @Put('requirements')
@@ -206,6 +214,7 @@ export class RdController {
       prdId?: string | null;
       specId?: string | null;
       pipelineRunId?: string | null;
+      baselineId?: string | null;
       createdBy?: string | null;
     },
   ) {
@@ -564,6 +573,65 @@ export class RdController {
   @RequirePermissions('page.products')
   deleteProduct(@Param('id') id: string) {
     return this.rd.deleteProduct(id);
+  }
+
+  @Get('products/:productId/baselines')
+  @RequirePermissions('page.products')
+  listProductBaselines(@Param('productId') productId: string): Promise<IProductBaselineRow[]> {
+    return this.rd.listProductBaselines(productId);
+  }
+
+  @Post('products/:productId/baselines')
+  @RequirePermissions('page.products')
+  createProductBaseline(
+    @Param('productId') productId: string,
+    @Body()
+    body: {
+      id?: string;
+      version: string;
+      gitRef: string;
+      gitUrl?: string | null;
+      asBuiltMarkdown?: string;
+      notes?: string | null;
+      frozenBy?: string | null;
+      capabilities?: Array<{
+        id?: string;
+        domain?: string;
+        name: string;
+        description?: string;
+        interfaces?: IProductCapabilityRow['interfaces'];
+        source?: IProductCapabilityRow['source'];
+        sourceRef?: string | null;
+        sortOrder?: number;
+      }>;
+    },
+  ): Promise<IProductBaselineRow> {
+    return this.rd.createProductBaseline({ ...body, productId });
+  }
+
+  @Get('products/:productId/baselines/:baselineId')
+  @RequirePermissions('page.products')
+  getProductBaseline(
+    @Param('productId') productId: string,
+    @Param('baselineId') baselineId: string,
+  ): Promise<IProductBaselineRow | null> {
+    return this.rd.getProductBaseline(baselineId).then((row) => {
+      if (row && row.productId !== productId) {
+        return null;
+      }
+      return row;
+    });
+  }
+
+  @Get('products/:productId/capabilities')
+  @RequirePermissions('page.products')
+  listProductCapabilities(
+    @Param('productId') productId: string,
+    @Query('baselineId') baselineId: string,
+  ): Promise<IProductCapabilityRow[]> {
+    return this.rd.listProductCapabilities(baselineId).then((rows) =>
+      rows.filter((row) => row.productId === productId),
+    );
   }
 
   @Get('bounty-tasks')

@@ -7,6 +7,7 @@ const REQUIREMENT_ROW: IRequirementRow = {
   title: 'AI 需求',
   description: '实现自动编码',
   product: 'RD 平台',
+  changeType: 'greenfield',
   bountyPoints: 0,
   pmCoins: 0,
   tmCoins: 0,

@@ -51,6 +51,9 @@ import { cn } from '@/lib/utils';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { Label } from '@/components/ui/label';
 import type { IPrd, IRequirement } from '@/lib/rd-types';
+import { isBrownfieldChangeType } from '@/lib/rd-types';
+import { rdApi } from '@/lib/rd-api';
+import { buildDeltaPrdTemplate, DELTA_PRD_GENERATION_HINT } from '@shared/prd-delta-template';
 import { formatPrdListTitle } from '@/lib/prd-display-title';
 import {
   buildMultiPrdGenerationHints,
@@ -418,6 +421,15 @@ const PRDPage: React.FC = () => {
       return;
     }
 
+    const anchorChangeType = anchor.changeType ?? 'greenfield';
+    if (isBrownfieldChangeType(anchorChangeType)) {
+      const missingBaseline = selectedReqs.some((r) => !r.baselineId?.trim());
+      if (missingBaseline) {
+        toast.error('存量改动类需求须绑定产品基线后才能生成 Delta PRD');
+        return;
+      }
+    }
+
     setGenerating(true);
     setGeneratedContent('');
     setPrdPreviewTab('edit');
@@ -427,6 +439,21 @@ const PRDPage: React.FC = () => {
     const streamTimeoutId = window.setTimeout(() => streamAbort.abort(), PRD_STREAM_TIMEOUT_MS);
 
     try {
+      const deltaPromptExtras: string[] = [];
+      let brownfieldBaseline: Awaited<ReturnType<typeof rdApi.getProductBaseline>> = null;
+      if (isBrownfieldChangeType(anchorChangeType) && anchor.productId && anchor.baselineId) {
+        brownfieldBaseline = await rdApi.getProductBaseline(anchor.productId, anchor.baselineId);
+        if (!brownfieldBaseline) {
+          toast.error('无法加载产品基线，请确认基线仍存在');
+          return;
+        }
+        deltaPromptExtras.push(DELTA_PRD_GENERATION_HINT);
+        const asBuilt = truncateForModelContext(brownfieldBaseline.asBuiltMarkdown || '', 6000);
+        if (asBuilt) {
+          deltaPromptExtras.push(`【产品基线 As-Built 摘要（节选）】\n${asBuilt}`);
+        }
+      }
+
       const productEntity = productKey ? products.find((x) => x.id === productKey) : undefined;
       const productLines: string[] = [];
       if (productKey) {
@@ -474,12 +501,13 @@ const PRDPage: React.FC = () => {
             original_requirement: originalRequirement,
             additional_requirements: [
               buildMultiPrdGenerationHints(selectedReqs.length),
+              ...deltaPromptExtras,
               uploadCount > 0
                 ? `用户已上传 ${uploadCount} 份参考文档，生成时须综合引用每一份中的有效信息，不得只采用其中一份而忽略其余。`
                 : '',
             ]
               .filter(Boolean)
-              .join(''),
+              .join('\n\n'),
             related_prd_document,
             user_supplementary_document,
           },
@@ -492,6 +520,21 @@ const PRDPage: React.FC = () => {
           fullContent += chunk.content;
           setGeneratedContent((prev) => prev + chunk.content);
         }
+      }
+
+      if (brownfieldBaseline && !fullContent.includes('## 基线引用')) {
+        const productName =
+          productLabel || anchor.product || products.find((p) => p.id === anchor.productId)?.name || '产品';
+        const skeleton = buildDeltaPrdTemplate({
+          productName,
+          baselineVersion: brownfieldBaseline.version,
+          gitRef: brownfieldBaseline.gitRef,
+          requirementTitle: anchor.title,
+        });
+        fullContent = fullContent.trim()
+          ? `${skeleton}\n\n---\n\n## AI 生成补充\n\n${fullContent.trim()}`
+          : skeleton;
+        setGeneratedContent(fullContent);
       }
 
       const newId = `prd-${Date.now()}`;
@@ -1016,22 +1059,19 @@ const PRDPage: React.FC = () => {
                           const rowDisabled = generating || (!selectable && !checked);
                           return (
                             <li key={req.id}>
-                              <button
-                                type="button"
+                              <label
                                 className={cn(
-                                  'flex w-full items-start gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent',
+                                  'flex w-full cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent',
                                   checked && 'bg-accent/60',
                                   rowDisabled &&
-                                    'cursor-not-allowed opacity-50 hover:bg-transparent'
+                                    'pointer-events-none cursor-not-allowed opacity-50 hover:bg-transparent'
                                 )}
-                                disabled={rowDisabled}
-                                onClick={() => toggleRequirementSelection(req.id)}
                               >
                                 <Checkbox
                                   checked={checked}
-                                  className="mt-0.5 pointer-events-none"
-                                  tabIndex={-1}
-                                  aria-hidden
+                                  disabled={rowDisabled}
+                                  onCheckedChange={() => toggleRequirementSelection(req.id)}
+                                  className="mt-0.5"
                                 />
                                 <span className="min-w-0 flex-1">
                                   <span className="font-medium">{req.title}</span>
@@ -1043,7 +1083,7 @@ const PRDPage: React.FC = () => {
                                     {!selectable && !checked ? ' · 与已选需求产品不一致' : ''}
                                   </span>
                                 </span>
-                              </button>
+                              </label>
                             </li>
                           );
                         })}

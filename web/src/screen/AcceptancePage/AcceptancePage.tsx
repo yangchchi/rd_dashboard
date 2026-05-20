@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/slider';
 import { Streamdown } from '@/components/ui/streamdown';
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty';
@@ -25,24 +25,17 @@ import {
   useAcceptanceRecords,
   useAddAcceptanceRecord,
   useDeleteRequirement,
+  usePrdsList,
   useRequirementsList,
   useUpsertRequirement,
 } from '@/lib/rd-hooks';
-
-interface IRequirement {
-  id: string;
-  title: string;
-  description: string;
-  sketchUrl?: string;
-  priority: 'P0' | 'P1' | 'P2' | 'P3';
-  expectedDate: string;
-  status: 'backlog' | 'prd_writing' | 'spec_defining' | 'ai_developing' | 'pending_acceptance' | 'released';
-  submitter: string;
-  pm?: string;
-  tm?: string;
-  createdAt: string;
-  updatedAt: string;
-}
+import type { IPrd, IRequirement } from '@/lib/rd-types';
+import { isBrownfieldChangeType } from '@/lib/rd-types';
+import { rdApi } from '@/lib/rd-api';
+import {
+  BrownfieldAcceptancePanel,
+  buildMergedBaselineCapabilities,
+} from './BrownfieldAcceptancePanel';
 
 type IAcceptanceRecord = IStoreAcceptanceRecord;
 
@@ -75,6 +68,7 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
   const router = useRouter();
   const currentProfile = useCurrentUserProfile();
   const { data: allRequirements = [] } = useRequirementsList();
+  const { data: allPrds = [] } = usePrdsList();
   const { data: acceptanceHistory = [] } = useAcceptanceRecords();
   const addAcceptanceRecord = useAddAcceptanceRecord();
   const deleteRequirement = useDeleteRequirement();
@@ -95,6 +89,17 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
   const [aiAnalysis, setAiAnalysis] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeTab, setActiveTab] = useState('pending');
+  const [mergeBaselineOnApprove, setMergeBaselineOnApprove] = useState(false);
+
+  const findPrdForRequirement = React.useCallback(
+    (reqId: string): IPrd | null => {
+      const hit =
+        allPrds.find((p) => p.requirementId === reqId) ??
+        allPrds.find((p) => p.linkedRequirementIds?.includes(reqId));
+      return hit ?? null;
+    },
+    [allPrds],
+  );
 
   const handleAcceptClick = (req: IRequirement) => {
     setSelectedRequirement(req);
@@ -139,7 +144,7 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
     }
   };
 
-  const submitAcceptance = (approved: boolean) => {
+  const submitAcceptance = async (approved: boolean) => {
     if (!selectedRequirement) return;
     const existingRecord = acceptanceHistory.find((r) => r.requirementId === selectedRequirement.id);
     if (existingRecord && existingRecord.result !== 'pending') {
@@ -166,33 +171,73 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
       updatedBy: reviewerId,
     };
 
-    void addAcceptanceRecord.mutateAsync(newRecord).then(() => {
-      return upsertRequirement.mutateAsync({
+    try {
+      await addAcceptanceRecord.mutateAsync(newRecord);
+      await upsertRequirement.mutateAsync({
         ...selectedRequirement,
         status: approved ? 'released' : 'pending_acceptance',
         updatedAt: now,
         ...rdAuditUpdate(),
       });
-    }).then(() => {
-      toast.success(approved ? '验收已通过' : '验收已驳回');
-    });
+
+      if (
+        approved &&
+        mergeBaselineOnApprove &&
+        isBrownfieldChangeType(selectedRequirement.changeType ?? 'greenfield') &&
+        selectedRequirement.productId &&
+        selectedRequirement.baselineId
+      ) {
+        const bl = await rdApi.getProductBaseline(
+          selectedRequirement.productId,
+          selectedRequirement.baselineId,
+        );
+        const prd = findPrdForRequirement(selectedRequirement.id);
+        const caps = buildMergedBaselineCapabilities(bl, prd);
+        const user = getCurrentUser();
+        const nextVersion = bl?.version ? `${bl.version}-post-${new Date().toISOString().slice(0, 10)}` : `v-${Date.now()}`;
+        await rdApi.createProductBaseline(selectedRequirement.productId, {
+          version: nextVersion,
+          gitRef: bl?.gitRef ?? 'main',
+          gitUrl: bl?.gitUrl ?? null,
+          asBuiltMarkdown: `验收通过合并自需求 ${selectedRequirement.title}（${selectedRequirement.id}）`,
+          frozenBy: user?.id ?? user?.name ?? null,
+          capabilities: caps,
+        });
+        toast.success('已合并能力至新产品基线', { description: `版本 ${nextVersion}` });
+      } else {
+        toast.success(approved ? '验收已通过' : '验收已驳回');
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '验收提交失败');
+    }
     setIsAcceptDialogOpen(false);
     setIsRejectDialogOpen(false);
+    setMergeBaselineOnApprove(false);
     setFeedback('');
     setAiAnalysis('');
   };
 
-  const submitRFC = () => {
+  const submitRFC = async () => {
     if (!selectedRequirement) return;
-
-    void upsertRequirement
-      .mutateAsync({
+    const prd = findPrdForRequirement(selectedRequirement.id);
+    const baselineRef = selectedRequirement.baselineId?.trim();
+    try {
+      await upsertRequirement.mutateAsync({
         ...selectedRequirement,
         status: 'prd_writing',
+        baselineId: baselineRef || selectedRequirement.baselineId,
         updatedAt: new Date().toISOString(),
         ...rdAuditUpdate(),
-      })
-      .then(() => toast.success('RFC变更申请已发起，需求已回退至PRD阶段'));
+      });
+      toast.success('RFC 已发起，需求已回退至 PRD 阶段', {
+        description: baselineRef ? `基线引用已保留，可在 PRD 中继续基于原基线修订` : undefined,
+      });
+      if (prd?.id) {
+        router.push(`/prd/${prd.id}/edit`);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'RFC 发起失败');
+    }
     setIsRFCDialogOpen(false);
     setFeedback('');
   };
@@ -221,7 +266,13 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
   const pendingRequirements = requirements.filter((r) => r.status === 'pending_acceptance');
   const releasedRequirements = requirements.filter(r => r.status === 'released');
 
-  const renderRequirementCard = (req: IRequirement) => (
+  const renderRequirementCard = (req: IRequirement) => {
+    const linkedPrd = findPrdForRequirement(req.id);
+    const showBrownfield =
+      isBrownfieldChangeType(req.changeType ?? 'greenfield') &&
+      Boolean(req.productId && req.baselineId);
+
+    return (
     <Card key={req.id} className="mb-4 border-l-4 border-l-orange-500 shadow-sm">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
@@ -277,6 +328,11 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
             </button>
           </div>
         </div>
+        {showBrownfield ? (
+          <div className="mb-4">
+            <BrownfieldAcceptancePanel requirement={req} prd={linkedPrd} />
+          </div>
+        ) : null}
         {req.status === 'pending_acceptance' && (
           <div className="mt-4 flex justify-end gap-2">
             <Button
@@ -298,7 +354,8 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
         )}
       </CardContent>
     </Card>
-  );
+    );
+  };
 
   return (
     <>
@@ -491,12 +548,26 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
                   rows={3}
                 />
               </div>
+              {selectedRequirement &&
+              isBrownfieldChangeType(selectedRequirement.changeType ?? 'greenfield') &&
+              selectedRequirement.productId ? (
+                <div className="flex items-start gap-2 rounded-md border border-border p-3">
+                  <Checkbox
+                    id="merge-baseline"
+                    checked={mergeBaselineOnApprove}
+                    onCheckedChange={(v) => setMergeBaselineOnApprove(Boolean(v))}
+                  />
+                  <Label htmlFor="merge-baseline" className="text-sm font-normal leading-snug">
+                    验收通过后，将本次 PRD 功能合并为新产品基线草案（供下一需求引用）
+                  </Label>
+                </div>
+              ) : null}
             </div>
             
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAcceptDialogOpen(false)}>取消</Button>
               <Button
-                onClick={() => submitAcceptance(true)}
+                onClick={() => void submitAcceptance(true)}
                 className="bg-success text-success-foreground hover:bg-success/90"
               >
                 <CheckCircle className="w-4 h-4 mr-1" />
@@ -595,7 +666,7 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
                 <Button variant="outline" onClick={() => setIsRejectDialogOpen(false)}>取消</Button>
                 <Button 
                   variant="destructive"
-                  onClick={() => submitAcceptance(false)}
+                  onClick={() => void submitAcceptance(false)}
                 >
                   <XCircle className="w-4 h-4 mr-1" />
                   确认驳回
@@ -625,7 +696,7 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
               </DialogDescription>
             </DialogHeader>
             
-            <div className="py-4">
+            <div className="py-4 space-y-3">
               <div className="rounded-lg border border-orange-500/25 bg-orange-500/10 p-4 backdrop-blur-sm">
                 <h4 className="mb-2 text-sm font-medium text-orange-200">变更影响说明</h4>
                 <ul className="list-inside list-disc space-y-1 text-sm text-orange-100/90">
@@ -635,12 +706,17 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
                   <li>AI开发任务将自动终止</li>
                 </ul>
               </div>
+              {selectedRequirement?.baselineId ? (
+                <p className="text-xs text-muted-foreground">
+                  将保留产品基线引用（baselineId={selectedRequirement.baselineId.slice(0, 12)}…），PRD 修订时仍可对照原杯子。
+                </p>
+              ) : null}
             </div>
             
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsRFCDialogOpen(false)}>取消</Button>
               <Button 
-                onClick={submitRFC}
+                onClick={() => void submitRFC()}
                 className="bg-orange-600 hover:bg-orange-700"
               >
                 <RotateCcw className="w-4 h-4 mr-1" />

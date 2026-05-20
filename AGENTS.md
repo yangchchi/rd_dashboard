@@ -166,6 +166,14 @@ interface IRequirement {
   title: string;
   description: string;
   sketchUrl?: string;
+  /** 所属产品展示名（与产品主数据 name 对齐） */
+  product?: string;
+  /** 所属产品主数据 ID */
+  productId?: string;
+  /** 变更类型：greenfield=新造 | enhancement/defect/refactor=存量改动（Brownfield） */
+  changeType?: 'greenfield' | 'enhancement' | 'defect' | 'refactor';
+  /** Brownfield 时必填：引用的产品基线 ID */
+  baselineId?: string;
   priority: 'P0' | 'P1' | 'P2' | 'P3';
   expectedDate: string;
   status: 'backlog' | 'prd_writing' | 'spec_defining' | 'ai_developing' | 'pending_acceptance' | 'released';
@@ -174,6 +182,17 @@ interface IRequirement {
   tm?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** 产品基线（As-Built「原杯子」） */
+interface IProductBaseline {
+  id: string;
+  productId: string;
+  version: string;
+  gitRef: string;
+  asBuiltMarkdown: string;
+  capabilities?: IProductCapability[];
+  frozenAt: string;
 }
 
 interface IPRD {

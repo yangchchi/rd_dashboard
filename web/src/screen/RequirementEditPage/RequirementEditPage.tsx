@@ -18,8 +18,20 @@ import { Textarea } from '@/components/ui/textarea';
 import { CalendarIcon, Save, Sparkles, Loader2, ArrowLeft } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rdAuditUpdate } from '@/lib/rd-actor';
-import { useRequirement, useUpsertRequirement } from '@/lib/rd-hooks';
-import type { IRequirement, IUser } from '@/lib/rd-types';
+import {
+  useProductBaselinesList,
+  useProductsList,
+  useRequirement,
+  useUpsertRequirement,
+} from '@/lib/rd-hooks';
+import type { IRequirement, IUser, RequirementChangeType } from '@/lib/rd-types';
+import {
+  isBrownfieldChangeType,
+  REQUIREMENT_CHANGE_TYPE_HINTS,
+  REQUIREMENT_CHANGE_TYPE_LABELS,
+  REQUIREMENT_CHANGE_TYPE_OPTIONS,
+} from '@/lib/rd-types';
+import { rdApi } from '@/lib/rd-api';
 import { authApi } from '@/lib/auth-api';
 import {
   ACCESS_ROLE_PM,
@@ -47,6 +59,7 @@ const RequirementEditPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const userInfo = useCurrentUserProfile();
   const { data: loadedRequirement, isLoading: isQueryLoading } = useRequirement(id);
+  const { data: products = [] } = useProductsList();
   const upsertRequirement = useUpsertRequirement();
 
   const [requirement, setRequirement] = useState<IRequirement | null>(null);
@@ -56,7 +69,12 @@ const RequirementEditPage: React.FC = () => {
   const [priority, setPriority] = useState<string>('P1');
   const [status, setStatus] = useState<string>('');
   const [product, setProduct] = useState('');
+  const [productId, setProductId] = useState('');
+  const [changeType, setChangeType] = useState<RequirementChangeType>('greenfield');
+  const [baselineId, setBaselineId] = useState('');
   const [bountyPoints, setBountyPoints] = useState(0);
+
+  const { data: baselines = [] } = useProductBaselinesList(productId || undefined);
   const [pmCandidateUserId, setPmCandidateUserId] = useState('');
   const [tmCandidateUserId, setTmCandidateUserId] = useState('');
   const [users, setUsers] = useState<IUser[]>([]);
@@ -90,6 +108,9 @@ const RequirementEditPage: React.FC = () => {
     setPriority(found.priority || 'P1');
     setStatus(found.status);
     setProduct(found.product || '');
+    setProductId(found.productId || '');
+    setChangeType(found.changeType ?? 'greenfield');
+    setBaselineId(found.baselineId || '');
     setBountyPoints(
       typeof found.bountyPoints === 'number' && Number.isFinite(found.bountyPoints)
         ? Math.max(0, Math.floor(found.bountyPoints))
@@ -204,16 +225,42 @@ const RequirementEditPage: React.FC = () => {
       toast.error('请选择业务优先级');
       return;
     }
+    if (isBrownfieldChangeType(changeType) && !baselineId.trim()) {
+      toast.error('存量改动类需求须选择产品基线');
+      return;
+    }
     const bounty = Math.max(0, Math.floor(Number(bountyPoints) || 0));
 
     setIsSaving(true);
     
     try {
+      let resolvedProductId = productId.trim();
+      let resolvedProductName = product.trim();
+      if (resolvedProductId) {
+        const hit = products.find((p) => p.id === resolvedProductId);
+        if (hit) resolvedProductName = hit.name;
+        else {
+          const p = await rdApi.getProduct(resolvedProductId);
+          if (p) resolvedProductName = p.name;
+        }
+      } else if (resolvedProductName) {
+        const hit = products.find(
+          (p) => p.name.trim().toLowerCase() === resolvedProductName.toLowerCase(),
+        );
+        if (hit) {
+          resolvedProductId = hit.id;
+          resolvedProductName = hit.name;
+        }
+      }
+
       const updatedRequirement: IRequirement = {
         ...requirement!,
         title: title.trim(),
         description: description.trim(),
-        product: product.trim(),
+        product: resolvedProductName,
+        productId: resolvedProductId || undefined,
+        changeType,
+        baselineId: isBrownfieldChangeType(changeType) ? baselineId.trim() : undefined,
         bountyPoints: bounty,
         pmCandidateUserId: pmCandidateUserId.trim() || undefined,
         tmCandidateUserId: tmCandidateUserId.trim() || undefined,
@@ -296,16 +343,84 @@ const RequirementEditPage: React.FC = () => {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-            <div className="space-y-2">
-                <Label htmlFor="edit-product">
-                  所属产品 <RequiredMark />
-                </Label>
-                <Input
-                  id="edit-product"
-                  placeholder="如：核心平台、数据中台"
-                  value={product}
-                  onChange={(e) => setProduct(e.target.value)}
-                />
+              <div className="space-y-2">
+                <Label>变更类型 <RequiredMark /></Label>
+                <Select
+                  value={changeType}
+                  onValueChange={(v) => {
+                    setChangeType(v as RequirementChangeType);
+                    if (v === 'greenfield') setBaselineId('');
+                  }}
+                >
+                  <SelectTrigger className="h-10 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REQUIREMENT_CHANGE_TYPE_OPTIONS.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {REQUIREMENT_CHANGE_TYPE_LABELS[value]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {REQUIREMENT_CHANGE_TYPE_HINTS[changeType]}
+                </p>
+              </div>
+              <div
+                className={cn(
+                  'grid gap-4',
+                  isBrownfieldChangeType(changeType) && productId
+                    ? 'grid-cols-1 sm:grid-cols-2'
+                    : 'grid-cols-1',
+                )}
+              >
+                <div className="space-y-2 min-w-0">
+                  <Label htmlFor="edit-product">所属产品 <RequiredMark /></Label>
+                  <div className="w-full">
+                  <Select
+                    value={productId || undefined}
+                    onValueChange={(v) => {
+                      const hit = products.find((p) => p.id === v);
+                      if (hit) {
+                        setProductId(hit.id);
+                        setProduct(hit.name);
+                      }
+                    }}
+                  >
+                    <SelectTrigger
+                      id="edit-product"
+                      className="h-10 w-full min-w-0 justify-between px-3 font-normal shadow-none"
+                    >
+                      <SelectValue placeholder="选择产品" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {products.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  </div>
+                </div>
+                {isBrownfieldChangeType(changeType) && productId ? (
+                  <div className="space-y-2 min-w-0">
+                    <Label>产品基线 <RequiredMark /></Label>
+                    <div className="w-full">
+                    <Select value={baselineId} onValueChange={setBaselineId}>
+                      <SelectTrigger className="h-10 w-full min-w-0 justify-between px-3 font-normal shadow-none">
+                        <SelectValue placeholder="选择基线" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {baselines.map((bl) => (
+                          <SelectItem key={bl.id} value={bl.id}>
+                            {bl.version} ({bl.gitRef.slice(0, 8)})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    </div>
+                  </div>
+                ) : null}
               </div>
               {/* 需求标题 */}
               <div className="space-y-2">
