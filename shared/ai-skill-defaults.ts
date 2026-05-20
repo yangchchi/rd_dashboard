@@ -15,6 +15,8 @@ export const PRD_GENERATION_SKILL_ID = 'prd_auto_generation';
 /** 流水线 Agent 工作台「启动规划」时组装的 planMarkdown 模板（非模型调用，仅结构化提示词）。 */
 export const AGENT_WORKBENCH_PLAN_SKILL_ID = 'agent_workbench_plan';
 
+export const ONE_SHOT_APP_GENERATOR_SKILL_ID = 'one_shot_app_generator';
+
 export const PLUGIN_SKILL_ORDER: string[] = [
   PRD_GENERATION_SKILL_ID,
   'prd_to_tech_spec',
@@ -29,6 +31,7 @@ export const PLUGIN_SKILL_ORDER: string[] = [
   'pipeline_test_case_generator',
   'pipeline_test_runner',
   'acceptance_feedback_analyzer',
+  ONE_SHOT_APP_GENERATOR_SKILL_ID,
 ];
 
 export const DEFAULT_AI_SKILLS: Record<string, IDefaultAiSkillConfig> = {
@@ -350,5 +353,57 @@ PRD 文档如下：
 
 验收反馈：
 {{acceptance_feedback}}`,
+  },
+  [ONE_SHOT_APP_GENERATOR_SKILL_ID]: {
+    id: ONE_SHOT_APP_GENERATOR_SKILL_ID,
+    name: '一句话生成应用',
+    description:
+      '全局悬浮 AI 副驾：根据一句话需求（含多轮对话与上一版代码）输出单文件可运行 HTML 应用，用于即席演示与原型沉淀。占位符：{{user_intent}}、{{previous_code}}、{{conversation_history}}、{{platform_context}}、{{device_target}}、{{theme}}。',
+    provider: 'ark',
+    model: 'deepseek-v3-2-251201',
+    stream: true,
+    tools: [],
+    promptTemplate: `你是一名资深前端工程师，擅长用最少的代码实现可运行、可演示的小型 Web 应用。请根据下方材料生成或修改一个单文件 HTML 应用。
+
+【硬性输出约束】
+1) 仅输出最终 HTML 代码：不要任何前言、解释、Markdown 围栏或思考过程；不要输出 <think>/<reasoning>/<plan> 等标签或工具意图。
+2) 第一个非空字符必须是 \`<!DOCTYPE html>\`，最后一个非空字符必须是 \`</html>\`。
+3) 整页样式必须使用 Tailwind CDN：\`<script src="https://cdn.tailwindcss.com"></script>\`。不引入其他 CSS 框架。
+4) 仅允许下列外部资源域名：cdn.tailwindcss.com、unpkg.com、esm.sh、cdn.jsdelivr.net。其余资源请使用 data: 或 placehold.co/picsum.photos。
+5) 状态管理仅使用 JS 变量 / 闭包 / 模块；禁止依赖 localStorage、sessionStorage、IndexedDB、document.cookie 做关键数据持久化（沙箱环境下它们仅有内存模拟，刷新即丢，且不可作为业务事实来源）。
+6) 严禁 fetch 真实外网接口、严禁 window.parent/window.top/window.opener、严禁创建 ServiceWorker；如需数据请内联 mock。
+7) 全部界面文案中文优先；商务、专业、克制。
+
+【交互与质量约束】
+- 所有按钮、表单、列表必须可交互且有可见反馈（更新计数、切换状态、Toast 等）。
+- 关键交互需有 hover/active/focus 视觉反馈；表单输入需基本校验。
+- 控制台不得报错；不依赖外网（除上述 CDN）。
+- 单文件尽量控制在 30KB 以内；优先使用 Tailwind class，避免自写大段 CSS。
+
+【风格基线】
+- 主色 hsl(217 91% 60%)（蓝）、辅助 hsl(210 40% 96%)、文本 hsl(222 47% 11%)；dark 主题用深色背景 hsl(222 47% 11%) + 浅色文字。
+- 圆角统一 8px（rounded-lg）；卡片使用 1px 边框 + 极浅阴影；不要彩色阴影。
+
+【目标设备】
+{{device_target}}
+（desktop=桌面 1280 视口；tablet=768；mobile=375。请相应优化排版与触控目标）
+
+【目标主题】
+{{theme}}
+（light 或 dark；将其作为根容器默认值，不内置切换器）
+
+【平台上下文】（若为空或仅占位则忽略）
+{{platform_context}}
+
+【已发生的对话历史】（若为空则忽略；仅用于理解上下文，不直接复述）
+{{conversation_history}}
+
+【上一版完整代码】（若为空表示首次生成；否则在该版本上做最小必要修改，保持未被要求修改的功能与命名不变）
+{{previous_code}}
+
+【用户本轮一句话需求】
+{{user_intent}}
+
+请直接输出完整的 HTML 文档，从 \`<!DOCTYPE html>\` 开始，到 \`</html>\` 结束。`,
   },
 };

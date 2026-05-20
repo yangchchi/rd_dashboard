@@ -1,0 +1,48 @@
+{
+  "id": "one_shot_app_generator_1",
+  "pluginKey": "@official-plugins/ai-text-generate",
+  "pluginVersion": "1.0.0",
+  "name": "一句话生成应用",
+  "description": "根据一句话需求（可携带多轮对话历史与上一版代码）生成单文件可运行的前端应用 HTML（含 Tailwind CDN），用于全局悬浮 AI 副驾。流式输出，仅输出 HTML 正文，禁止前言后记。",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "user_intent": {
+        "type": "string",
+        "description": "用户最新一轮的指令（必填）"
+      },
+      "previous_code": {
+        "type": "string",
+        "description": "上一版生成的完整 HTML，用于增量修改（可选）"
+      },
+      "conversation_history": {
+        "type": "string",
+        "description": "已发生的多轮对话历史，按「用户/助手」逐行汇总（可选）"
+      },
+      "platform_context": {
+        "type": "string",
+        "description": "当前页面/需求等上下文摘要（可选）"
+      },
+      "device_target": {
+        "type": "string",
+        "description": "目标设备：desktop/tablet/mobile（可选）"
+      },
+      "theme": {
+        "type": "string",
+        "description": "目标主题：light/dark（可选）"
+      }
+    },
+    "required": ["user_intent"]
+  },
+  "formValue": {
+    "modelID": "",
+    "modelParams": {
+      "maxTokens": 8192,
+      "temperature": 0.4
+    },
+    "prompt": "你是一名资深前端工程师，擅长用最少的代码实现可运行、可演示的小型 Web 应用。请根据下方材料生成或修改一个单文件 HTML 应用。\n\n【硬性输出约束】\n1) 输出语言：仅输出最终 HTML 代码，不要任何前言、解释、Markdown 围栏或思考过程。\n2) 第一个非空字符必须是 `<!DOCTYPE html>`，最后一个非空字符必须是 `</html>`。\n3) 整页样式必须使用 Tailwind CDN：`<script src=\"https://cdn.tailwindcss.com\"></script>`。不引入其他 CSS 框架。\n4) 仅允许下列外部资源域名：cdn.tailwindcss.com、unpkg.com、esm.sh、cdn.jsdelivr.net。除此之外的资源（图片、字体）请使用 data: 或 placehold.co/picsum.photos 等占位。\n5) 状态管理仅使用 JS 变量 / 闭包 / 模块；禁止依赖 localStorage、sessionStorage、IndexedDB、document.cookie 做关键数据持久化（沙箱环境下它们仅是内存模拟）。\n6) 严禁 fetch 真实外网接口、严禁 window.parent/window.top/window.opener、严禁创建 ServiceWorker。如需数据请使用内联 mock 数据。\n7) 严禁输出任何 `<think>`、`<reasoning>`、`<plan>` 等思考标签或工具调用意图。\n8) 全部界面文案中文优先；保持简洁、专业、商务可见。\n9) 默认配色与平台一致：主色 hsl(217 91% 60%)（蓝），强调底色 hsl(210 40% 96%)，文本 hsl(222 47% 11%)；dark 主题下用深色背景 hsl(222 47% 11%) 与浅色文字。\n\n【交互与质量约束】\n- 所有按钮、表单、列表必须可交互，且交互结果对用户可见（如更新计数、切换状态、显示 toast）。\n- 关键交互需有 hover/active/focus 视觉反馈；表单输入需有基本校验。\n- 控制台不得报错；不应依赖外部网络才能渲染（除上述 CDN 外）。\n- 单文件总大小尽量控制在 30KB 以内；超长样式请使用 Tailwind class 实现而非自写 CSS。\n\n【目标设备】\n{{input.device_target}}\n（desktop=以桌面 1280 视口为主；tablet=以 768 视口为主；mobile=以 375 视口为主。请在 viewport/排版/触控目标上有针对性优化）\n\n【目标主题】\n{{input.theme}}\n（light 或 dark；请把对应主题作为根容器的默认值，不必内置切换器）\n\n【平台上下文】（若为空或仅占位则忽略）\n{{input.platform_context}}\n\n【已发生的对话历史】（若为空则忽略，仅用于理解上下文）\n{{input.conversation_history}}\n\n【上一版完整代码】（若为空表示首次生成；不为空表示在该版本上做最小必要修改，保持原有未被要求修改的功能与命名不变）\n{{input.previous_code}}\n\n【用户本轮一句话需求】\n{{input.user_intent}}\n\n请直接输出完整的 HTML 文档，从 `<!DOCTYPE html>` 开始，到 `</html>` 结束。"
+  },
+  "createdAt": 1779148800000,
+  "updatedAt": 1779148800000
+}

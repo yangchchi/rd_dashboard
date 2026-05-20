@@ -161,6 +161,13 @@ export const ACCESS_PERMISSION_LIST: AccessPermissionDef[] = [
     group: g('actions'),
     kind: 'action',
   },
+  {
+    id: 'action.ai.one_shot_app',
+    label: 'AI：一句话生成应用',
+    description: '全局悬浮 AI 副驾入口；用一句话生成可运行的前端原型，并可多轮优化',
+    group: g('actions'),
+    kind: 'action',
+  },
 ];
 
 export const ACCESS_PERMISSION_IDS: string[] = ACCESS_PERMISSION_LIST.map((p) => p.id);
