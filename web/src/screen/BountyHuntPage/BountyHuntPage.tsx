@@ -631,12 +631,12 @@ const BountyHuntPage: React.FC = () => {
         </div>
       </section>
 
-      <section className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
         {isLoading ? (
-          <div className="text-sm text-muted-foreground">加载赏金猎场任务中...</div>
+          <div className="col-span-full text-sm text-muted-foreground">加载赏金猎场任务中...</div>
         ) : null}
         {!isLoading && huntTasks.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
+          <div className="col-span-full rounded-lg border border-dashed border-border p-10 text-center text-sm text-muted-foreground">
             当前暂无待领取悬赏
           </div>
         ) : null}
@@ -666,7 +666,7 @@ const BountyHuntPage: React.FC = () => {
           const plainDesc = htmlToPlainText(task.description || '');
           const statusBracket = requirementStatusBracket(requirementById.get(task.requirementId));
           return (
-            <article key={task.id} className="rd-surface-card flex flex-col gap-4 p-4">
+            <article key={task.id} className="rd-surface-card flex min-w-0 flex-col gap-4 p-4">
               <div className="space-y-1.5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">

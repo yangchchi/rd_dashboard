@@ -47,7 +47,6 @@ import {
   Sun,
   Moon,
   Monitor,
-  ChevronsUpDown,
   ChevronRight,
   Settings,
   Package,
@@ -111,9 +110,18 @@ const isActivePath = (pathname: string, itemPath: string) => {
 const menuButtonClass = (isActive: boolean) =>
   cn(
     "rounded-xl transition-colors duration-200",
+    "group-data-[collapsible=icon]:[&_svg]:!size-5",
     isActive
       ? "border border-primary/30 bg-primary/15 shadow-[inset_0_1px_0_0_hsl(0_0%_100%_/_0.06)]"
       : "border border-transparent hover:border-sidebar-border hover:bg-sidebar-accent/80"
+  );
+
+/** 展开/收起均为 20px（size-5），收起时加粗描边并覆盖 sidebar 默认 [&>svg]:size-4 */
+const navIconClass = (isActive: boolean) =>
+  cn(
+    "size-5 shrink-0 stroke-[1.75]",
+    "group-data-[collapsible=icon]:!size-5 group-data-[collapsible=icon]:!h-5 group-data-[collapsible=icon]:!w-5 group-data-[collapsible=icon]:stroke-[2]",
+    isActive ? "text-primary" : "text-sidebar-foreground/65"
   );
 
 const LayoutContent = ({ children }: { children: ReactNode }) => {
@@ -245,12 +253,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                       className={menuButtonClass(isDashboardPath(pathname))}
                     >
                       <Link href="/dashboard" className="gap-3">
-                        <LayoutDashboard
-                          className={cn(
-                            "size-5 shrink-0 stroke-[1.75]",
-                            isDashboardPath(pathname) ? "text-primary" : "text-sidebar-foreground/65"
-                          )}
-                        />
+                        <LayoutDashboard className={navIconClass(isDashboardPath(pathname))} />
                         <span
                           className={cn(
                             isDashboardPath(pathname)
@@ -288,12 +291,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                           className={menuButtonClass(isActive)}
                         >
                           <Link href={item.path} className="gap-3">
-                            <Icon
-                              className={cn(
-                                "size-5 shrink-0 stroke-[1.75]",
-                                isActive ? "text-primary" : "text-sidebar-foreground/65"
-                              )}
-                            />
+                            <Icon className={navIconClass(isActive)} />
                             <span
                               className={cn(
                                 isActive ? "font-semibold text-primary" : "font-medium text-sidebar-foreground/90"
@@ -316,14 +314,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                       className={menuButtonClass(isActivePath(pathname, "/products"))}
                     >
                       <Link href="/products" className="gap-3">
-                        <Package
-                          className={cn(
-                            "size-5 shrink-0 stroke-[1.75]",
-                            isActivePath(pathname, "/products")
-                              ? "text-primary"
-                              : "text-sidebar-foreground/65"
-                          )}
-                        />
+                        <Package className={navIconClass(isActivePath(pathname, "/products"))} />
                         <span
                           className={cn(
                             isActivePath(pathname, "/products")
@@ -355,14 +346,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                             "group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0"
                           )}
                         >
-                          <Settings
-                            className={cn(
-                              "size-5 shrink-0 stroke-[1.75]",
-                              isSettingsSectionActive(pathname)
-                                ? "text-primary"
-                                : "text-sidebar-foreground/65"
-                            )}
-                          />
+                          <Settings className={navIconClass(isSettingsSectionActive(pathname))} />
                           <span
                             className={cn(
                               "flex-1 text-left group-data-[collapsible=icon]:hidden",
@@ -473,21 +457,17 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                   className="h-10 min-w-0 flex-1 justify-start gap-2 rounded-lg px-2 text-sidebar-foreground shadow-none ring-0 hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring group-data-[collapsible=icon]:h-auto group-data-[collapsible=icon]:w-auto group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-1.5"
                   aria-label={`${displayName}，打开账户菜单`}
                 >
-                  <Avatar className="size-8 shrink-0 border-0 bg-transparent ring-0">
+                  <Avatar className="size-8 shrink-0 border-0 bg-transparent ring-0 group-data-[collapsible=icon]:!size-5">
                     {avatarSrc ? (
                       <AvatarImage src={avatarSrc} alt="" className="object-cover" />
                     ) : null}
                     <AvatarFallback className="bg-transparent text-sidebar-foreground/90">
-                      <User className="size-4" />
+                      <User className="size-4 shrink-0 stroke-[1.75] group-data-[collapsible=icon]:!size-5 group-data-[collapsible=icon]:!h-5 group-data-[collapsible=icon]:!w-5 group-data-[collapsible=icon]:stroke-[2]" />
                     </AvatarFallback>
                   </Avatar>
                   <span className="min-w-0 flex-1 truncate text-left text-sm font-medium group-data-[collapsible=icon]:hidden">
                     {displayName}
                   </span>
-                  <ChevronsUpDown
-                    className="size-4 shrink-0 text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden"
-                    aria-hidden
-                  />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -580,7 +560,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                   className="relative size-9 shrink-0 rounded-lg text-sidebar-foreground/80 shadow-none hover:bg-sidebar-accent hover:text-sidebar-foreground"
                   aria-label="站内信"
                 >
-                  <Bell className="size-[18px] stroke-[1.75]" />
+                  <Bell className="size-[18px] shrink-0 stroke-[1.75] group-data-[collapsible=icon]:!size-5 group-data-[collapsible=icon]:!h-5 group-data-[collapsible=icon]:!w-5 group-data-[collapsible=icon]:stroke-[2]" />
                   {unreadSiteCount > 0 ? (
                     <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-primary-foreground">
                       {unreadSiteCount > 99 ? "99+" : unreadSiteCount}
