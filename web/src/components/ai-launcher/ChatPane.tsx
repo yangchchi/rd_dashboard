@@ -1,10 +1,16 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { Bot, RotateCcw, User } from 'lucide-react';
+import { Bot, Loader2, RotateCcw, User } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import type { AppGenMessage, AppGenStatus, AppGenVersion } from '@/lib/app-gen-types';
+
+function formatBytes(n: number): string {
+  if (!n) return '0 B';
+  if (n < 1024) return `${n} B`;
+  return `${(n / 1024).toFixed(1)} KB`;
+}
 
 interface ChatPaneProps {
   messages: AppGenMessage[];
@@ -56,10 +62,27 @@ export function ChatPane({
               <div
                 className={cn(
                   'min-w-0 max-w-[80%] rounded-lg border px-3 py-2 text-sm leading-relaxed shadow-sm',
-                  isUser ? 'border-primary/30 bg-primary/5 text-foreground' : 'border-border bg-card text-foreground'
+                  isUser
+                    ? 'border-primary/30 bg-primary/5 text-foreground'
+                    : 'border-border bg-card text-foreground',
+                  !isUser && version?.status === 'streaming' && 'border-primary/30 bg-primary/[0.03]'
                 )}
               >
-                <div className="whitespace-pre-wrap break-words">{m.text}</div>
+                <div className="flex flex-wrap items-center gap-1.5 whitespace-pre-wrap break-words">
+                  {!isUser && version?.status === 'streaming' ? (
+                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+                  ) : null}
+                  <span>
+                    {!isUser && version?.status === 'streaming'
+                      ? `正在生成 v${version.seq}`
+                      : m.text}
+                  </span>
+                  {!isUser && version?.status === 'streaming' && version.bytes > 0 ? (
+                    <span className="font-mono text-[11px] text-muted-foreground">
+                      · {formatBytes(version.bytes)}
+                    </span>
+                  ) : null}
+                </div>
                 {version ? (
                   <button
                     type="button"
@@ -73,7 +96,13 @@ export function ChatPane({
                   >
                     v{version.seq}
                     <span className="text-[10px] text-muted-foreground/80">
-                      {version.status === 'streaming' ? '生成中' : version.status === 'done' ? '已完成' : version.status === 'aborted' ? '已停止' : '失败'}
+                      {version.status === 'streaming'
+                        ? '生成中'
+                        : version.status === 'done'
+                          ? '已完成'
+                          : version.status === 'aborted'
+                            ? '已停止'
+                            : '失败'}
                     </span>
                   </button>
                 ) : null}

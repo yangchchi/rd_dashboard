@@ -232,18 +232,23 @@ export function useAppGenSession(): UseAppGenSessionResult {
 
       let accumulated = '';
       let lastFlush = 0;
+      let chunkCount = 0;
 
+      /**
+       * 流式 chunk 写入节流：
+       *  - 前 8 个 chunk 立即刷新（启动瞬间字节计就跳动，避免「无响应」错觉）
+       *  - 之后按 200ms 节流（避免高频 setState 拖慢渲染）
+       *  - force=true 时（完成/中断）必刷
+       */
       const flush = (force: boolean) => {
         const nowTs = performance.now();
-        if (!force && nowTs - lastFlush < 200) return;
+        const isWarmup = chunkCount < 8;
+        if (!force && !isWarmup && nowTs - lastFlush < 200) return;
         lastFlush = nowTs;
         const html = extractHtmlDocument(accumulated) || accumulated;
-        setVersions((prev) => {
-          const updated = prev.map((v) =>
-            v.id === versionId ? { ...v, code: html, bytes: html.length } : v
-          );
-          return updated;
-        });
+        setVersions((prev) =>
+          prev.map((v) => (v.id === versionId ? { ...v, code: html, bytes: html.length } : v))
+        );
       };
 
       try {
@@ -266,6 +271,7 @@ export function useAppGenSession(): UseAppGenSessionResult {
           if (ac.signal.aborted) break;
           if (chunk?.content) {
             accumulated += chunk.content;
+            chunkCount += 1;
             flush(false);
           }
         }

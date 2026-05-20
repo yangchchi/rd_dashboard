@@ -136,11 +136,17 @@ export function AppGenPanel({ open, onOpenChange }: AppGenPanelProps) {
               type="button"
               size="sm"
               variant="ghost"
-              className="h-7 gap-1 px-2 text-xs"
+              className="relative h-7 gap-1 px-2 text-xs"
               onClick={() => setShowCode((v) => !v)}
             >
               <Code2 className="h-3.5 w-3.5" />
               {showCode ? '隐藏代码' : '查看代码'}
+              {isStreaming && !showCode ? (
+                <span className="absolute -right-0.5 -top-0.5 flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                </span>
+              ) : null}
             </Button>
             <Button
               type="button"

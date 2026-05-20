@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Camera,
+  Loader2,
   Maximize2,
   Monitor,
   Moon,
@@ -22,10 +23,20 @@ import {
   type AppGenTheme,
 } from '@/lib/app-gen-types';
 import {
+  closeIncompleteHtml,
   isBridgeMessage,
   isLikelyCompleteHtml,
   wrapHtmlForSandbox,
 } from '@/lib/app-gen-sandbox';
+
+/** 流式期间 iframe srcDoc 重写节流（ms）：太短抖动，太长拖慢感知 */
+const PROGRESSIVE_REFRESH_MS = 1200;
+
+function formatBytes(n: number): string {
+  if (!n) return '0 B';
+  if (n < 1024) return `${n} B`;
+  return `${(n / 1024).toFixed(1)} KB`;
+}
 
 interface PreviewPaneProps {
   code: string;
@@ -63,11 +74,60 @@ export function PreviewPane({
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [iframeKey, setIframeKey] = useState(0);
 
-  const isReady = isLikelyCompleteHtml(code);
-  const srcDoc = useMemo(
-    () => (isReady ? wrapHtmlForSandbox(code, theme) : null),
-    [code, isReady, theme]
+  const isComplete = isLikelyCompleteHtml(code);
+  const isStreaming = status === 'streaming';
+  const hasBody = useMemo(() => /<body/i.test(code), [code]);
+  /** 已经能进入预览：要么完整 </html>，要么流式中已经有 <body> 可以渐进渲染 */
+  const canShowIframe = isComplete || (isStreaming && hasBody);
+
+  // 流式时按 1200ms 节流；完成时立刻刷新一次最终版本
+  const [srcDoc, setSrcDoc] = useState<string | null>(null);
+  const lastFlushRef = useRef(0);
+  const pendingTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!canShowIframe) {
+      setSrcDoc(null);
+      return;
+    }
+    if (isComplete) {
+      // 完成态：丢弃节流计时器，立刻定稿
+      if (pendingTimerRef.current != null) {
+        window.clearTimeout(pendingTimerRef.current);
+        pendingTimerRef.current = null;
+      }
+      setSrcDoc(wrapHtmlForSandbox(code, theme));
+      lastFlushRef.current = performance.now();
+      return;
+    }
+    // 流式态：节流刷新
+    const now = performance.now();
+    const elapsed = now - lastFlushRef.current;
+    const doFlush = () => {
+      lastFlushRef.current = performance.now();
+      setSrcDoc(wrapHtmlForSandbox(code, theme, { progressive: true }));
+      pendingTimerRef.current = null;
+    };
+    if (elapsed >= PROGRESSIVE_REFRESH_MS || lastFlushRef.current === 0) {
+      doFlush();
+      return;
+    }
+    if (pendingTimerRef.current != null) return;
+    const delay = Math.max(0, PROGRESSIVE_REFRESH_MS - elapsed);
+    pendingTimerRef.current = window.setTimeout(doFlush, delay);
+  }, [code, theme, isComplete, isStreaming, canShowIframe]);
+
+  // 卸载时清理待执行的节流任务
+  useEffect(
+    () => () => {
+      if (pendingTimerRef.current != null) window.clearTimeout(pendingTimerRef.current);
+    },
+    []
   );
+
+  const sizeText = formatBytes(code.length);
+  /** 是否已经发起过本轮生成（用于区分"从未生成"与"流式刚启动还没出 body"两种空态） */
+  const hasAnyCode = code.length > 0;
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -160,7 +220,7 @@ export function PreviewPane({
             variant="ghost"
             className="h-7 gap-1 px-2 text-xs"
             onClick={handleScreenshot}
-            disabled={!isReady}
+            disabled={!isComplete}
             title="下载 HTML 备份"
           >
             <Camera className="h-3.5 w-3.5" />
@@ -185,14 +245,24 @@ export function PreviewPane({
         ref={wrapperRef}
         className="relative flex flex-1 min-h-0 items-start justify-center overflow-auto bg-muted/30 p-4"
       >
-        {!isReady ? (
+        {!canShowIframe ? (
           <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-            {status === 'streaming' ? (
+            {isStreaming ? (
               <>
-                <div className="h-1 w-32 overflow-hidden rounded-full bg-muted">
-                  <div className="h-full w-1/3 animate-pulse bg-primary/60" />
+                <div className="flex items-center gap-2 text-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <span className="font-medium">
+                    {hasAnyCode ? '正在构建 HTML 结构…' : 'Ark 已开始响应…'}
+                  </span>
                 </div>
-                <span>正在生成应用结构…</span>
+                <div className="h-1 w-40 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full w-1/3 animate-pulse bg-primary/70" />
+                </div>
+                {hasAnyCode ? (
+                  <span className="font-mono text-[11px] text-muted-foreground/80">
+                    已生成 {sizeText}
+                  </span>
+                ) : null}
               </>
             ) : (
               <span>在右下角输入一句话开始</span>
@@ -200,7 +270,7 @@ export function PreviewPane({
           </div>
         ) : (
           <div
-            className="bg-card shadow-sm transition-all"
+            className="relative bg-card shadow-sm transition-all"
             style={{
               width: `${APP_GEN_DEVICE_WIDTH[device]}px`,
               maxWidth: '100%',
@@ -216,6 +286,12 @@ export function PreviewPane({
               srcDoc={srcDoc ?? undefined}
               className="block h-full w-full border-0"
             />
+            {isStreaming && !isComplete ? (
+              <div className="pointer-events-none absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-full border border-primary/30 bg-card/95 px-2.5 py-1 text-[11px] font-medium text-primary shadow-sm backdrop-blur">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                补全中 · {sizeText}
+              </div>
+            ) : null}
           </div>
         )}
       </div>

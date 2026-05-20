@@ -99,10 +99,22 @@ const PARENT_BRIDGE_SCRIPT = `
         }).join(' ');
       } catch (_) { return ''; }
     };
+    // 已知噪音：Tailwind CDN production-warning、React devtools 提示等，统一吞掉避免污染调试面板
+    var NOISE = [
+      'cdn.tailwindcss.com should not be used in production',
+      'Download the React DevTools',
+    ];
+    var isNoise = function(text){
+      for (var i = 0; i < NOISE.length; i++) {
+        if (text.indexOf(NOISE[i]) !== -1) return true;
+      }
+      return false;
+    };
     ['log','info','warn','error'].forEach(function(level){
       var orig = console[level] ? console[level].bind(console) : function(){};
       console[level] = function(){
-        send(level, safeStringify(arguments));
+        var msg = safeStringify(arguments);
+        if (!isNoise(msg)) send(level, msg);
         try { orig.apply(console, arguments); } catch (_) {}
       };
     });
@@ -171,9 +183,15 @@ export function closeIncompleteHtml(raw: string): string {
  *   - 注入父子桥脚本（用于回传 console / error）
  *   - 注入主题类（用 Tailwind 的 dark: 变体）
  *   - 若模型没给 <head>，则用通用模板兜底
+ *   - 当 progressive=true 且文档未闭合时自动补全（用于流式期间的渐进式预览）
  */
-export function wrapHtmlForSandbox(raw: string, theme: AppGenTheme = 'light'): string {
-  const html = extractHtmlDocument(raw) || raw;
+export function wrapHtmlForSandbox(
+  raw: string,
+  theme: AppGenTheme = 'light',
+  options: { progressive?: boolean } = {}
+): string {
+  const completed = options.progressive ? closeIncompleteHtml(raw) : '';
+  const html = completed || extractHtmlDocument(raw) || raw;
   if (!html) return buildFallbackDocument('（暂无内容，请输入一句话开始生成）', theme);
 
   const cspMeta = buildCspMeta();
