@@ -50,7 +50,7 @@ export function MiaodaPromptInput({
       {leadingSlot ? (
         <>
           {leadingSlot}
-          <div className="h-5 w-px shrink-0 bg-[hsl(214_32%_91%)]" aria-hidden />
+          <div className="h-5 w-px shrink-0 bg-border" aria-hidden />
         </>
       ) : null}
       <button
@@ -59,7 +59,7 @@ export function MiaodaPromptInput({
         className={cn(
           'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
           activeTab === 'explore'
-            ? 'bg-[hsl(217_91%_60%/0.1)] text-[hsl(217_91%_50%)]'
+            ? 'bg-primary/10 text-primary'
             : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
         )}
       >
@@ -72,7 +72,7 @@ export function MiaodaPromptInput({
         className={cn(
           'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
           activeTab === 'develop'
-            ? 'bg-[hsl(217_91%_60%/0.1)] text-[hsl(217_91%_50%)]'
+            ? 'bg-primary/10 text-primary'
             : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
         )}
       >

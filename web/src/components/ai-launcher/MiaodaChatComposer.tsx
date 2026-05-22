@@ -25,7 +25,7 @@ interface MiaodaChatComposerProps {
 /** Agent 工作台底部输入（与小研 Agent 一致） */
 export function MiaodaChatComposer(props: MiaodaChatComposerProps) {
   return (
-    <div className="shrink-0 border-t border-[hsl(214_32%_91%)] bg-white px-4 py-3">
+    <div className="shrink-0 border-t border-border bg-card px-4 py-3">
       <AgentComposerField
         {...props}
         placeholder="告诉小研如何修改应用"

@@ -15,12 +15,12 @@ import type { AppGenRecentApp, AppGenRecentIconTone } from '@/lib/app-gen-types'
 import { cn } from '@/lib/utils';
 
 const TONE_CLASS: Record<AppGenRecentIconTone, string> = {
-  orange: 'bg-orange-100 text-orange-600',
-  slate: 'bg-slate-200 text-slate-600',
-  amber: 'bg-amber-100 text-amber-700',
-  blue: 'bg-blue-100 text-blue-600',
-  green: 'bg-emerald-100 text-emerald-600',
-  purple: 'bg-violet-100 text-violet-600',
+  orange: 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
+  slate: 'bg-muted text-muted-foreground',
+  amber: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+  blue: 'bg-primary/15 text-primary',
+  green: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+  purple: 'bg-violet-500/15 text-violet-600 dark:text-violet-400',
 };
 
 const TONE_ICON: Record<AppGenRecentIconTone, LucideIcon> = {
@@ -61,8 +61,8 @@ export function MiaodaAppNavMenu({
           type="button"
           aria-label="最近应用"
           className={cn(
-            'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[hsl(214_32%_91%)] bg-[hsl(210_20%_98%)] text-muted-foreground transition-colors',
-            'hover:bg-white hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground transition-colors',
+            'hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             disabled && 'cursor-not-allowed opacity-50'
           )}
         >
@@ -72,7 +72,7 @@ export function MiaodaAppNavMenu({
       <DropdownMenuContent
         align="start"
         sideOffset={8}
-        className="w-64 rounded-xl border border-[hsl(214_32%_91%)] p-1 shadow-lg"
+        className="w-64 rounded-xl border border-border bg-popover p-1 shadow-lg"
       >
         {!isHome && onGoHome ? (
           <DropdownMenuItem
@@ -86,7 +86,7 @@ export function MiaodaAppNavMenu({
 
         {list.length > 0 ? (
           <>
-            {!isHome ? <DropdownMenuSeparator className="my-1 bg-[hsl(214_32%_91%)]" /> : null}
+            {!isHome ? <DropdownMenuSeparator className="my-1" /> : null}
             <DropdownMenuLabel className="px-2.5 py-1 text-xs font-normal text-muted-foreground">
               {isHome ? '最近创建的应用' : '最近应用'}
             </DropdownMenuLabel>
@@ -98,7 +98,7 @@ export function MiaodaAppNavMenu({
                   key={app.id}
                   className={cn(
                     'cursor-pointer gap-2.5 rounded-lg px-2.5 py-2',
-                    isCurrent && 'bg-[hsl(217_91%_60%/0.08)]'
+                    isCurrent && 'bg-primary/8'
                   )}
                   onSelect={() => {
                     if (!isCurrent) onSwitchApp(app.id);

@@ -189,10 +189,7 @@ export function AppGenPanel({ open, onOpenChange }: AppGenPanelProps) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className={cn(
-          'flex h-full w-full max-w-none flex-col gap-0 border-l p-0 sm:max-w-none',
-          !hasAny && 'bg-[hsl(210_20%_98%)]'
-        )}
+        className="flex h-full w-full max-w-none flex-col gap-0 border-l border-border bg-background p-0 sm:max-w-none"
         style={{ width: hasAny ? 'min(96vw, 1280px)' : 'min(96vw, 1080px)' }}
       >
         <SheetTitle className="sr-only">一句话生成应用</SheetTitle>
@@ -225,7 +222,7 @@ export function AppGenPanel({ open, onOpenChange }: AppGenPanelProps) {
 
             <div className="flex min-h-0 flex-1">
               {/* 左侧：妙搭对话区 + 底部输入 */}
-              <div className="flex w-[min(100%,400px)] shrink-0 flex-col border-r border-[hsl(214_32%_91%)] sm:w-[38%] sm:max-w-[420px]">
+              <div className="flex w-[min(100%,400px)] shrink-0 flex-col border-r border-border sm:w-[38%] sm:max-w-[420px]">
                 <ChatPane
                   messages={session.messages}
                   status={session.status}

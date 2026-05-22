@@ -40,7 +40,7 @@ export function MiaodaWorkspaceHeader({
   return (
     <header
       className={cn(
-        'flex shrink-0 items-center justify-between gap-3 border-b border-[hsl(214_32%_91%)] bg-white px-4 py-2.5',
+        'flex shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-4 py-2.5',
         className
       )}
     >
@@ -52,11 +52,11 @@ export function MiaodaWorkspaceHeader({
           onGoHome={onGoHome}
           onSwitchApp={onSwitchApp}
         />
-        <div className="h-5 w-px shrink-0 bg-[hsl(214_32%_91%)]" aria-hidden />
+        <div className="h-5 w-px shrink-0 bg-border" aria-hidden />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="truncate text-sm font-semibold text-foreground">{projectTitle}</h2>
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[hsl(270_60%_55%/0.12)] px-2 py-0.5 text-[11px] font-medium text-[hsl(270_60%_45%)]">
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[hsl(270_60%_55%/0.12)] px-2 py-0.5 text-[11px] font-medium text-[hsl(270_60%_55%)]">
               <Wand2 className="h-3 w-3" />
               灵感
             </span>
@@ -105,7 +105,7 @@ export function MiaodaWorkspaceHeader({
           <Button
             type="button"
             size="sm"
-            className="h-8 gap-1 rounded-lg bg-[hsl(217_91%_60%)] px-3 text-xs text-white hover:bg-[hsl(217_91%_55%)]"
+            className="h-8 gap-1 rounded-lg bg-primary px-3 text-xs text-primary-foreground hover:bg-primary/90"
             onClick={() => toast.info('一键发布将在后续版本开放')}
           >
             <Rocket className="h-3.5 w-3.5" />

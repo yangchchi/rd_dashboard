@@ -178,9 +178,9 @@ export function PreviewPane({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#f0f2f5]">
+    <div className="flex h-full min-h-0 flex-col bg-muted/40">
       {/* 妙搭预览工具栏 */}
-      <div className="shrink-0 border-b border-[hsl(214_32%_91%)] bg-white">
+      <div className="shrink-0 border-b border-border bg-card">
         <div className="flex items-center justify-between gap-2 px-3 py-2">
           <div className="flex items-center gap-1">
             <button
@@ -188,7 +188,7 @@ export function PreviewPane({
               className={cn(
                 'inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium',
                 !showCode
-                  ? 'bg-[hsl(217_91%_60%/0.1)] text-[hsl(217_91%_50%)]'
+                  ? 'bg-primary/10 text-primary'
                   : 'text-muted-foreground hover:bg-muted'
               )}
               onClick={() => showCode && onToggleCode?.()}
@@ -201,7 +201,7 @@ export function PreviewPane({
               className={cn(
                 'inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium',
                 showCode
-                  ? 'bg-[hsl(217_91%_60%/0.1)] text-[hsl(217_91%_50%)]'
+                  ? 'bg-primary/10 text-primary'
                   : 'text-muted-foreground hover:bg-muted'
               )}
               onClick={() => !showCode && onToggleCode?.()}
@@ -221,7 +221,7 @@ export function PreviewPane({
                   variant="ghost"
                   className={cn(
                     'h-7 gap-1 px-2 text-xs',
-                    device === d && 'bg-muted text-[hsl(217_91%_50%)]'
+                    device === d && 'bg-muted text-primary'
                   )}
                   onClick={() => onDeviceChange(d)}
                 >
@@ -277,8 +277,8 @@ export function PreviewPane({
             </Button>
           </div>
         </div>
-        <div className="flex items-center gap-2 border-t border-[hsl(214_32%_91%/0.8)] px-3 py-1.5">
-          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-[hsl(214_32%_91%)] bg-[hsl(210_20%_98%)] px-2.5 py-1 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 border-t border-border px-3 py-1.5">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-border bg-muted px-2.5 py-1 text-xs text-muted-foreground">
             <Link2 className="h-3 w-3 shrink-0" />
             <span className="truncate">
               {isStreaming ? '生成中…' : isComplete ? '刚刚更新' : '等待生成'}
@@ -327,7 +327,7 @@ export function PreviewPane({
           </div>
         ) : (
           <div
-            className="relative overflow-hidden rounded-xl bg-white shadow-[0_4px_24px_rgba(15,23,42,0.08)] transition-all"
+            className="relative overflow-hidden rounded-xl bg-card shadow-md transition-all"
             style={{
               width: `${APP_GEN_DEVICE_WIDTH[device]}px`,
               maxWidth: '100%',
@@ -352,7 +352,7 @@ export function PreviewPane({
           </div>
         )}
       </div>
-      <div className="shrink-0 border-t border-[hsl(214_32%_91%)] bg-white">
+      <div className="shrink-0 border-t border-border bg-card">
         <button
           type="button"
           onClick={() => setConsoleOpen((v) => !v)}

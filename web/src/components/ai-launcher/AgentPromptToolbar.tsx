@@ -79,7 +79,7 @@ export function AgentPromptToolbar({
           <Plus className={size === 'compact' ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
         </button>
 
-        <div className="mx-0.5 flex items-center gap-0.5 rounded-lg border border-[hsl(214_32%_91%)] bg-[hsl(210_20%_98%)] p-0.5">
+        <div className="mx-0.5 flex items-center gap-0.5 rounded-lg border border-border bg-muted p-0.5">
           <button
             type="button"
             disabled={disabled || isStreaming}
@@ -87,7 +87,7 @@ export function AgentPromptToolbar({
             className={cn(
               MODE_BTN,
               mode === 'ask'
-                ? 'bg-white text-[hsl(217_91%_50%)] shadow-sm'
+                ? 'bg-card text-primary shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
@@ -101,7 +101,7 @@ export function AgentPromptToolbar({
             className={cn(
               MODE_BTN,
               mode === 'agent'
-                ? 'bg-[hsl(217_91%_60%/0.12)] text-[hsl(217_91%_50%)]'
+                ? 'bg-primary/12 text-primary'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
@@ -170,7 +170,7 @@ export function AgentPromptToolbar({
               sendBtn,
               'ml-0.5',
               canSend && !disabled
-                ? 'bg-[hsl(217_91%_60%)] text-white shadow-sm hover:bg-[hsl(217_91%_55%)]'
+                ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90'
                 : 'bg-muted text-muted-foreground'
             )}
           >

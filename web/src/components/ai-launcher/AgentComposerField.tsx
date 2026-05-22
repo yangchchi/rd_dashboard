@@ -512,7 +512,7 @@ export function AgentComposerField({
   return (
     <div
       className={cn(
-        'rounded-2xl border border-[hsl(214_32%_91%)] bg-white shadow-[0_8px_40px_-12px_rgba(15,23,42,0.12)]',
+        'rounded-2xl border border-border bg-card shadow-sm',
         menuOpen ? 'overflow-visible' : 'overflow-hidden',
         className
       )}
@@ -526,7 +526,7 @@ export function AgentComposerField({
         onChange={(e) => void handleFileInput(e)}
       />
       {headerSlot ? (
-        <div className="border-b border-[hsl(214_32%_91%/0.8)]">{headerSlot}</div>
+        <div className="border-b border-border">{headerSlot}</div>
       ) : null}
       <div ref={menuAnchorRef} className="relative overflow-visible">
         {menuPanel}
@@ -566,7 +566,7 @@ export function AgentComposerField({
         onOpenSkills={openSkillPalette}
         onOpenFiles={openFilePalette}
         size={size}
-        className="border-t border-[hsl(214_32%_91%/0.8)]"
+        className="border-t border-border"
       />
     </div>
   );

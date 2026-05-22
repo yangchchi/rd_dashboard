@@ -46,7 +46,7 @@ const ACCENT_BAR_CLASS: Record<AppGenShowcaseAccent, string> = {
 
 /** 统一卡片尺寸（预览 + 文案区） */
 const SHOWCASE_CARD_CLASS =
-  'group flex h-[196px] w-full flex-col overflow-hidden rounded-xl border border-border bg-white text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-[hsl(217_91%_60%/0.35)] hover:shadow-md';
+  'group flex h-[196px] w-full flex-col overflow-hidden rounded-xl border border-border bg-card text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-md';
 
 interface PromptStarterProps {
   input: string;
@@ -85,12 +85,12 @@ export function PromptStarter({
   const [activeTab, setActiveTab] = useState<MiaodaPromptTab>('explore');
 
   return (
-    <div className="flex h-full w-full flex-col overflow-y-auto bg-[hsl(210_20%_98%)]">
+    <div className="flex h-full w-full flex-col overflow-y-auto bg-background">
       <section className="mx-auto w-full max-w-4xl shrink-0 px-6 pb-4 pt-8">
         <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
           <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight text-foreground sm:text-[28px]">
             <span>海智赋能研发，应用万象新生</span>
-            <Sparkles className="h-6 w-6 shrink-0 text-[hsl(217_91%_60%)]" aria-hidden />
+            <Sparkles className="h-6 w-6 shrink-0 text-primary" aria-hidden />
           </h1>
           <div className="flex items-center gap-2 text-xs">
            
@@ -139,8 +139,8 @@ export function PromptStarter({
                 disabled={disabled}
                 onClick={() => onPick(pill.prompt)}
                 className={cn(
-                  'inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3.5 py-1.5 text-sm text-foreground shadow-sm transition-all',
-                  'hover:border-[hsl(217_91%_60%/0.4)] hover:shadow-md',
+                  'inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-sm text-foreground shadow-sm transition-all',
+                  'hover:border-primary/40 hover:shadow-md',
                   disabled && 'cursor-not-allowed opacity-60'
                 )}
               >
@@ -175,7 +175,7 @@ export function PromptStarter({
                   )}
                   aria-hidden
                 />
-                <span className="pl-2 text-sm font-medium text-foreground group-hover:text-[hsl(217_91%_50%)]">
+                <span className="pl-2 text-sm font-medium text-foreground group-hover:text-primary">
                   {item.title}
                 </span>
                 <span className="mt-1 pl-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
@@ -187,15 +187,15 @@ export function PromptStarter({
         </div>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          <kbd className="rounded border border-border bg-white px-1.5 py-0.5 font-mono text-[10px]">
+          <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
             ⌘ / Ctrl + I
           </kbd>{' '}
           唤起面板 ·{' '}
-          <kbd className="rounded border border-border bg-white px-1.5 py-0.5 font-mono text-[10px]">
+          <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
             ⌘ / Ctrl + Enter
           </kbd>{' '}
           发送 ·{' '}
-          <kbd className="rounded border border-border bg-white px-1.5 py-0.5 font-mono text-[10px]">
+          <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px]">
             Esc
           </kbd>{' '}
           关闭

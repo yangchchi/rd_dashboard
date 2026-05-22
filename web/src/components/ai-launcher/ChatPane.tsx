@@ -66,7 +66,7 @@ export function ChatPane({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[hsl(210_20%_98%)]">
+    <div className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5">
         {pairs.map(({ user, assistant, version }, idx) => {
           const isStreaming = version?.status === 'streaming';
@@ -78,7 +78,7 @@ export function ChatPane({
             <div key={user.id} className="space-y-3">
               {/* 用户诉求 */}
               <div className="flex justify-end">
-                <div className="max-w-[92%] rounded-2xl rounded-tr-md border border-[hsl(214_32%_91%)] bg-white px-3.5 py-2.5 text-sm leading-relaxed text-foreground shadow-sm">
+                <div className="max-w-[92%] rounded-2xl rounded-tr-md border border-border bg-card px-3.5 py-2.5 text-sm leading-relaxed text-foreground shadow-sm">
                   {user.text}
                 </div>
               </div>
@@ -88,24 +88,24 @@ export function ChatPane({
                 <div className="space-y-2 text-sm text-muted-foreground">
                   {showThinking ? (
                     <div className="flex items-center gap-2">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(217_91%_60%)]" />
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
                       <span>思考中…</span>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 text-xs">
-                      <Sparkles className="h-3.5 w-3.5 text-[hsl(217_91%_60%)]" />
+                      <Sparkles className="h-3.5 w-3.5 text-primary" />
                       <span>已完成方案设计</span>
                     </div>
                   )}
 
-                  <details className="group rounded-xl border border-[hsl(214_32%_91%)] bg-white" open={isLast}>
+                  <details className="group rounded-xl border border-border bg-card" open={isLast}>
                     <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
-                      <Pencil className="h-3.5 w-3.5 text-[hsl(217_91%_60%)]" />
+                      <Pencil className="h-3.5 w-3.5 text-primary" />
                       方案设计
                       <ChevronRight className="ml-auto h-3.5 w-3.5 text-muted-foreground group-open:hidden" />
                       <ChevronDown className="ml-auto hidden h-3.5 w-3.5 text-muted-foreground group-open:block" />
                     </summary>
-                    <div className="space-y-2 border-t border-[hsl(214_32%_91%/0.8)] px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+                    <div className="space-y-2 border-t border-border px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
                       <p>
                         <span className="font-medium text-foreground">页面结构：</span>
                         输入区、列表/主内容区、操作按钮区
@@ -124,14 +124,14 @@ export function ChatPane({
               {version ? (
                 <div
                   className={cn(
-                    'rounded-xl border bg-white p-3 shadow-sm transition-colors',
+                    'rounded-xl border bg-card p-3 shadow-sm transition-colors',
                     isCurrent
-                      ? 'border-[hsl(217_91%_60%/0.45)] ring-1 ring-[hsl(217_91%_60%/0.15)]'
-                      : 'border-[hsl(214_32%_91%)]'
+                      ? 'border-primary/45 ring-1 ring-primary/15'
+                      : 'border-border'
                   )}
                 >
                   <div className="flex items-start gap-2.5">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[hsl(217_91%_60%/0.12)] text-[hsl(217_91%_50%)]">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/12 text-primary">
                       <Box className="h-4 w-4" />
                     </div>
                     <div className="min-w-0 flex-1">
@@ -146,7 +146,7 @@ export function ChatPane({
                       </p>
                       {isStreaming ? (
                         <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
-                          <div className="h-full w-1/3 animate-pulse bg-[hsl(217_91%_60%)]" />
+                          <div className="h-full w-1/3 animate-pulse bg-primary" />
                         </div>
                       ) : (
                         <div className="mt-2 flex flex-wrap gap-2">
@@ -156,8 +156,8 @@ export function ChatPane({
                             className={cn(
                               'rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors',
                               isCurrent
-                                ? 'border-[hsl(217_91%_60%/0.4)] bg-[hsl(217_91%_60%/0.08)] text-[hsl(217_91%_50%)]'
-                                : 'border-border bg-muted/50 text-muted-foreground hover:border-[hsl(217_91%_60%/0.35)] hover:text-[hsl(217_91%_50%)]'
+                                ? 'border-primary/40 bg-primary/8 text-primary'
+                                : 'border-border bg-muted/50 text-muted-foreground hover:border-primary/35 hover:text-primary'
                             )}
                           >
                             预览应用
@@ -165,7 +165,7 @@ export function ChatPane({
                           <button
                             type="button"
                             onClick={onViewCode}
-                            className="rounded-lg border border-border bg-white px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                            className="rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
                           >
                             查看变更
                           </button>
@@ -187,7 +187,7 @@ export function ChatPane({
               <button
                 type="button"
                 onClick={onRetry}
-                className="mt-2 inline-flex items-center gap-1 rounded-lg border border-destructive/30 bg-white px-2.5 py-1 text-xs text-destructive hover:bg-destructive/5"
+                className="mt-2 inline-flex items-center gap-1 rounded-lg border border-destructive/30 bg-card px-2.5 py-1 text-xs text-destructive hover:bg-destructive/5"
               >
                 <RotateCcw className="h-3 w-3" /> 重试
               </button>
