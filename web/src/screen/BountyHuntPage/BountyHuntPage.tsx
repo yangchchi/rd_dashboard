@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Coins, Send, Swords, Timer, LockKeyhole, Sparkles, Package, ShieldCheck, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
+import { toastApiError } from '@/lib/api-error';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Input } from '@/components/ui/input';
@@ -333,7 +334,7 @@ const BountyHuntPage: React.FC = () => {
       setDescription('');
       setRewardCoins([88]);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '发布失败');
+      toastApiError(e, '发布失败');
     }
   };
 
@@ -364,7 +365,7 @@ const BountyHuntPage: React.FC = () => {
         toast.error(`慢了一步，下次手速快点！补偿 +${result.consolationCoins ?? 1} 勇气金币`);
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '领取失败');
+      toastApiError(e, '领取失败');
     } finally {
       setAcceptingSlot(null);
     }
@@ -406,7 +407,7 @@ const BountyHuntPage: React.FC = () => {
       }
       toast.success('提测/交付成功，包裹已送达发起人');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '交付失败');
+      toastApiError(e, '交付失败');
     }
   };
 
@@ -449,7 +450,7 @@ const BountyHuntPage: React.FC = () => {
       toast.success('Bounty Collected！赏金已结算');
       window.setTimeout(() => setShowCollectedText(false), 1500);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '结算失败');
+      toastApiError(e, '结算失败');
     }
   };
 
@@ -458,7 +459,7 @@ const BountyHuntPage: React.FC = () => {
       await rejectBounty.mutateAsync(taskId);
       toast.error('任务未达标，退回返工');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '打回失败');
+      toastApiError(e, '打回失败');
     }
   };
 

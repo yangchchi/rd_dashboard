@@ -51,6 +51,7 @@ import {
   useUpsertSpec,
 } from '@/lib/rd-hooks';
 import { toast } from 'sonner';
+import { toastApiError } from '@/lib/api-error';
 import { formatSpecValidationIssues, validateSpecForReview } from '@shared/spec-validation';
 import type { IRequirement } from '@/lib/rd-types';
 import { isBrownfieldChangeType } from '@/lib/rd-types';
@@ -654,7 +655,7 @@ const SpecEditPage: React.FC = () => {
       toast.success('功能规格（FS）已生成');
     } catch (e) {
       logger.error('FS generation failed:', e);
-      toast.error(e instanceof Error ? e.message : 'FS 生成失败');
+      toastApiError(e, 'FS 生成失败');
     } finally {
       setGeneratingFs(false);
     }
@@ -712,7 +713,7 @@ const SpecEditPage: React.FC = () => {
       toast.success('技术规格（TS）已生成');
     } catch (e) {
       logger.error('TS generation failed:', e);
-      toast.error(e instanceof Error ? e.message : 'TS 生成失败');
+      toastApiError(e, 'TS 生成失败');
     } finally {
       setGeneratingTs(false);
     }
@@ -768,7 +769,7 @@ const SpecEditPage: React.FC = () => {
       toast.success('编程计划（CP）已生成');
     } catch (e) {
       logger.error('CP generation failed:', e);
-      toast.error(e instanceof Error ? e.message : 'CP 生成失败');
+      toastApiError(e, 'CP 生成失败');
     } finally {
       setGeneratingCp(false);
     }
@@ -810,7 +811,7 @@ const SpecEditPage: React.FC = () => {
       toast.success('规格说明书已提交审核');
     } catch (error) {
       logger.error('Spec submit review failed:', error);
-      toast.error(error instanceof Error ? error.message : '提交审核失败，请稍后重试');
+      toastApiError(error, '提交审核失败，请稍后重试');
     }
   }, [spec, validateJson, updateSpec, submitSpecReviewMutation]);
 

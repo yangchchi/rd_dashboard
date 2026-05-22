@@ -43,6 +43,7 @@ import {
 } from '@/lib/access-policy-storage';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { toastApiError } from '@/lib/api-error';
 
 const grouped = (): Record<AccessPermissionGroup, typeof ACCESS_PERMISSION_LIST> => {
   const acc = {} as Record<AccessPermissionGroup, typeof ACCESS_PERMISSION_LIST>;
@@ -122,7 +123,7 @@ const RoleDefinitionPage: React.FC = () => {
       setDialogOpen(false);
       reload();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '保存失败');
+      toastApiError(e, '保存失败');
     }
   };
 
@@ -143,7 +144,7 @@ const RoleDefinitionPage: React.FC = () => {
       reload();
       toast.success('已恢复默认角色');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '恢复失败');
+      toastApiError(e, '恢复失败');
     }
   };
 

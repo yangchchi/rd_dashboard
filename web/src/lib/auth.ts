@@ -6,6 +6,65 @@ const USER_KEY = '__rd_auth_user';
 const USER_UPDATED_EVENT = 'rd-auth-user-updated';
 const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
+export const LOGIN_PATH = '/login';
+
+export class AuthSessionExpiredError extends Error {
+  readonly isAuthSessionExpired = true as const;
+
+  constructor(message = '登录已过期，请重新登录') {
+    super(message);
+    this.name = 'AuthSessionExpiredError';
+  }
+}
+
+export function isAuthSessionExpiredError(error: unknown): boolean {
+  if (error instanceof AuthSessionExpiredError) return true;
+  if (!(error instanceof Error)) return false;
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes('401') ||
+    msg.includes('unauthorized') ||
+    msg.includes('未登录') ||
+    msg.includes('登录已过期')
+  );
+}
+
+function isOnLoginRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  const path = window.location.pathname;
+  return path === LOGIN_PATH || path.startsWith(`${LOGIN_PATH}/`);
+}
+
+/** 清除会话并强制跳转登录页（未登录、登录过期、主动退出时调用） */
+export function forceRedirectToLogin(): void {
+  if (typeof window === 'undefined') return;
+  clearAuthSession();
+  if (isOnLoginRoute()) return;
+  window.location.replace(LOGIN_PATH);
+}
+
+/** API 返回 401 时：清会话、跳转登录，并抛出可识别的错误 */
+export function rejectIfUnauthorized(status: number, bodyText = ''): void {
+  if (status !== 401) return;
+  forceRedirectToLogin();
+  throw new AuthSessionExpiredError(
+    parseUnauthorizedMessage(bodyText) || '登录已过期，请重新登录'
+  );
+}
+
+function parseUnauthorizedMessage(bodyText: string): string | null {
+  if (!bodyText.trim()) return null;
+  try {
+    const parsed = JSON.parse(bodyText) as {
+      error?: { message?: string };
+      message?: string;
+    };
+    return parsed.error?.message || parsed.message || null;
+  } catch {
+    return null;
+  }
+}
+
 function emitStoredUserUpdated(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event('storage'));

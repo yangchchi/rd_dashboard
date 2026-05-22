@@ -36,6 +36,7 @@ import { rdAuditCreate, rdAuditUpdate } from '@/lib/rd-actor';
 import { rdApi } from '@/lib/rd-api';
 import type { IProduct } from '@/lib/rd-types';
 import { toast } from 'sonner';
+import { toastApiError } from '@/lib/api-error';
 import Link from 'next/link';
 import { ExternalLink, Package, Pencil, Plus, Trash2 } from 'lucide-react';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
@@ -84,7 +85,7 @@ const ProductManagementPage: React.FC = () => {
       const list = await rdApi.listProducts();
       setProducts(list);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '加载产品列表失败');
+      toastApiError(e, '加载产品列表失败');
     } finally {
       setLoading(false);
     }
@@ -152,7 +153,7 @@ const ProductManagementPage: React.FC = () => {
       setDialogOpen(false);
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '保存失败');
+      toastApiError(e, '保存失败');
     } finally {
       setSubmitting(false);
     }
@@ -166,7 +167,7 @@ const ProductManagementPage: React.FC = () => {
       setDeleteTarget(null);
       await load();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '删除失败');
+      toastApiError(e, '删除失败');
     }
   };
 

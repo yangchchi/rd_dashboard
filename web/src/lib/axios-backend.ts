@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-import { getAuthToken } from '@/lib/auth';
+import { AuthSessionExpiredError, forceRedirectToLogin, getAuthToken } from '@/lib/auth';
 
 const baseURL =
   typeof window !== 'undefined'
@@ -20,3 +20,14 @@ axiosForBackend.interceptors.request.use((config) => {
   }
   return config;
 });
+
+axiosForBackend.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      forceRedirectToLogin();
+      return Promise.reject(new AuthSessionExpiredError());
+    }
+    return Promise.reject(error);
+  }
+);

@@ -31,6 +31,7 @@ import {
 } from '@/lib/access-policy-storage';
 import type { IUser } from '@/lib/rd-types';
 import { toast } from 'sonner';
+import { toastApiError } from '@/lib/api-error';
 
 function roleIdsLabel(ids: string[], roles: AccessRoleRecord[]): string {
   if (ids.length === 0) return '未分配（仅智研看板）';
@@ -81,7 +82,7 @@ const UserManagementPage: React.FC = () => {
       const list = await authApi.listUsers();
       setUsers(list);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '加载用户失败');
+      toastApiError(e, '加载用户失败');
     } finally {
       setLoading(false);
     }
@@ -127,7 +128,7 @@ const UserManagementPage: React.FC = () => {
       toast.success('访问角色已更新');
       await loadUsers();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '更新角色失败');
+      toastApiError(e, '更新角色失败');
     }
   };
 
@@ -149,7 +150,7 @@ const UserManagementPage: React.FC = () => {
       setCreateOpen(false);
       await loadUsers();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '创建失败');
+      toastApiError(e, '创建失败');
     } finally {
       setSubmitting(false);
     }
@@ -161,7 +162,7 @@ const UserManagementPage: React.FC = () => {
       toast.success('用户删除成功');
       await loadUsers();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '删除失败');
+      toastApiError(e, '删除失败');
     }
   };
 

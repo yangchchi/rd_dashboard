@@ -62,7 +62,7 @@ import {
 } from '@/lib/rd-hooks';
 import { gitBlobViewerUrl } from '@/lib/git-web-url';
 import { rdApi } from '@/lib/rd-api';
-import { getAuthToken } from '@/lib/auth';
+import { getAuthToken, isAuthSessionExpiredError } from '@/lib/auth';
 import { defaultGitPatFormFields } from '@/lib/git-pat-storage';
 import type {
   IAgentSession,
@@ -1088,6 +1088,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
       toast.success(`流水线创建成功，文档已提交（${publishResult.commitHash || '未知提交号'}）`);
       router.push(`/ai-pipeline/${encodeURIComponent(taskId)}`);
     } catch (error) {
+      if (isAuthSessionExpiredError(error)) return;
       const message = extractPipelineErrorMessage(error, '提交失败');
       toast.error(message);
       logger.error('创建流水线并提交文档失败:', error);

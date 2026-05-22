@@ -18,6 +18,7 @@ import { FileSearch, CheckCircle, XCircle, RotateCcw, ExternalLink, MessageSquar
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { toast } from 'sonner';
+import { toastApiError } from '@/lib/api-error';
 import { getCurrentUser } from '@/lib/auth';
 import { rdAuditUpdate } from '@/lib/rd-actor';
 import type { IAcceptanceRecord as IStoreAcceptanceRecord } from '@/lib/mock-data-store';
@@ -208,7 +209,7 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
         toast.success(approved ? '验收已通过' : '验收已驳回');
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '验收提交失败');
+      toastApiError(e, '验收提交失败');
     }
     setIsAcceptDialogOpen(false);
     setIsRejectDialogOpen(false);
@@ -236,7 +237,7 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
         router.push(`/prd/${prd.id}/edit`);
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'RFC 发起失败');
+      toastApiError(e, 'RFC 发起失败');
     }
     setIsRFCDialogOpen(false);
     setFeedback('');

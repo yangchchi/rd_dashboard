@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
+import { SpecPhaseProgress } from '@/components/spec-phase-progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty';
@@ -21,6 +21,7 @@ import {
   ArrowRight,
   Send,
   XCircle,
+  ListChecks,
 } from 'lucide-react';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
@@ -37,7 +38,11 @@ import {
   useSpecsList,
   useSubmitSpecReview,
 } from '@/lib/rd-hooks';
-import { mapSpecsToListRows, type ISpecListRow } from '@/lib/spec-list-mapper';
+import {
+  mapSpecsToListRows,
+  specPhaseProgressPercent,
+  type ISpecListRow,
+} from '@/lib/spec-list-mapper';
 import { toast } from 'sonner';
 
 interface IConflictResult {
@@ -69,29 +74,20 @@ const SpecPage: React.FC = () => {
   const [conflicts, setConflicts] = useState<IConflictResult[]>([]);
 
   const getFSProgress = (spec: ISpecListRow) => {
-    const total =
-      spec.functionalSpec.apis +
-      spec.functionalSpec.uiComponents +
-      spec.functionalSpec.interactions;
-    if (total === 0) {
-      return spec.fsMarkdownPresent ? 100 : 0;
-    }
-    const completed =
-      spec.functionalSpec.completedApis +
-      spec.functionalSpec.completedUi +
-      spec.functionalSpec.completedInteractions;
-    return Math.round((completed / total) * 100);
+    const countSum =
+      spec.functionalSpec.userStories +
+      spec.functionalSpec.pageDesigns +
+      spec.functionalSpec.rules;
+    return specPhaseProgressPercent(countSum, spec.fsMarkdownPresent);
   };
 
   const getTSProgress = (spec: ISpecListRow) => {
-    let completed = 0;
-    const total = 3;
-    if (spec.technicalSpec.databaseSchema) completed++;
-    if (spec.technicalSpec.architecture) completed++;
-    if (spec.technicalSpec.completedIntegrations > 0) completed++;
-    if (completed === 0 && spec.tsMarkdownPresent) return 100;
-    return Math.round((completed / total) * 100);
+    const countSum = spec.technicalSpec.tables + spec.technicalSpec.apis;
+    return specPhaseProgressPercent(countSum, spec.tsMarkdownPresent);
   };
+
+  const getCPProgress = (spec: ISpecListRow) =>
+    specPhaseProgressPercent(spec.cpSpec.tasks, spec.cpMarkdownPresent);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -129,14 +125,16 @@ const SpecPage: React.FC = () => {
     try {
       const techSpecContent = `
 功能规格 (FS):
-- API接口: ${spec.functionalSpec.completedApis}/${spec.functionalSpec.apis} 已完成
-- UI组件: ${spec.functionalSpec.completedUi}/${spec.functionalSpec.uiComponents} 已完成
-- 交互逻辑: ${spec.functionalSpec.completedInteractions}/${spec.functionalSpec.interactions} 已完成
+- 用户故事: ${spec.functionalSpec.userStories}
+- 页面设计: ${spec.functionalSpec.pageDesigns}
+- 规则: ${spec.functionalSpec.rules}
 
 技术规格 (TS):
-- 数据库Schema: ${spec.technicalSpec.databaseSchema ? '已完成' : '未完成'}
-- 系统架构: ${spec.technicalSpec.architecture ? '已完成' : '未完成'}
-- 第三方集成: ${spec.technicalSpec.completedIntegrations}/${spec.technicalSpec.thirdPartyIntegrations} 已完成
+- 数据表: ${spec.technicalSpec.tables}
+- API: ${spec.technicalSpec.apis}
+
+编程计划 (CP):
+- Task: ${spec.cpSpec.tasks}
 
 Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
       `;
@@ -370,11 +368,11 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
                                 </span>
                                 <span className="font-medium">{getFSProgress(spec)}%</span>
                               </div>
-                              <Progress value={getFSProgress(spec)} className="h-1.5" />
-                              <div className="flex gap-4 mt-1.5 text-xs text-muted-foreground">
-                                <span>API: {spec.functionalSpec.completedApis}/{spec.functionalSpec.apis}</span>
-                                <span>UI: {spec.functionalSpec.completedUi}/{spec.functionalSpec.uiComponents}</span>
-                                <span>交互: {spec.functionalSpec.completedInteractions}/{spec.functionalSpec.interactions}</span>
+                              <SpecPhaseProgress value={getFSProgress(spec)} />
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-muted-foreground">
+                                <span>用户故事 {spec.functionalSpec.userStories}</span>
+                                <span>页面设计 {spec.functionalSpec.pageDesigns}</span>
+                                <span>规则 {spec.functionalSpec.rules}</span>
                               </div>
                             </div>
                             <div>
@@ -385,7 +383,24 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
                                 </span>
                                 <span className="font-medium">{getTSProgress(spec)}%</span>
                               </div>
-                              <Progress value={getTSProgress(spec)} className="h-1.5" />
+                              <SpecPhaseProgress value={getTSProgress(spec)} />
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-muted-foreground">
+                                <span>数据表 {spec.technicalSpec.tables}</span>
+                                <span>API {spec.technicalSpec.apis}</span>
+                              </div>
+                            </div>
+                            <div>
+                              <div className="flex items-center justify-between text-xs mb-1.5">
+                                <span className="flex items-center text-muted-foreground">
+                                  <ListChecks className="w-3.5 h-3.5 mr-1.5" />
+                                  编程计划 (CP)
+                                </span>
+                                <span className="font-medium">{getCPProgress(spec)}%</span>
+                              </div>
+                              <SpecPhaseProgress value={getCPProgress(spec)} />
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-muted-foreground">
+                                <span>Task {spec.cpSpec.tasks}</span>
+                              </div>
                             </div>
                           </div>
                         </div>

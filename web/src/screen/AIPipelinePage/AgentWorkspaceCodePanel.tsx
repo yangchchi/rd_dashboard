@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTheme } from 'next-themes';
 import { ChevronRight, FileCode2, Folder, FolderOpen, GitBranch, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { toastApiError } from '@/lib/api-error';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -306,7 +307,7 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
       setGitDialogOpen(false);
       void refetch();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '推送失败');
+      toastApiError(e, '推送失败');
     }
   };
 

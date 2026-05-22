@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { toastApiError } from '@/lib/api-error';
 import {
   ArrowLeft,
   ExternalLink,
@@ -119,7 +120,7 @@ const ProductDetailPage: React.FC = () => {
       const p = await rdApi.getProduct(productId);
       setProduct(p);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '加载产品失败');
+      toastApiError(e, '加载产品失败');
     } finally {
       setLoading(false);
     }
@@ -160,28 +161,30 @@ const ProductDetailPage: React.FC = () => {
       setCapName('');
       setCapDescription('');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '冻结基线失败');
+      toastApiError(e, '冻结基线失败');
     }
   };
 
   if (!productId) {
-    return <p className="p-8 text-sm text-muted-foreground">无效的产品 ID</p>;
+    return <p className="w-full text-sm text-muted-foreground">无效的产品 ID</p>;
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-8 px-6 py-8">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <RdPageModuleHeading
-          icon={Package}
-          title={product?.name ?? '产品 Hub'}
-          description="以产品为锚点查看基线、能力与进行中需求"
-          leading={
-            <Button type="button" variant="outline" size="icon" onClick={() => router.push('/products')}>
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-          }
-        />
-        <Button type="button" asChild disabled={!product}>
+    <div className="flex w-full min-w-0 flex-col gap-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="rd-page-header-lead min-w-0">
+          <RdPageModuleHeading
+            icon={Package}
+            title={product?.name ?? '产品 Hub'}
+            description="以产品为锚点查看基线、能力与进行中需求"
+            leading={
+              <Button type="button" variant="outline" size="icon" onClick={() => router.push('/products')}>
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+            }
+          />
+        </div>
+        <Button type="button" className="shrink-0" asChild disabled={!product}>
           <Link href={enhancementHref}>
             <Sparkles className="mr-2 h-4 w-4" />
             新建增强需求
@@ -194,8 +197,8 @@ const ProductDetailPage: React.FC = () => {
       ) : !product ? (
         <p className="text-sm text-muted-foreground">产品不存在</p>
       ) : (
-        <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full max-w-2xl grid-cols-4">
+        <Tabs defaultValue="overview" className="w-full space-y-6">
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4">
             <TabsTrigger value="overview">概览</TabsTrigger>
             <TabsTrigger value="capabilities">能力目录</TabsTrigger>
             <TabsTrigger value="requirements">产品需求</TabsTrigger>
@@ -253,6 +256,7 @@ const ProductDetailPage: React.FC = () => {
                 {latestCapabilities.length === 0 ? (
                   <p className="text-sm text-muted-foreground">暂无结构化能力条目</p>
                 ) : (
+                  <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -277,6 +281,7 @@ const ProductDetailPage: React.FC = () => {
                       ))}
                     </TableBody>
                   </Table>
+                  </div>
                 )}
                 {latestBaseline?.asBuiltMarkdown?.trim() ? (
                   <div className="rounded-lg border border-border bg-muted/30 p-4">
@@ -302,7 +307,7 @@ const ProductDetailPage: React.FC = () => {
                   <Link href={enhancementHref}>新建增强需求</Link>
                 </Button>
               </CardHeader>
-              <CardContent>
+              <CardContent className="overflow-x-auto">
                 {productRequirements.length === 0 ? (
                   <p className="text-sm text-muted-foreground">暂无关联需求</p>
                 ) : (

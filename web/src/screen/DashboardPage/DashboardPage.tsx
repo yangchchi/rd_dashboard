@@ -26,6 +26,7 @@ import { buildDashboardEfficiencyMetrics } from '@/lib/dashboard-metrics';
 import { getCurrentUser, updateStoredCurrentUser } from '@/lib/auth';
 import { authApi } from '@/lib/auth-api';
 import { toast } from 'sonner';
+import { toastApiError } from '@/lib/api-error';
 import { REQUIREMENT_KANBAN_COLUMNS } from '@/lib/requirement-status-present';
 
 const LEADERBOARD_TOP = 10;
@@ -189,7 +190,7 @@ const DashboardPage: React.FC = () => {
       setRoleDialogOpen(false);
       toast.success('角色已确认');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '角色保存失败，请重试');
+      toastApiError(e, '角色保存失败，请重试');
     } finally {
       setRoleSaving(false);
     }

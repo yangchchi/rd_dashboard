@@ -34,7 +34,7 @@ import type {
   IAiSkillConfig,
   ISiteMessage,
 } from './rd-types';
-import { getAuthToken } from './auth';
+import { getAuthToken, rejectIfUnauthorized } from './auth';
 import { normalizeRequirementChangeType } from '@shared/product-baseline';
 
 const BASE = '/api/rd';
@@ -51,6 +51,7 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const t = await res.text();
+    rejectIfUnauthorized(res.status, t);
     throw new Error(`${res.status}: ${t}`);
   }
   if (res.status === 204) {
@@ -744,6 +745,7 @@ export const rdApi = {
     });
     if (!response.ok || !response.body) {
       const text = await response.text().catch(() => '');
+      rejectIfUnauthorized(response.status, text);
       throw new Error(`${response.status}: ${text || 'Codex stream failed'}`);
     }
     const reader = response.body.getReader();
@@ -925,6 +927,7 @@ export const rdApi = {
     });
     if (!res.ok) {
       const t = await res.text();
+      rejectIfUnauthorized(res.status, t);
       throw new Error(`${res.status}: ${t}`);
     }
     return res.blob();

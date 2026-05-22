@@ -62,8 +62,8 @@ export function AiLauncher({ className }: AiLauncherProps) {
         )}
       >
         <Sparkles className="h-6 w-6 transition-transform group-hover:rotate-12" />
-        <span className="absolute -top-1 -right-1 rounded-full border border-white/40 bg-white/20 px-1.5 py-0.5 text-[10px] font-medium backdrop-blur">
-          AI
+        <span className="absolute -top-1 -right-1 rounded-full border border-white/40 bg-white/20 px-1 py-0.5 text-[9px] font-medium leading-none backdrop-blur">
+          小研
         </span>
       </button>
       <AppGenPanel open={open} onOpenChange={setOpen} />

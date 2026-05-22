@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
+import { toastApiError } from '@/lib/api-error';
 import { Plus, Puzzle, Search, Sparkles, Trash2 } from 'lucide-react';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import type { IAiSkillConfig } from '@/lib/ai-skill-engine';
@@ -116,7 +117,7 @@ const PluginConfigPage: React.FC = () => {
       }
       await reload();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '保存失败');
+      toastApiError(e, '保存失败');
     }
   };
 
@@ -127,7 +128,7 @@ const PluginConfigPage: React.FC = () => {
       toast.success('已恢复该插件的默认配置');
       await reload();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '恢复失败');
+      toastApiError(e, '恢复失败');
     }
   };
 
@@ -156,7 +157,7 @@ const PluginConfigPage: React.FC = () => {
       await reload();
       toast.success('Skill 已删除');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : '删除失败');
+      toastApiError(e, '删除失败');
     }
   };
 

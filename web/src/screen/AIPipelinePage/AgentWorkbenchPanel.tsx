@@ -29,6 +29,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { toastApiError } from '@/lib/api-error';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -1340,7 +1341,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       }
     } catch (error) {
       logger.error('创建 Agent Thread 失败', error);
-      toast.error(error instanceof Error ? error.message : '创建 Agent Thread 失败');
+      toastApiError(error, '创建 Agent Thread 失败');
       throw error;
     }
   };
@@ -1479,7 +1480,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
     } catch (error) {
       logger.error('准备 Workspace 失败', error);
       appendLog(`${logPrefix}[错误] ${error instanceof Error ? error.message : '准备 Workspace 失败'}`);
-      toast.error(error instanceof Error ? error.message : '准备 Workspace 失败');
+      toastApiError(error, '准备 Workspace 失败');
       throw error;
     }
   };
@@ -1917,7 +1918,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       toast.success('已请求停止');
     } catch (error) {
       logger.error('停止失败', error);
-      toast.error(error instanceof Error ? error.message : '停止失败');
+      toastApiError(error, '停止失败');
     }
   };
 

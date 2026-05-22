@@ -59,7 +59,7 @@ import { useTheme } from "next-themes";
 import { useCurrentUserProfile } from "@/hooks/useCurrentUserProfile";
 import { useAccessControl } from "@/hooks/useAccessControl";
 import { menuKeyAllowed, type AccessMenuKey } from "@/lib/access-catalog";
-import { clearAuthSession, getCurrentUser } from "@/lib/auth";
+import { forceRedirectToLogin, getCurrentUser } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { RequireRouteAccess } from "@/components/require-route-access";
 import { useMarkSiteMessageRead, useRequirementsList, useSiteMessagesList } from "@/lib/rd-hooks";
@@ -179,9 +179,8 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
     return sum;
   }, 0);
 
-  const handleLogout = async () => {
-    clearAuthSession();
-    router.replace("/login");
+  const handleLogout = () => {
+    forceRedirectToLogin();
   };
 
   const handleBrandLinkClick = (event: MouseEvent<HTMLAnchorElement>) => {
