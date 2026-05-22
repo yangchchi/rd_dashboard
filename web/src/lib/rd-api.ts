@@ -1,3 +1,4 @@
+import type { IGlobalConfig } from '@shared/global-config-defaults';
 import type {
   IAcceptanceRecord,
   IAgentSession,
@@ -499,6 +500,17 @@ export const rdApi = {
 
   async saveOrgSpecConfig(config: IOrganizationSpecConfig): Promise<void> {
     await json('/org-spec', {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    });
+  },
+
+  async getGlobalConfig(): Promise<IGlobalConfig> {
+    return json<IGlobalConfig>('/global-config');
+  },
+
+  async saveGlobalConfig(config: IGlobalConfig): Promise<IGlobalConfig> {
+    return json<IGlobalConfig>('/global-config', {
       method: 'PUT',
       body: JSON.stringify(config),
     });

@@ -1,7 +1,15 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { Bot, Loader2, RotateCcw, User } from 'lucide-react';
+import {
+  Box,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Pencil,
+  RotateCcw,
+  Sparkles,
+} from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import type { AppGenMessage, AppGenStatus, AppGenVersion } from '@/lib/app-gen-types';
@@ -12,6 +20,12 @@ function formatBytes(n: number): string {
   return `${(n / 1024).toFixed(1)} KB`;
 }
 
+function shortIntentTitle(intent: string): string {
+  const t = intent.trim();
+  if (t.length <= 24) return t;
+  return `${t.slice(0, 24)}…`;
+}
+
 interface ChatPaneProps {
   messages: AppGenMessage[];
   status: AppGenStatus;
@@ -20,8 +34,10 @@ interface ChatPaneProps {
   versions: AppGenVersion[];
   errorMessage?: string | null;
   onRetry?: () => void;
+  onViewCode?: () => void;
 }
 
+/** 妙搭工作台左侧对话流 */
 export function ChatPane({
   messages,
   status,
@@ -30,97 +46,150 @@ export function ChatPane({
   versions,
   errorMessage,
   onRetry,
+  onViewCode,
 }: ChatPaneProps) {
   const endRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages.length, status]);
 
+  const pairs: Array<{ user: AppGenMessage; assistant?: AppGenMessage; version?: AppGenVersion }> =
+    [];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== 'user') continue;
+    const assistant = messages[i + 1]?.role === 'assistant' ? messages[i + 1] : undefined;
+    const version = assistant?.versionId
+      ? versions.find((v) => v.id === assistant.versionId)
+      : undefined;
+    pairs.push({ user: m, assistant, version });
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        {messages.map((m) => {
-          const isUser = m.role === 'user';
-          const version = m.versionId ? versions.find((v) => v.id === m.versionId) : undefined;
-          const isCurrent = !!version && version.id === currentVersionId;
+    <div className="flex h-full min-h-0 flex-col bg-[hsl(210_20%_98%)]">
+      <div className="flex-1 space-y-5 overflow-y-auto px-4 py-5">
+        {pairs.map(({ user, assistant, version }, idx) => {
+          const isStreaming = version?.status === 'streaming';
+          const isCurrent = version?.id === currentVersionId;
+          const isLast = idx === pairs.length - 1;
+          const showThinking = isStreaming && isLast;
+
           return (
-            <div
-              key={m.id}
-              className={cn('flex w-full items-start gap-2', isUser ? 'flex-row-reverse' : 'flex-row')}
-            >
-              <div
-                className={cn(
-                  'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-foreground',
-                  isUser
-                    ? 'border-primary/30 bg-primary/10 text-primary'
-                    : 'border-border bg-muted'
-                )}
-                aria-hidden
-              >
-                {isUser ? <User className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
-              </div>
-              <div
-                className={cn(
-                  'min-w-0 max-w-[80%] rounded-lg border px-3 py-2 text-sm leading-relaxed shadow-sm',
-                  isUser
-                    ? 'border-primary/30 bg-primary/5 text-foreground'
-                    : 'border-border bg-card text-foreground',
-                  !isUser && version?.status === 'streaming' && 'border-primary/30 bg-primary/[0.03]'
-                )}
-              >
-                <div className="flex flex-wrap items-center gap-1.5 whitespace-pre-wrap break-words">
-                  {!isUser && version?.status === 'streaming' ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
-                  ) : null}
-                  <span>
-                    {!isUser && version?.status === 'streaming'
-                      ? `正在生成 v${version.seq}`
-                      : m.text}
-                  </span>
-                  {!isUser && version?.status === 'streaming' && version.bytes > 0 ? (
-                    <span className="font-mono text-[11px] text-muted-foreground">
-                      · {formatBytes(version.bytes)}
-                    </span>
-                  ) : null}
+            <div key={user.id} className="space-y-3">
+              {/* 用户诉求 */}
+              <div className="flex justify-end">
+                <div className="max-w-[92%] rounded-2xl rounded-tr-md border border-[hsl(214_32%_91%)] bg-white px-3.5 py-2.5 text-sm leading-relaxed text-foreground shadow-sm">
+                  {user.text}
                 </div>
-                {version ? (
-                  <button
-                    type="button"
-                    onClick={() => onPickVersion?.(version.id)}
-                    className={cn(
-                      'mt-2 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium transition-colors',
-                      isCurrent
-                        ? 'border-primary/40 bg-primary/10 text-primary'
-                        : 'border-border bg-muted text-muted-foreground hover:border-primary/40 hover:text-primary'
-                    )}
-                  >
-                    v{version.seq}
-                    <span className="text-[10px] text-muted-foreground/80">
-                      {version.status === 'streaming'
-                        ? '生成中'
-                        : version.status === 'done'
-                          ? '已完成'
-                          : version.status === 'aborted'
-                            ? '已停止'
-                            : '失败'}
-                    </span>
-                  </button>
-                ) : null}
               </div>
+
+              {/* 思考 / 方案设计 */}
+              {(showThinking || version?.status === 'done') && (
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  {showThinking ? (
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(217_91%_60%)]" />
+                      <span>思考中…</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs">
+                      <Sparkles className="h-3.5 w-3.5 text-[hsl(217_91%_60%)]" />
+                      <span>已完成方案设计</span>
+                    </div>
+                  )}
+
+                  <details className="group rounded-xl border border-[hsl(214_32%_91%)] bg-white" open={isLast}>
+                    <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm font-medium text-foreground [&::-webkit-details-marker]:hidden">
+                      <Pencil className="h-3.5 w-3.5 text-[hsl(217_91%_60%)]" />
+                      方案设计
+                      <ChevronRight className="ml-auto h-3.5 w-3.5 text-muted-foreground group-open:hidden" />
+                      <ChevronDown className="ml-auto hidden h-3.5 w-3.5 text-muted-foreground group-open:block" />
+                    </summary>
+                    <div className="space-y-2 border-t border-[hsl(214_32%_91%/0.8)] px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+                      <p>
+                        <span className="font-medium text-foreground">页面结构：</span>
+                        输入区、列表/主内容区、操作按钮区
+                      </p>
+                      <p>
+                        <span className="font-medium text-foreground">功能范围：</span>
+                        增删改查、表单校验、本地状态管理
+                      </p>
+                      <p className="text-[11px]">基于你的描述：{shortIntentTitle(user.text)}</p>
+                    </div>
+                  </details>
+                </div>
+              )}
+
+              {/* 实现结果卡 */}
+              {version ? (
+                <div
+                  className={cn(
+                    'rounded-xl border bg-white p-3 shadow-sm transition-colors',
+                    isCurrent
+                      ? 'border-[hsl(217_91%_60%/0.45)] ring-1 ring-[hsl(217_91%_60%/0.15)]'
+                      : 'border-[hsl(214_32%_91%)]'
+                  )}
+                >
+                  <div className="flex items-start gap-2.5">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[hsl(217_91%_60%/0.12)] text-[hsl(217_91%_50%)]">
+                      <Box className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-foreground">
+                        {isStreaming
+                          ? `正在实现 v${version.seq}…`
+                          : `实现${shortIntentTitle(user.text)}`}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {assistant?.text ?? `v${version.seq}`}
+                        {version.bytes > 0 ? ` · ${formatBytes(version.bytes)}` : null}
+                      </p>
+                      {isStreaming ? (
+                        <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted">
+                          <div className="h-full w-1/3 animate-pulse bg-[hsl(217_91%_60%)]" />
+                        </div>
+                      ) : (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onPickVersion?.(version.id)}
+                            className={cn(
+                              'rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors',
+                              isCurrent
+                                ? 'border-[hsl(217_91%_60%/0.4)] bg-[hsl(217_91%_60%/0.08)] text-[hsl(217_91%_50%)]'
+                                : 'border-border bg-muted/50 text-muted-foreground hover:border-[hsl(217_91%_60%/0.35)] hover:text-[hsl(217_91%_50%)]'
+                            )}
+                          >
+                            预览应用
+                          </button>
+                          <button
+                            type="button"
+                            onClick={onViewCode}
+                            className="rounded-lg border border-border bg-white px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                          >
+                            查看变更
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           );
         })}
+
         {errorMessage && status === 'error' ? (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            <div className="font-medium">这一轮没生成出来</div>
-            <div className="mt-1 break-all text-xs opacity-80">{errorMessage}</div>
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm">
+            <div className="font-medium text-destructive">这一轮没生成出来</div>
+            <div className="mt-1 break-all text-xs text-destructive/80">{errorMessage}</div>
             {onRetry ? (
               <button
                 type="button"
                 onClick={onRetry}
-                className="mt-2 inline-flex items-center gap-1 rounded-md border border-destructive/40 bg-card px-2 py-1 text-xs text-destructive hover:bg-destructive/5"
+                className="mt-2 inline-flex items-center gap-1 rounded-lg border border-destructive/30 bg-white px-2.5 py-1 text-xs text-destructive hover:bg-destructive/5"
               >
-                <RotateCcw className="h-3 w-3" /> 重试这一轮
+                <RotateCcw className="h-3 w-3" /> 重试
               </button>
             ) : null}
           </div>

@@ -28,6 +28,12 @@ import { resolvePipelineGitBaseBranch, resolvePipelineWorkspaceBranchLabel } fro
 import { assertToolCallCanStart, prepareToolCallPolicy } from '../../../shared/agent-tool-gateway';
 import { createDefaultOrgSpecConfig } from '../../../shared/org-spec-defaults';
 import {
+  createDefaultGlobalConfig,
+  normalizeWorkspacesDir,
+  validateWorkspacesDir,
+  type IGlobalConfig,
+} from '../../../shared/global-config-defaults';
+import {
   isBrownfieldChangeType,
   normalizeRequirementChangeType,
   type IProductCapabilityInterface,
@@ -844,6 +850,13 @@ export class RdService implements OnModuleInit {
       CREATE TABLE IF NOT EXISTS rd_org_spec_config (
         id TEXT PRIMARY KEY,
         config JSONB NOT NULL
+      );
+    `);
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_global_config (
+        id TEXT PRIMARY KEY,
+        config JSONB NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
     `);
     await this.db.execute(sql`
@@ -3230,6 +3243,53 @@ export class RdService implements OnModuleInit {
     `);
   }
 
+  async getGlobalConfig(): Promise<IGlobalConfig> {
+    const result = await this.db.execute(sql`
+      SELECT config FROM rd_global_config WHERE id = 'global-default' LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute<{ config?: unknown }>(result);
+    const stored = this.parseGlobalConfig(rows[0]?.config);
+    if (stored) return stored;
+    return createDefaultGlobalConfig();
+  }
+
+  async saveGlobalConfig(body: unknown): Promise<IGlobalConfig> {
+    const raw = this.parseJsonObject(body);
+    const workspacesDir = String(raw.workspacesDir ?? raw.workspaces_dir ?? '').trim();
+    const err = validateWorkspacesDir(workspacesDir);
+    if (err) throw new BadRequestException(err);
+    const config: IGlobalConfig = {
+      workspacesDir: normalizeWorkspacesDir(workspacesDir),
+      updatedAt: new Date().toISOString(),
+    };
+    await this.db.execute(sql`
+      INSERT INTO rd_global_config (id, config, updated_at)
+      VALUES ('global-default', ${JSON.stringify(config)}::jsonb, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        config = EXCLUDED.config,
+        updated_at = EXCLUDED.updated_at;
+    `);
+    return config;
+  }
+
+  /** 环境变量 RD_AGENT_WORKSPACE_ROOT 优先于库内配置 */
+  async getConfiguredWorkspaceRoot(): Promise<string> {
+    const fromEnv = String(process.env.RD_AGENT_WORKSPACE_ROOT || '').trim();
+    if (fromEnv) return normalizeWorkspacesDir(fromEnv);
+    const cfg = await this.getGlobalConfig();
+    return normalizeWorkspacesDir(cfg.workspacesDir);
+  }
+
+  private parseGlobalConfig(raw: unknown): IGlobalConfig | null {
+    const obj = this.parseJsonObject(raw);
+    const dir = String(obj.workspacesDir ?? obj.workspaces_dir ?? '').trim();
+    if (!dir) return null;
+    return {
+      workspacesDir: normalizeWorkspacesDir(dir),
+      updatedAt: obj.updatedAt ? String(obj.updatedAt) : undefined,
+    };
+  }
+
   async listAcceptanceRecords(): Promise<IAcceptanceRecordRow[]> {
     const result = await this.db.execute(sql`
       SELECT * FROM rd_acceptance_records ORDER BY created_at DESC;
@@ -4649,7 +4709,10 @@ esac
     };
     this.runningExecutions.set(id, execution);
 
-    const codexLogRoot = String(process.env.RD_AGENT_CODEX_LOG_DIR || '/tmp/rd-agent-workspaces/codex-logs').trim();
+    const workspaceRootForLogs = await this.getConfiguredWorkspaceRoot();
+    const codexLogRoot = String(
+      process.env.RD_AGENT_CODEX_LOG_DIR || `${workspaceRootForLogs}/codex-logs`,
+    ).trim();
     const logDir = join(codexLogRoot, workspace.sessionId);
     let logStream: WriteStream | null = null;
     let executorLogPath: string | null = null;
@@ -5303,6 +5366,7 @@ esac
       }
     }
     const id = `awork_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const configuredRoot = await this.getConfiguredWorkspaceRoot();
     const plan = buildAgentWorkspaceLifecyclePlan({
       workspaceId: id,
       sessionId: body.sessionId,
@@ -5311,7 +5375,7 @@ esac
       repoUrl: body.repoUrl,
       baseBranch: body.baseBranch || session.baseBranch,
       agentBranch: body.agentBranch?.trim() || undefined,
-      workspaceRoot: body.workspaceRoot,
+      workspaceRoot: body.workspaceRoot?.trim() || configuredRoot,
       kind: body.kind || 'worktree',
       productSlug: productSlug || undefined,
       sessionFolderName: sessionFolderName || undefined,

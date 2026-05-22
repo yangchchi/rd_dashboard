@@ -192,6 +192,18 @@ export class RdController {
     return this.rd.saveOrgSpecConfig(body);
   }
 
+  @Get('global-config')
+  @RequirePermissions('page.global_config')
+  getGlobalConfig() {
+    return this.rd.getGlobalConfig();
+  }
+
+  @Put('global-config')
+  @RequirePermissions('page.global_config')
+  saveGlobalConfig(@Body() body: unknown) {
+    return this.rd.saveGlobalConfig(body);
+  }
+
   @Get('context-packs')
   @RequirePermissions('page.pipeline')
   listContextPacks(@Query('requirementId') requirementId?: string): Promise<IContextPackRow[]> {

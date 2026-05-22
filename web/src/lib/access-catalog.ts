@@ -37,7 +37,8 @@ export type AccessMenuKey =
   | 'settings_plugins'
   | 'settings_users'
   | 'settings_roles'
-  | 'settings_permissions';
+  | 'settings_permissions'
+  | 'settings_global';
 
 const g = (x: AccessPermissionGroup) => x;
 
@@ -134,6 +135,13 @@ export const ACCESS_PERMISSION_LIST: AccessPermissionDef[] = [
     menuKey: 'settings_permissions',
   },
   {
+    id: 'page.global_config',
+    label: '全局配置',
+    group: g('settings'),
+    kind: 'route',
+    menuKey: 'settings_global',
+  },
+  {
     id: 'action.users.create',
     label: '用户：新建账号',
     description: '用户管理页「新建用户」',
@@ -218,6 +226,7 @@ export function requiredRoutePermission(pathname: string): string | null {
   if (p.startsWith('/users')) return 'page.users';
   if (p.startsWith('/settings/roles')) return 'page.roles';
   if (p.startsWith('/settings/permissions')) return 'page.permissions';
+  if (p.startsWith('/settings/global')) return 'page.global_config';
   return null;
 }
 

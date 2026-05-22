@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS rd_global_config (
+  id TEXT PRIMARY KEY,
+  config JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

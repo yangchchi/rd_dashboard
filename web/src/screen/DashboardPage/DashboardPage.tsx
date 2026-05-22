@@ -18,11 +18,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Activity, Coins, Gauge, LayoutDashboard, Filter, Plus, ChevronDown, Trophy } from 'lucide-react';
+import { LayoutDashboard, Filter, Plus, ChevronDown, Trophy } from 'lucide-react';
 import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
-import { usePipelineTasksList, useRequirementsList } from '@/lib/rd-hooks';
+import { useRequirementsList } from '@/lib/rd-hooks';
 import type { IRequirement } from '@/lib/rd-types';
-import { buildDashboardEfficiencyMetrics } from '@/lib/dashboard-metrics';
 import { getCurrentUser, updateStoredCurrentUser } from '@/lib/auth';
 import { authApi } from '@/lib/auth-api';
 import { toast } from 'sonner';
@@ -154,7 +153,6 @@ const DashboardPage: React.FC = () => {
   const router = useRouter();
   const currentProfile = useCurrentUserProfile();
   const { data: requirements = [], isLoading } = useRequirementsList();
-  const { data: pipelineTasks = [] } = usePipelineTasksList();
   const [filter, setFilter] = useState<FilterType>('all');
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [selectedRole, setSelectedRole] = useState<(typeof ROLE_OPTIONS)[number]['roleId'] | null>(null);
@@ -209,19 +207,6 @@ const DashboardPage: React.FC = () => {
       }),
     [currentProfile.user_id, filter, requirements],
   );
-  const filteredRequirementIds = useMemo(
-    () => new Set(filteredRequirements.map((requirement) => requirement.id)),
-    [filteredRequirements],
-  );
-  const filteredPipelineTasks = useMemo(
-    () => pipelineTasks.filter((task) => filteredRequirementIds.has(task.requirementId)),
-    [filteredRequirementIds, pipelineTasks],
-  );
-  const efficiencyMetrics = useMemo(
-    () => buildDashboardEfficiencyMetrics(filteredRequirements, filteredPipelineTasks),
-    [filteredPipelineTasks, filteredRequirements],
-  );
-
   const getColumnCount = (status: IRequirement['status']) => {
     return filteredRequirements.filter((r) => r.status === status).length;
   };
@@ -332,70 +317,6 @@ const DashboardPage: React.FC = () => {
         </section>
 
         <section className="w-full">
-          <p className="text-sm text-muted-foreground mb-4">
-            统计范围：共 <span className="font-medium text-foreground">{filteredRequirements.length}</span> 条需求
-          </p>
-          <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-            <Card className="border-border bg-card">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-muted-foreground">自动化覆盖率</p>
-                    <p className="mt-1 text-2xl font-semibold tabular-nums">{efficiencyMetrics.automationCoverage}%</p>
-                  </div>
-                  <Gauge className="h-5 w-5 text-primary" />
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {filteredPipelineTasks.length} 条流水线覆盖 {efficiencyMetrics.totalRequirements} 条需求
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-border bg-card">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-muted-foreground">平均质量分</p>
-                    <p className="mt-1 text-2xl font-semibold tabular-nums">{efficiencyMetrics.averageQualityScore}</p>
-                  </div>
-                  <Activity className="h-5 w-5 text-indigo-500" />
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  综合规格一致性、API覆盖、代码质量与测试通过率
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-border bg-card">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-muted-foreground">测试通过率</p>
-                    <p className="mt-1 text-2xl font-semibold tabular-nums">{efficiencyMetrics.testPassRate}%</p>
-                  </div>
-                  <Trophy className="h-5 w-5 text-green-600" />
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  已入库流水线测试报告的通过用例占比
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-border bg-card">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-muted-foreground">估算 AI 成本</p>
-                    <p className="mt-1 text-2xl font-semibold tabular-nums">¥{efficiencyMetrics.estimatedAiCost}</p>
-                  </div>
-                  <Coins className="h-5 w-5 text-amber-600" />
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  基于日志、质量评估和测试报告数量的粗略估算
-                </p>
-              </CardContent>
-            </Card>
-          </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {REQUIREMENT_KANBAN_COLUMNS.map((column) => {
               const count = getColumnCount(column.status);

@@ -64,6 +64,7 @@ const DEFAULT_PERMISSION_IDS = [
   'page.users',
   'page.roles',
   'page.permissions',
+  'page.global_config',
   'action.users.create',
   'action.users.delete',
   'action.users.assign_role',

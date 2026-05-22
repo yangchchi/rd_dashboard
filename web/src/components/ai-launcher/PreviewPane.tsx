@@ -4,14 +4,19 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Camera,
+  Code2,
+  Eye,
+  Link2,
   Loader2,
   Maximize2,
   Monitor,
   Moon,
+  Pencil,
   RotateCw,
   Smartphone,
   Sun,
   Tablet,
+  Trash2,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -45,6 +50,8 @@ interface PreviewPaneProps {
   theme: AppGenTheme;
   onDeviceChange: (d: AppGenDevice) => void;
   onThemeChange: (t: AppGenTheme) => void;
+  showCode?: boolean;
+  onToggleCode?: () => void;
 }
 
 interface ConsoleEntry {
@@ -67,6 +74,8 @@ export function PreviewPane({
   theme,
   onDeviceChange,
   onThemeChange,
+  showCode = false,
+  onToggleCode,
 }: PreviewPaneProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -169,81 +178,129 @@ export function PreviewPane({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-3 py-2">
-        <div className="flex items-center gap-1">
-          {(['desktop', 'tablet', 'mobile'] as AppGenDevice[]).map((d) => {
-            const Icon = d === 'desktop' ? Monitor : d === 'tablet' ? Tablet : Smartphone;
-            return (
-              <Button
-                key={d}
-                type="button"
-                size="sm"
-                variant={device === d ? 'secondary' : 'ghost'}
-                className={cn(
-                  'h-7 gap-1 px-2 text-xs',
-                  device === d && 'border border-primary/30 bg-primary/10 text-primary'
-                )}
-                onClick={() => onDeviceChange(d)}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{APP_GEN_DEVICE_WIDTH[d]}px</span>
-              </Button>
-            );
-          })}
+    <div className="flex h-full min-h-0 flex-col bg-[#f0f2f5]">
+      {/* 妙搭预览工具栏 */}
+      <div className="shrink-0 border-b border-[hsl(214_32%_91%)] bg-white">
+        <div className="flex items-center justify-between gap-2 px-3 py-2">
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className={cn(
+                'inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium',
+                !showCode
+                  ? 'bg-[hsl(217_91%_60%/0.1)] text-[hsl(217_91%_50%)]'
+                  : 'text-muted-foreground hover:bg-muted'
+              )}
+              onClick={() => showCode && onToggleCode?.()}
+            >
+              <Eye className="h-3.5 w-3.5" />
+              预览
+            </button>
+            <button
+              type="button"
+              className={cn(
+                'inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium',
+                showCode
+                  ? 'bg-[hsl(217_91%_60%/0.1)] text-[hsl(217_91%_50%)]'
+                  : 'text-muted-foreground hover:bg-muted'
+              )}
+              onClick={() => !showCode && onToggleCode?.()}
+            >
+              <Code2 className="h-3.5 w-3.5" />
+              代码
+            </button>
+          </div>
+          <div className="flex items-center gap-0.5">
+            {(['desktop', 'tablet', 'mobile'] as AppGenDevice[]).map((d) => {
+              const Icon = d === 'desktop' ? Monitor : d === 'tablet' ? Tablet : Smartphone;
+              return (
+                <Button
+                  key={d}
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className={cn(
+                    'h-7 gap-1 px-2 text-xs',
+                    device === d && 'bg-muted text-[hsl(217_91%_50%)]'
+                  )}
+                  onClick={() => onDeviceChange(d)}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  <span className="hidden md:inline">{APP_GEN_DEVICE_WIDTH[d]}px</span>
+                </Button>
+              );
+            })}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={() => onThemeChange(theme === 'light' ? 'dark' : 'light')}
+              title="切换主题"
+            >
+              {theme === 'light' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={() => setIframeKey((k) => k + 1)}
+              title="刷新预览"
+            >
+              <RotateCw className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={handleScreenshot}
+              disabled={!isComplete}
+              title="下载 HTML"
+            >
+              <Camera className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 w-7 p-0"
+              onClick={() => {
+                if (wrapperRef.current?.requestFullscreen) {
+                  void wrapperRef.current.requestFullscreen();
+                }
+              }}
+              title="全屏"
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1 px-2 text-xs"
-            onClick={() => onThemeChange(theme === 'light' ? 'dark' : 'light')}
-            title="切换主题"
-          >
-            {theme === 'light' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-            <span className="hidden sm:inline">{theme === 'light' ? '亮色' : '暗色'}</span>
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1 px-2 text-xs"
-            onClick={() => setIframeKey((k) => k + 1)}
-            title="刷新预览"
-          >
-            <RotateCw className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1 px-2 text-xs"
-            onClick={handleScreenshot}
-            disabled={!isComplete}
-            title="下载 HTML 备份"
-          >
-            <Camera className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 gap-1 px-2 text-xs"
-            onClick={() => {
-              if (wrapperRef.current?.requestFullscreen) {
-                void wrapperRef.current.requestFullscreen();
-              }
-            }}
-            title="全屏预览"
-          >
-            <Maximize2 className="h-3.5 w-3.5" />
-          </Button>
+        <div className="flex items-center gap-2 border-t border-[hsl(214_32%_91%/0.8)] px-3 py-1.5">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-[hsl(214_32%_91%)] bg-[hsl(210_20%_98%)] px-2.5 py-1 text-xs text-muted-foreground">
+            <Link2 className="h-3 w-3 shrink-0" />
+            <span className="truncate">
+              {isStreaming ? '生成中…' : isComplete ? '刚刚更新' : '等待生成'}
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-0.5 text-muted-foreground">
+            <button type="button" className="rounded p-1 hover:bg-muted" aria-label="编辑">
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+            <button type="button" className="rounded p-1 hover:bg-muted" aria-label="链接">
+              <Link2 className="h-3.5 w-3.5" />
+            </button>
+            <button type="button" className="rounded p-1 hover:bg-muted" aria-label="删除">
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </div>
+
       <div
         ref={wrapperRef}
-        className="relative flex flex-1 min-h-0 items-start justify-center overflow-auto bg-muted/30 p-4"
+        className="relative flex flex-1 min-h-0 items-start justify-center overflow-auto p-5"
       >
         {!canShowIframe ? (
           <div className="flex h-full w-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
@@ -270,12 +327,12 @@ export function PreviewPane({
           </div>
         ) : (
           <div
-            className="relative bg-card shadow-sm transition-all"
+            className="relative overflow-hidden rounded-xl bg-white shadow-[0_4px_24px_rgba(15,23,42,0.08)] transition-all"
             style={{
               width: `${APP_GEN_DEVICE_WIDTH[device]}px`,
               maxWidth: '100%',
               height: '100%',
-              minHeight: '100%',
+              minHeight: 'min(100%, 720px)',
             }}
           >
             <iframe
@@ -295,7 +352,7 @@ export function PreviewPane({
           </div>
         )}
       </div>
-      <div className="border-t border-border bg-card">
+      <div className="shrink-0 border-t border-[hsl(214_32%_91%)] bg-white">
         <button
           type="button"
           onClick={() => setConsoleOpen((v) => !v)}

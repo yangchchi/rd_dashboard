@@ -10,6 +10,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { getCurrentUser, updateStoredCurrentUser } from '@/lib/auth';
 import {
@@ -17,6 +24,16 @@ import {
   getStoredGitPatCredentials,
   saveStoredGitPatCredentials,
 } from '@/lib/git-pat-storage';
+import {
+  clearStoredModelConfig,
+  defaultModelConfigFormFields,
+  getDefaultApiBaseUrl,
+  getModelProviderOption,
+  getStoredModelConfig,
+  MODEL_PROVIDER_OPTIONS,
+  saveStoredModelConfig,
+  type ModelProviderId,
+} from '@/lib/model-config-storage';
 
 const MAX_AVATAR_FILE_BYTES = 512 * 1024;
 
@@ -100,6 +117,10 @@ export default function AccountSettingsPage() {
   const [gitUsername, setGitUsername] = useState('');
   const [gitPat, setGitPat] = useState('');
   const [savingGitPat, setSavingGitPat] = useState(false);
+  const [modelProvider, setModelProvider] = useState<ModelProviderId>('volcengine');
+  const [modelApiBaseUrl, setModelApiBaseUrl] = useState('');
+  const [modelApiKey, setModelApiKey] = useState('');
+  const [savingModelConfig, setSavingModelConfig] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const username = user?.username ?? '';
@@ -109,6 +130,24 @@ export default function AccountSettingsPage() {
     setGitUsername(stored?.username ?? '');
     setGitPat(stored?.pat ?? '');
   }, []);
+
+  useEffect(() => {
+    const fields = defaultModelConfigFormFields();
+    setModelProvider(fields.provider);
+    setModelApiBaseUrl(fields.apiBaseUrl);
+    setModelApiKey(fields.apiKey);
+  }, []);
+
+  const handleModelProviderChange = (value: string) => {
+    const next = value as ModelProviderId;
+    setModelProvider(next);
+    const stored = getStoredModelConfig();
+    const previousDefault = getDefaultApiBaseUrl(modelProvider);
+    const trimmedUrl = modelApiBaseUrl.trim();
+    if (!trimmedUrl || trimmedUrl === previousDefault || trimmedUrl === (stored?.apiBaseUrl ?? '')) {
+      setModelApiBaseUrl(getDefaultApiBaseUrl(next));
+    }
+  };
 
   const handleAvatarFile: ChangeEventHandler<HTMLInputElement> = (e) => {
     const file = e.target.files?.[0];
@@ -158,6 +197,50 @@ export default function AccountSettingsPage() {
     toast.success('已清除本机保存的 Git PAT');
   };
 
+  const handleSaveModelConfig = () => {
+    const trimmedUrl = modelApiBaseUrl.trim();
+    const trimmedKey = modelApiKey.trim();
+    if (!trimmedUrl) {
+      toast.error('请填写 API 地址');
+      return;
+    }
+    if (!/^https?:\/\//i.test(trimmedUrl)) {
+      toast.error('API 地址需以 http:// 或 https:// 开头');
+      return;
+    }
+    if (!trimmedKey) {
+      toast.error('请填写 API Key');
+      return;
+    }
+    if (trimmedKey.length < 8) {
+      toast.error('API Key 长度过短，请检查是否填写完整');
+      return;
+    }
+    setSavingModelConfig(true);
+    try {
+      saveStoredModelConfig({
+        provider: modelProvider,
+        apiBaseUrl: trimmedUrl,
+        apiKey: trimmedKey,
+      });
+      toast.success('模型配置已保存');
+    } finally {
+      setSavingModelConfig(false);
+    }
+  };
+
+  const handleClearModelConfig = () => {
+    clearStoredModelConfig();
+    const defaults = defaultModelConfigFormFields();
+    setModelProvider(defaults.provider);
+    setModelApiBaseUrl(defaults.apiBaseUrl);
+    setModelApiKey('');
+    toast.success('已清除本机保存的模型配置');
+  };
+
+  const modelProviderPlaceholder =
+    getModelProviderOption(modelProvider)?.defaultBaseUrl ?? 'https://your-api-endpoint/v1';
+
   const handleSaveProfile = () => {
     if (!user) {
       toast.error('未登录，无法保存');
@@ -191,7 +274,9 @@ export default function AccountSettingsPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-semibold leading-tight tracking-tight">个人设置</h1>
-        <p className="mt-1 text-sm text-muted-foreground">管理显示信息、Git 凭据与界面主题</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          管理显示信息、模型接入、Git 凭据与界面主题
+        </p>
       </div>
 
       <Card className="rounded-xl border-border">
@@ -296,6 +381,81 @@ export default function AccountSettingsPage() {
           <div className="flex justify-end border-t border-border pt-6">
             <Button type="button" onClick={handleSaveProfile} disabled={saving || !user}>
               {saving ? '保存中…' : '保存'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-xl border-border">
+        <CardHeader className="space-y-1">
+          <CardTitle className="text-lg font-semibold">模型配置</CardTitle>
+          <CardDescription>
+            配置大模型供应商与 API 凭据；仅保存在本机浏览器，供 AI 能力调用时使用
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid gap-6 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="settings-model-provider">供应商</Label>
+              <Select value={modelProvider} onValueChange={handleModelProviderChange}>
+                <SelectTrigger id="settings-model-provider" className="h-10 w-full">
+                  <SelectValue placeholder="选择模型供应商" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MODEL_PROVIDER_OPTIONS.map((option) => (
+                    <SelectItem key={option.id} value={option.id}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="settings-model-api-url">API 地址</Label>
+              <Input
+                id="settings-model-api-url"
+                value={modelApiBaseUrl}
+                onChange={(e) => setModelApiBaseUrl(e.target.value)}
+                placeholder={modelProviderPlaceholder}
+                autoComplete="off"
+              />
+              {modelProvider === 'azure_openai' ? (
+                <p className="text-xs text-muted-foreground">
+                  Azure 需将占位符替换为实际资源名与部署名，例如
+                  https://my-resource.openai.azure.com/openai/deployments/gpt-4o
+                </p>
+              ) : modelProvider === 'custom' ? (
+                <p className="text-xs text-muted-foreground">
+                  填写 OpenAI 兼容格式的 Chat Completions 端点基地址
+                </p>
+              ) : null}
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="settings-model-api-key">API Key</Label>
+              <Input
+                id="settings-model-api-key"
+                type="password"
+                value={modelApiKey}
+                onChange={(e) => setModelApiKey(e.target.value)}
+                placeholder="sk-… 或厂商提供的密钥"
+                autoComplete="new-password"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            不会写入服务端数据库；请勿在公共设备上保存。切换供应商时，若 API 地址仍为默认值将自动更新为对应厂商推荐地址。
+          </p>
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-6">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClearModelConfig}
+              disabled={!modelApiBaseUrl.trim() && !modelApiKey.trim()}
+            >
+              清除
+            </Button>
+            <Button type="button" onClick={handleSaveModelConfig} disabled={savingModelConfig}>
+              {savingModelConfig ? '保存中…' : '保存'}
             </Button>
           </div>
         </CardContent>

@@ -6,6 +6,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 
+import type { IGlobalConfig } from '@shared/global-config-defaults';
 import { rdApi } from './rd-api';
 import type {
   IAcceptanceRecord,
@@ -37,6 +38,7 @@ export const rdKeys = {
   prds: ['rd', 'prds'] as const,
   specs: ['rd', 'specs'] as const,
   orgSpec: ['rd', 'orgSpec'] as const,
+  globalConfig: ['rd', 'globalConfig'] as const,
   acceptance: ['rd', 'acceptance'] as const,
   pipelineTasks: ['rd', 'pipeline-tasks'] as const,
   pipelineRuns: ['rd', 'pipeline-runs'] as const,
@@ -302,6 +304,23 @@ export function useSaveOrgSpecConfig() {
     mutationFn: (config: IOrganizationSpecConfig) => rdApi.saveOrgSpecConfig(config),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: rdKeys.orgSpec });
+    },
+  });
+}
+
+export function useGlobalConfig() {
+  return useQuery({
+    queryKey: rdKeys.globalConfig,
+    queryFn: () => rdApi.getGlobalConfig(),
+  });
+}
+
+export function useSaveGlobalConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (config: IGlobalConfig) => rdApi.saveGlobalConfig(config),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rdKeys.globalConfig });
     },
   });
 }

@@ -52,6 +52,7 @@ import {
   Package,
   UserCog,
   KeyRound,
+  SlidersHorizontal,
   Swords,
   ShipWheel,
 } from "lucide-react";
@@ -77,7 +78,9 @@ const isSettingsSectionActive = (pathname: string) =>
   pathname === "/settings/roles" ||
   pathname.startsWith("/settings/roles/") ||
   pathname === "/settings/permissions" ||
-  pathname.startsWith("/settings/permissions/");
+  pathname.startsWith("/settings/permissions/") ||
+  pathname === "/settings/global" ||
+  pathname.startsWith("/settings/global/");
 
 const isActivePath = (pathname: string, itemPath: string) => {
   if (itemPath === "/dashboard") {
@@ -97,6 +100,9 @@ const isActivePath = (pathname: string, itemPath: string) => {
   }
   if (itemPath === "/settings/permissions") {
     return pathname === "/settings/permissions" || pathname.startsWith("/settings/permissions/");
+  }
+  if (itemPath === "/settings/global") {
+    return pathname === "/settings/global" || pathname.startsWith("/settings/global/");
   }
   if (itemPath === "/requirements") {
     return (
@@ -141,7 +147,8 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
     navOk("settings_plugins") ||
     navOk("settings_users") ||
     navOk("settings_roles") ||
-    navOk("settings_permissions");
+    navOk("settings_permissions") ||
+    navOk("settings_global");
 
   const [settingsOpen, setSettingsOpen] = useState(() => isSettingsSectionActive(pathname));
   const [themeMounted, setThemeMounted] = useState(false);
@@ -427,6 +434,19 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                                 <Link href="/settings/permissions">
                                   <KeyRound className="size-4" />
                                   <span>权限管理</span>
+                                </Link>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                          ) : null}
+                          {navOk("settings_global") ? (
+                            <SidebarMenuSubItem>
+                              <SidebarMenuSubButton
+                                asChild
+                                isActive={isActivePath(pathname, "/settings/global")}
+                              >
+                                <Link href="/settings/global">
+                                  <SlidersHorizontal className="size-4" />
+                                  <span>全局配置</span>
                                 </Link>
                               </SidebarMenuSubButton>
                             </SidebarMenuSubItem>

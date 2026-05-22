@@ -11,10 +11,12 @@ import {
   type AppGenContextChip,
   type AppGenDevice,
   type AppGenMessage,
+  type AppGenPersistedSession,
   type AppGenStatus,
   type AppGenTheme,
   type AppGenVersion,
 } from '@/lib/app-gen-types';
+import { findRecentApp, upsertRecentApp } from '@/lib/app-gen-recent';
 import { extractHtmlDocument } from '@/lib/app-gen-sandbox';
 
 /** capabilities `textGenerate` 流式协议：每个 chunk 形如 { content: string } */
@@ -22,31 +24,33 @@ interface AppGenStreamChunk {
   content?: string;
 }
 
-interface PersistedSession {
-  messages: AppGenMessage[];
-  versions: AppGenVersion[];
-  currentVersionId: string | null;
-  device: AppGenDevice;
-  theme: AppGenTheme;
-}
-
-function readPersisted(): PersistedSession | null {
+function readPersisted(): AppGenPersistedSession | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = window.localStorage.getItem(APP_GEN_LOCAL_STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedSession;
+    const parsed = JSON.parse(raw) as AppGenPersistedSession & { appId?: string };
     if (!Array.isArray(parsed.messages) || !Array.isArray(parsed.versions)) return null;
-    return parsed;
+    return {
+      appId: parsed.appId ?? nanoid(8),
+      messages: parsed.messages,
+      versions: parsed.versions,
+      currentVersionId: parsed.currentVersionId ?? null,
+      device: parsed.device ?? 'desktop',
+      theme: parsed.theme ?? 'light',
+    };
   } catch {
     return null;
   }
 }
 
-function persistSession(snapshot: PersistedSession): void {
+function persistSession(snapshot: AppGenPersistedSession): void {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(APP_GEN_LOCAL_STORAGE_KEY, JSON.stringify(snapshot));
+    if (snapshot.messages.length > 0) {
+      upsertRecentApp(snapshot);
+    }
   } catch {
     // 配额满 / 隐私模式失败时静默
   }
@@ -78,6 +82,11 @@ export interface UseAppGenSessionResult {
   abort: () => void;
   retry: () => void;
   reset: () => void;
+  pickVersion: (versionId: string) => void;
+  appId: string | null;
+  getSnapshot: () => AppGenPersistedSession;
+  loadApp: (appId: string) => boolean;
+  goHome: () => void;
 }
 
 /**
@@ -88,9 +97,10 @@ export interface UseAppGenSessionResult {
  *   - 仅在前端 localStorage 暂存（M1 MVP）
  */
 export function useAppGenSession(): UseAppGenSessionResult {
-  const restored = useRef<PersistedSession | null>(null);
+  const restored = useRef<AppGenPersistedSession | null>(null);
   if (restored.current === null) {
     restored.current = readPersisted() ?? {
+      appId: nanoid(8),
       messages: [],
       versions: [],
       currentVersionId: null,
@@ -99,6 +109,7 @@ export function useAppGenSession(): UseAppGenSessionResult {
     };
   }
 
+  const [appId, setAppId] = useState<string>(restored.current.appId);
   const [status, setStatus] = useState<AppGenStatus>('idle');
   const [messages, setMessages] = useState<AppGenMessage[]>(restored.current.messages);
   const [versions, setVersions] = useState<AppGenVersion[]>(restored.current.versions);
@@ -111,18 +122,36 @@ export function useAppGenSession(): UseAppGenSessionResult {
   const lastIntentRef = useRef<string>('');
   const lastContextRef = useRef<AppGenContextChip[] | undefined>(undefined);
 
-  const persist = useCallback(
-    (snap: Partial<PersistedSession> = {}) => {
-      persistSession({
-        messages: snap.messages ?? messages,
-        versions: snap.versions ?? versions,
-        currentVersionId: snap.currentVersionId ?? currentVersionId,
-        device: snap.device ?? device,
-        theme: snap.theme ?? theme,
-      });
-    },
-    [messages, versions, currentVersionId, device, theme]
+  const buildSnapshot = useCallback(
+    (overrides: Partial<AppGenPersistedSession> = {}): AppGenPersistedSession => ({
+      appId: overrides.appId ?? appId,
+      messages: overrides.messages ?? messages,
+      versions: overrides.versions ?? versions,
+      currentVersionId: overrides.currentVersionId ?? currentVersionId,
+      device: overrides.device ?? device,
+      theme: overrides.theme ?? theme,
+    }),
+    [appId, messages, versions, currentVersionId, device, theme]
   );
+
+  const persist = useCallback(
+    (snap: Partial<AppGenPersistedSession> = {}) => {
+      persistSession(buildSnapshot(snap));
+    },
+    [buildSnapshot]
+  );
+
+  const applySnapshot = useCallback((snap: AppGenPersistedSession) => {
+    setAppId(snap.appId);
+    setMessages(snap.messages);
+    setVersions(snap.versions);
+    setCurrentVersionId(snap.currentVersionId);
+    setDeviceState(snap.device);
+    setThemeState(snap.theme);
+    setErrorMessage(null);
+    setStatus('idle');
+    persistSession(snap);
+  }, []);
 
   const setDevice = useCallback(
     (d: AppGenDevice) => {
@@ -142,6 +171,8 @@ export function useAppGenSession(): UseAppGenSessionResult {
   const reset = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
+    const freshId = nanoid(8);
+    setAppId(freshId);
     setStatus('idle');
     setMessages([]);
     setVersions([]);
@@ -157,6 +188,29 @@ export function useAppGenSession(): UseAppGenSessionResult {
       }
     }
   }, []);
+
+  const goHome = useCallback(() => {
+    if (messages.length > 0) {
+      upsertRecentApp(buildSnapshot());
+    }
+    reset();
+  }, [messages.length, buildSnapshot, reset]);
+
+  const loadApp = useCallback(
+    (targetAppId: string): boolean => {
+      if (targetAppId === appId) return true;
+      if (messages.length > 0) {
+        upsertRecentApp(buildSnapshot());
+      }
+      const found = findRecentApp(targetAppId);
+      if (!found) return false;
+      abortRef.current?.abort();
+      abortRef.current = null;
+      applySnapshot(found.snapshot);
+      return true;
+    },
+    [appId, messages.length, buildSnapshot, applySnapshot]
+  );
 
   const abort = useCallback(() => {
     if (abortRef.current) {
@@ -202,6 +256,9 @@ export function useAppGenSession(): UseAppGenSessionResult {
         createdAt: now,
       };
 
+      const sessionAppId = messages.length === 0 ? nanoid(8) : appId;
+      if (messages.length === 0) setAppId(sessionAppId);
+
       const nextMessages = [...messages, newUserMessage, newAssistantMessage];
       const nextVersions = [...versions, newVersion];
       setMessages(nextMessages);
@@ -209,6 +266,7 @@ export function useAppGenSession(): UseAppGenSessionResult {
       setCurrentVersionId(versionId);
       setStatus('streaming');
       persist({
+        appId: sessionAppId,
         messages: nextMessages,
         versions: nextVersions,
         currentVersionId: versionId,
@@ -352,6 +410,15 @@ export function useAppGenSession(): UseAppGenSessionResult {
     void runGenerate(lastIntentRef.current, lastContextRef.current);
   }, [runGenerate]);
 
+  const pickVersion = useCallback(
+    (versionId: string) => {
+      if (!versions.some((v) => v.id === versionId)) return;
+      setCurrentVersionId(versionId);
+      persist({ currentVersionId: versionId });
+    },
+    [versions, persist]
+  );
+
   const currentVersion = useMemo(
     () => versions.find((v) => v.id === currentVersionId) ?? versions[versions.length - 1] ?? null,
     [versions, currentVersionId]
@@ -374,5 +441,10 @@ export function useAppGenSession(): UseAppGenSessionResult {
     abort,
     retry,
     reset,
+    pickVersion,
+    appId: hasHistory ? appId : null,
+    getSnapshot: buildSnapshot,
+    loadApp,
+    goHome,
   };
 }
