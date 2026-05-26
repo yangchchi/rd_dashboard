@@ -7,6 +7,7 @@ import { RdModule } from './modules/rd/rd.module';
 import { PipelineGitModule } from './modules/pipeline-git/pipeline-git.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CapabilitiesModule } from './modules/capabilities/capabilities.module';
+import { FilesModule } from './modules/files/files.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { CapabilitiesModule } from './modules/capabilities/capabilities.module';
     PipelineGitModule,
     AuthModule,
     CapabilitiesModule,
+    FilesModule,
   ],
   providers: [
     {

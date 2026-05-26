@@ -1,4 +1,8 @@
+import { DEFAULT_ARK_MODEL } from '@shared/model-credentials';
+
 const MODEL_CONFIG_STORAGE_KEY = '__rd_model_config';
+
+export { DEFAULT_ARK_MODEL };
 
 export type ModelProviderId =
   | 'volcengine'
@@ -13,6 +17,8 @@ export type ModelProviderId =
 
 export interface IStoredModelConfig {
   provider: ModelProviderId;
+  /** 推理模型 ID / 部署名，与 ARK_MODEL 一致 */
+  modelName: string;
   apiBaseUrl: string;
   apiKey: string;
 }
@@ -58,6 +64,7 @@ function parseProvider(value: unknown): ModelProviderId {
   return 'volcengine';
 }
 
+/** @deprecated 仅用于迁移历史本机 localStorage 配置 */
 export function getStoredModelConfig(): IStoredModelConfig | null {
   if (typeof window === 'undefined') return null;
   try {
@@ -67,13 +74,18 @@ export function getStoredModelConfig(): IStoredModelConfig | null {
     const provider = parseProvider(parsed.provider);
     const apiBaseUrl = typeof parsed.apiBaseUrl === 'string' ? parsed.apiBaseUrl.trim() : '';
     const apiKey = typeof parsed.apiKey === 'string' ? parsed.apiKey.trim() : '';
+    const modelName =
+      typeof parsed.modelName === 'string' && parsed.modelName.trim()
+        ? parsed.modelName.trim()
+        : DEFAULT_ARK_MODEL;
     if (!apiBaseUrl && !apiKey) return null;
-    return { provider, apiBaseUrl, apiKey };
+    return { provider, modelName, apiBaseUrl, apiKey };
   } catch {
     return null;
   }
 }
 
+/** @deprecated 迁移完成后不再写入 localStorage */
 export function saveStoredModelConfig(config: IStoredModelConfig): void {
   if (typeof window === 'undefined') return;
   try {
@@ -81,6 +93,7 @@ export function saveStoredModelConfig(config: IStoredModelConfig): void {
       MODEL_CONFIG_STORAGE_KEY,
       JSON.stringify({
         provider: config.provider,
+        modelName: config.modelName.trim() || DEFAULT_ARK_MODEL,
         apiBaseUrl: config.apiBaseUrl.trim(),
         apiKey: config.apiKey.trim(),
       }),
@@ -100,11 +113,71 @@ export function clearStoredModelConfig(): void {
 }
 
 export function defaultModelConfigFormFields(): IStoredModelConfig {
-  const stored = getStoredModelConfig();
-  if (stored) return stored;
   return {
     provider: 'volcengine',
+    modelName: DEFAULT_ARK_MODEL,
     apiBaseUrl: getDefaultApiBaseUrl('volcengine'),
     apiKey: '',
   };
+}
+
+function mapRemoteToStored(remote: {
+  provider: string;
+  modelName: string;
+  apiBaseUrl: string;
+  apiKey: string;
+}): IStoredModelConfig {
+  return {
+    provider: parseProvider(remote.provider),
+    modelName: remote.modelName?.trim() || DEFAULT_ARK_MODEL,
+    apiBaseUrl: remote.apiBaseUrl?.trim() ?? '',
+    apiKey: remote.apiKey?.trim() ?? '',
+  };
+}
+
+/** 从服务端读取当前用户的模型配置 */
+export async function fetchRemoteModelConfig(): Promise<IStoredModelConfig | null> {
+  const { authApi } = await import('./auth-api');
+  const remote = await authApi.getMyModelConfig();
+  if (!remote?.apiBaseUrl?.trim() || !remote.apiKey?.trim()) return null;
+  return mapRemoteToStored(remote);
+}
+
+/** 保存到服务端账号，并清除历史 localStorage 副本 */
+export async function persistRemoteModelConfig(config: IStoredModelConfig): Promise<void> {
+  const { authApi } = await import('./auth-api');
+  await authApi.saveMyModelConfig({
+    provider: config.provider,
+    modelName: config.modelName.trim() || DEFAULT_ARK_MODEL,
+    apiBaseUrl: config.apiBaseUrl.trim(),
+    apiKey: config.apiKey.trim(),
+  });
+  clearStoredModelConfig();
+}
+
+/** 删除服务端配置并清除 localStorage */
+export async function removeRemoteModelConfig(): Promise<void> {
+  const { authApi } = await import('./auth-api');
+  await authApi.deleteMyModelConfig();
+  clearStoredModelConfig();
+}
+
+/**
+ * 优先读服务端；若无则尝试将旧版本 localStorage 配置迁移入库。
+ */
+export async function loadModelConfigWithMigration(): Promise<IStoredModelConfig> {
+  const remote = await fetchRemoteModelConfig();
+  if (remote) return remote;
+
+  const legacy = getStoredModelConfig();
+  if (legacy?.apiKey && legacy.apiBaseUrl) {
+    try {
+      await persistRemoteModelConfig(legacy);
+      return legacy;
+    } catch {
+      return legacy;
+    }
+  }
+
+  return defaultModelConfigFormFields();
 }

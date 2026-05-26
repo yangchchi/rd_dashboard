@@ -2,6 +2,10 @@
  * 兼容 @lark-apaas/client-capability 协议，请求本仓库 Nest：`/api/capability/:id` 与 `/stream`。
  * baseURL 使用相对路径，便于 Next 通过 rewrites 代理到后端。
  */
+import { isModelConfigRequiredMessage, MODEL_CONFIG_REQUIRED } from '@shared/model-credentials';
+
+import { dispatchModelConfigRequired } from '@/lib/model-credentials-client';
+
 import { getAuthToken } from './auth';
 
 const SUCCESS = '0';
@@ -14,6 +18,24 @@ class CapabilityError extends Error {
     super(message);
     this.name = 'CapabilityError';
   }
+}
+
+export function isModelConfigRequiredError(err: unknown): boolean {
+  if (err instanceof CapabilityError) {
+    return err.code === MODEL_CONFIG_REQUIRED;
+  }
+  if (err instanceof Error) {
+    return isModelConfigRequiredMessage(err.message);
+  }
+  return false;
+}
+
+function throwCapabilityError(errorMsg: string | undefined, fallback: string): never {
+  if (isModelConfigRequiredMessage(errorMsg)) {
+    dispatchModelConfigRequired();
+    throw new CapabilityError(errorMsg || fallback, MODEL_CONFIG_REQUIRED);
+  }
+  throw new CapabilityError(errorMsg || fallback);
 }
 
 function createExecutor(
@@ -30,13 +52,18 @@ function createExecutor(
     ...authHeaders(),
     ...(fetchOptions?.headers ?? {}),
   });
+  const buildBody = (action: string, params: unknown) =>
+    JSON.stringify({
+      action,
+      params,
+    });
   return {
     call: async <T>(action: string, params: unknown): Promise<T> => {
       const url = `${baseURL}/api/capability/${capabilityId}`;
       const response = await fetch(url, {
         method: 'POST',
         headers: jsonHeaders(),
-        body: JSON.stringify({ action, params }),
+        body: buildBody(action, params),
         credentials: 'include',
         ...fetchOptions,
       });
@@ -46,7 +73,7 @@ function createExecutor(
         error_msg?: string;
       };
       if (!response.ok || data.status_code !== SUCCESS) {
-        throw new CapabilityError(data.error_msg || 'Capability call failed');
+        throwCapabilityError(data.error_msg, 'Capability call failed');
       }
       return data.data?.output as T;
     },
@@ -59,7 +86,7 @@ function createExecutor(
       const response = await fetch(url, {
         method: 'POST',
         headers: jsonHeaders(),
-        body: JSON.stringify({ action, params }),
+        body: buildBody(action, params),
         credentials: 'include',
         ...fetchOptions,
         ...streamInit,
@@ -93,7 +120,7 @@ function createExecutor(
               continue;
             }
             if (parsed.status_code !== SUCCESS) {
-              throw new CapabilityError(parsed.error_msg || 'Capability stream failed', parsed.status_code);
+              throwCapabilityError(parsed.error_msg, 'Capability stream failed');
             }
             if (!parsed.data) continue;
             const d = parsed.data;

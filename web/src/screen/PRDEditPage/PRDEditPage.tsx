@@ -13,7 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Textarea } from '@/components/ui/textarea';
+import { MarkdownPasteImageTextarea } from '@/components/business-ui/markdown-paste-image-textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Streamdown } from '@/components/ui/streamdown';
 import {
@@ -472,11 +472,11 @@ const PRDEditPage: React.FC = () => {
                 </TabsList>
                 <TabsContent value="edit" className="mt-3 flex min-h-0 flex-1 flex-col space-y-2 data-[state=inactive]:hidden">
                   <p className="shrink-0 text-xs text-muted-foreground">
-                    源码编辑（Markdown）；切换「预览」查看标题、列表、表格等排版效果
+                    源码编辑（Markdown）；支持粘贴/拖拽图片；切换「预览」查看排版效果
                   </p>
-                  <Textarea
+                  <MarkdownPasteImageTextarea
                     value={prd.background}
-                    onChange={(e) => updateField('background', e.target.value)}
+                    onChange={(v) => updateField('background', v)}
                     readOnly={isReadOnly}
                     placeholder="在此编辑完整 PRD Markdown，或使用 AI 助手生成…"
                     className="min-h-0 flex-1 resize-none font-mono text-sm leading-relaxed md:min-h-[calc(100svh-22rem)]"

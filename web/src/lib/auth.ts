@@ -144,7 +144,9 @@ export function clearAuthSession(): void {
 }
 
 export function updateStoredCurrentUser(
-  updates: Partial<Pick<IUser, 'name' | 'email' | 'phone' | 'avatarUrl' | 'accessRoleId' | 'accessRoleIds'>>
+  updates: Partial<
+    Pick<IUser, 'name' | 'email' | 'phone' | 'avatarUrl' | 'themePreference' | 'accessRoleId' | 'accessRoleIds'>
+  >
 ): IUser | null {
   if (typeof window === 'undefined') return null;
   const current = getCurrentUser();

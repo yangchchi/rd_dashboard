@@ -38,6 +38,7 @@ const TASKS = [
       'test/unit/web-auth-form.spec.ts',
       'test/unit/web-api-auth-headers.spec.ts',
       'test/unit/web-ai-skill-engine.spec.ts',
+      'test/unit/model-credentials.spec.ts',
       'test/unit/web-capability-client.spec.ts',
       'test/unit/web-pipeline-page-utils.spec.ts',
       '--runInBand',

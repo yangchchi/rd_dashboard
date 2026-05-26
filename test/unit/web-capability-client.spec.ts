@@ -4,20 +4,31 @@ jest.mock('../../web/src/lib/ai-skills', () => ({
   clearAiSkillCache: jest.fn(),
 }));
 
+jest.mock('../../web/src/lib/auth', () => ({
+  getAuthToken: jest.fn(() => null),
+}));
+
+const dispatchModelConfigRequired = jest.fn();
+jest.mock('../../web/src/lib/model-credentials-client', () => ({
+  dispatchModelConfigRequired: (...args: unknown[]) => dispatchModelConfigRequired(...args),
+  MODEL_CONFIG_REQUIRED_EVENT: 'rd:model-config-required',
+}));
+
 describe('web capability client', () => {
   const originalFetch = global.fetch;
 
   afterEach(() => {
     global.fetch = originalFetch;
     jest.resetModules();
+    dispatchModelConfigRequired.mockClear();
   });
 
-  it('throws when a stream event carries a non-success status', async () => {
+  it('throws when a stream event carries model config required status', async () => {
     const body = new ReadableStream({
       start(controller) {
         controller.enqueue(
           new TextEncoder().encode(
-            'data: {"status_code":"1","error_msg":"AI 模型服务未配置"}\n\n'
+            'data: {"status_code":"1","error_msg":"MODEL_CONFIG_REQUIRED:请配置模型"}\n\n'
           )
         );
         controller.close();
@@ -29,13 +40,22 @@ describe('web capability client', () => {
       body,
     })) as jest.Mock;
 
-    const { capabilityClient } = await import('../../web/src/lib/capability-client');
+    const { capabilityClient, isModelConfigRequiredError } = await import(
+      '../../web/src/lib/capability-client'
+    );
     const stream = capabilityClient.load('fs_auto_generation').callStream('textGenerate', {});
 
-    await expect(async () => {
+    let caught: unknown;
+    try {
       for await (const _chunk of stream) {
         // iteration should fail before yielding data
       }
-    }).rejects.toThrow('AI 模型服务未配置');
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toMatchObject({ code: 'MODEL_CONFIG_REQUIRED' });
+    expect(isModelConfigRequiredError(caught)).toBe(true);
+    expect(dispatchModelConfigRequired).toHaveBeenCalled();
   });
 });

@@ -163,7 +163,12 @@ const defaultComponents: NonNullable<
     <section className={cn(className)} {...omit(props, ['node'])} />
   ),
   img: ({ className, alt, ...props }) => (
-    <img className={cn(className)} alt={alt ?? ''} {...omit(props, ['node'])} />
+    <img
+      className={cn('my-3 max-w-full rounded-md border border-border', className)}
+      alt={alt ?? ''}
+      loading="lazy"
+      {...omit(props, ['node'])}
+    />
   ),
   /** 必须用真实 <pre> 并保留空白，否则 fenced code（目录树等）换行会被折叠成一行 */
   pre: ({ className, children, ...props }) => (

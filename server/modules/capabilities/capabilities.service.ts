@@ -3,6 +3,16 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
 import { DEFAULT_AI_SKILLS, PRD_GENERATION_SKILL_ID } from '../../../shared/ai-skill-defaults';
+import {
+  DEFAULT_ARK_MODEL,
+  IUserModelOverride,
+  isValidUserModelOverride,
+  IResolvedArkCredentials,
+  MODEL_CONFIG_REQUIRED_MESSAGE,
+  resolveArkCredentials,
+  userModelConfigToOverride,
+} from '../../../shared/model-credentials';
+import { AuthService } from '../auth/auth.service';
 import { RdService } from '../rd/rd.service';
 
 /** 与 @lark-apaas/client-capability ErrorCodes.SUCCESS 一致 */
@@ -11,8 +21,13 @@ const ERROR = '1';
 const AI_PROVIDER_UNAVAILABLE =
   'AI 模型服务未配置或调用失败。生产环境不会返回演示输出，请配置 ARK_API_KEY 或显式开启 AI_DEMO_MODE=true。';
 
+const AI_STREAM_ACTIONS = new Set(['textGenerate', 'textSummary', 'textToJson']);
+
+/** 开发/演示模式回退时，提示用户配置真实模型的引导文案 */
+const DEMO_MODEL_CONFIG_HINT =
+  '请前往「个人设置 → 模型配置」填写 API 地址、API Key 与模型名称；或由管理员在服务端配置 ARK_API_KEY。';
+
 const DEFAULT_ARK_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/responses';
-const DEFAULT_ARK_MODEL = 'deepseek-v3-2-251201';
 
 interface AiSkillConfig {
   endpoint?: string | null;
@@ -226,11 +241,45 @@ function buildPromptFromCapabilityFile(
 export class CapabilitiesService {
   private readonly logger = new Logger(CapabilitiesService.name);
 
-  constructor(private readonly rdService: RdService) {}
+  constructor(
+    private readonly rdService: RdService,
+    private readonly authService: AuthService
+  ) {}
 
-  invoke(capabilityId: string, action: string, params: unknown): CapabilityUnaryResponse {
+  private async resolveCredentialsForRequest(
+    userId: string | undefined,
+    modelOverride?: IUserModelOverride | null
+  ): Promise<ReturnType<typeof resolveArkCredentials>> {
+    const env = { arkApiKey: getArkApiKeyFromEnv() };
+    if (isValidUserModelOverride(modelOverride)) {
+      return resolveArkCredentials(modelOverride, env);
+    }
+    if (userId?.trim()) {
+      const stored = await this.authService.getUserModelConfig(userId.trim());
+      if (stored) {
+        const fromDb = userModelConfigToOverride(stored);
+        if (isValidUserModelOverride(fromDb)) {
+          return resolveArkCredentials(fromDb, env);
+        }
+      }
+    }
+    return resolveArkCredentials(null, env);
+  }
+
+  async invoke(
+    capabilityId: string,
+    action: string,
+    params: unknown,
+    modelOverride?: IUserModelOverride | null,
+    userId?: string
+  ): Promise<CapabilityUnaryResponse> {
     const p = (params ?? {}) as Record<string, unknown>;
+    const credentials = await this.resolveCredentialsForRequest(userId, modelOverride);
+    const needsModel = action === 'aiCategorize' || action === 'textToJson';
     if (!this.canUseDemoOutput()) {
+      if (needsModel && !credentials) {
+        return this.modelConfigRequiredUnaryResponse();
+      }
       return this.unavailableUnaryResponse();
     }
     switch (action) {
@@ -258,11 +307,15 @@ export class CapabilitiesService {
     }
   }
 
-  async *stream(capabilityId: string, action: string, params: unknown): AsyncGenerator<string> {
-    const apiKey = getArkApiKeyFromEnv();
-    const useArk =
-      apiKey &&
-      (action === 'textGenerate' || action === 'textSummary' || action === 'textToJson');
+  async *stream(
+    capabilityId: string,
+    action: string,
+    params: unknown,
+    modelOverride?: IUserModelOverride | null,
+    userId?: string
+  ): AsyncGenerator<string> {
+    const credentials = await this.resolveCredentialsForRequest(userId, modelOverride);
+    const useArk = credentials && AI_STREAM_ACTIONS.has(action);
 
     if (useArk) {
       const { skill, resolvedSkillId, skillSource } = await this.resolveSkillConfig(capabilityId);
@@ -284,7 +337,7 @@ export class CapabilitiesService {
         const deltaField: 'content' | 'summary' =
           action === 'textSummary' ? 'summary' : 'content';
         try {
-          yield* this.streamArkSse(prompt, apiKey, deltaField, skill, capabilityId);
+          yield* this.streamArkSse(prompt, credentials, deltaField, skill, capabilityId);
           return;
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
@@ -299,6 +352,10 @@ export class CapabilitiesService {
     }
 
     if (!this.canUseDemoOutput()) {
+      if (!credentials && AI_STREAM_ACTIONS.has(action)) {
+        yield this.modelConfigRequiredStreamEvent();
+        return;
+      }
       yield this.unavailableStreamEvent();
       return;
     }
@@ -328,13 +385,21 @@ export class CapabilitiesService {
 
   private async *streamArkSse(
     prompt: string,
-    apiKey: string,
+    credentials: IResolvedArkCredentials,
     deltaField: 'content' | 'summary',
     skill?: AiSkillConfig | null,
     capabilityId?: string
   ): AsyncGenerator<string> {
-    const model = skill?.model || process.env.ARK_MODEL || DEFAULT_ARK_MODEL;
-    const endpoint = skill?.endpoint || process.env.ARK_API_ENDPOINT || DEFAULT_ARK_ENDPOINT;
+    const model =
+      credentials.modelFromUser ||
+      skill?.model ||
+      process.env.ARK_MODEL ||
+      DEFAULT_ARK_MODEL;
+    const endpoint =
+      credentials.endpointFromUser ||
+      skill?.endpoint ||
+      process.env.ARK_API_ENDPOINT ||
+      DEFAULT_ARK_ENDPOINT;
     let tools = filterArkRequestTools(skill);
     /** PRD 插件仅消费请求内材料；禁用 tools（如 web_search），避免模型先输出「将搜索…」类前言污染流式正文 */
     if (capabilityId && /^prd_generator/.test(capabilityId)) {
@@ -344,7 +409,7 @@ export class CapabilitiesService {
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${credentials.apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -498,6 +563,20 @@ export class CapabilitiesService {
     return process.env.NODE_ENV !== 'production';
   }
 
+  private modelConfigRequiredUnaryResponse(): CapabilityUnaryResponse {
+    return {
+      status_code: ERROR,
+      error_msg: MODEL_CONFIG_REQUIRED_MESSAGE,
+    };
+  }
+
+  private modelConfigRequiredStreamEvent(): string {
+    return `data: ${JSON.stringify({
+      status_code: ERROR,
+      error_msg: MODEL_CONFIG_REQUIRED_MESSAGE,
+    })}\n\n`;
+  }
+
   private unavailableUnaryResponse(): CapabilityUnaryResponse {
     return {
       status_code: ERROR,
@@ -530,8 +609,8 @@ export class CapabilitiesService {
         {
           conflict_type: '兼容性提示（演示）',
           position: '自动检测',
-          description: '当前为本地演示模式，未连接真实大模型。接入 OPENAI_API_KEY 或替换为自建推理服务后可输出完整分析。',
-          suggestion: '在 server/modules/capabilities 中扩展 CapabilitiesService。',
+          description: `当前为本地演示模式，未连接真实大模型。${DEMO_MODEL_CONFIG_HINT}`,
+          suggestion: '配置完成后重新发起 AI 生成即可获取真实结果。',
         },
       ],
     };
@@ -545,19 +624,19 @@ export class CapabilitiesService {
     const p = (params ?? {}) as Record<string, unknown>;
     if (action === 'textGenerate') {
       const base =
-        '【演示输出】未配置真实模型时返回占位文本。可在 CapabilitiesService 中接入 OpenAI 兼容接口。\n\n' +
+        `【演示输出】当前未连接真实大模型，以下为占位文本。${DEMO_MODEL_CONFIG_HINT}\n\n` +
         String(p.original_requirement || p.requirement_text || '').slice(0, 500);
       return this.splitToDeltas(base, 'content');
     }
     if (action === 'textSummary') {
       const msg =
-        '【演示】代码审查摘要：建议检查异常处理与输入校验；以下为占位内容。\n' +
+        `【演示】当前未连接真实大模型，以下为占位摘要。${DEMO_MODEL_CONFIG_HINT}\n` +
         String((p.code_content as string) || (p.acceptance_feedback as string) || '').slice(0, 800);
       return this.splitToDeltas(msg, 'summary');
     }
     if (action === 'textToJson') {
       const msg =
-        '【演示】冲突检测：建议在 CapabilitiesService 中接入真实推理。输入长度 ' +
+        `【演示】当前未连接真实大模型，冲突检测为占位结果。${DEMO_MODEL_CONFIG_HINT} 输入长度 ` +
         String(p.tech_spec_content || '').length;
       return this.splitToDeltas(msg, 'content');
     }

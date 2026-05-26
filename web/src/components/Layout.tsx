@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import { toast } from "sonner";
 import {
   SidebarProvider,
   Sidebar,
@@ -61,6 +62,8 @@ import { useCurrentUserProfile } from "@/hooks/useCurrentUserProfile";
 import { useAccessControl } from "@/hooks/useAccessControl";
 import { menuKeyAllowed, type AccessMenuKey } from "@/lib/access-catalog";
 import { forceRedirectToLogin, getCurrentUser } from "@/lib/auth";
+import { applyThemePreference } from "@/lib/user-profile-storage";
+import { MODEL_CONFIG_REQUIRED_EVENT } from "@/lib/model-credentials-client";
 import { cn } from "@/lib/utils";
 import { RequireRouteAccess } from "@/components/require-route-access";
 import { useMarkSiteMessageRead, useRequirementsList, useSiteMessagesList } from "@/lib/rd-hooks";
@@ -162,6 +165,21 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
       setSettingsOpen(true);
     }
   }, [pathname]);
+
+  useEffect(() => {
+    const onModelConfigRequired = () => {
+      toast.error("未配置大模型", {
+        description: "请先在「个人设置」中填写 API 地址与 Key；也可由管理员配置系统 ARK_API_KEY。",
+        duration: 12_000,
+        action: {
+          label: "去配置",
+          onClick: () => router.push("/settings#model-config"),
+        },
+      });
+    };
+    window.addEventListener(MODEL_CONFIG_REQUIRED_EVENT, onModelConfigRequired);
+    return () => window.removeEventListener(MODEL_CONFIG_REQUIRED_EVENT, onModelConfigRequired);
+  }, [router]);
 
   useEffect(() => {
     setThemeMounted(true);
@@ -526,7 +544,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                             aria-checked={active}
                             aria-label={item.label}
                             disabled={!themeMounted}
-                            onClick={() => setTheme(item.id)}
+                            onClick={() => applyThemePreference(setTheme, item.id as "light" | "dark" | "system")}
                             className={cn(
                               "relative flex size-8 items-center justify-center rounded-full transition-colors",
                               active ? "text-background" : "text-foreground hover:bg-accent/80"

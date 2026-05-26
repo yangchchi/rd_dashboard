@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ErrorBoundary } from 'react-error-boundary';
 import { Toaster } from '@/components/ui/sonner';
 import { ThemeProvider } from '@/components/theme-provider';
+import { UserThemeSync } from '@/components/UserThemeSync';
 import { useState } from 'react';
 
 function ErrorFallback({
@@ -40,6 +41,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeProvider>
+      <UserThemeSync />
       <QueryClientProvider client={queryClient}>
         <ErrorBoundary FallbackComponent={ErrorFallback}>
           {children}

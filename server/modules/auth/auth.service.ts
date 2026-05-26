@@ -13,6 +13,15 @@ import { sql } from 'drizzle-orm';
 
 import type { IAuthenticatedUser } from './auth-context';
 import { hashPassword, signAuthToken, verifyAuthToken, verifyPassword } from './auth.utils';
+import {
+  DEFAULT_ARK_MODEL,
+  type IUserModelConfig,
+} from '../../../shared/model-credentials';
+import {
+  type IUserGitCredentials,
+  type IUserProfileInput,
+  parseThemePreference,
+} from '../../../shared/user-settings';
 
 export interface IUserRow {
   id: string;
@@ -33,6 +42,8 @@ export interface IUserView {
   name?: string;
   email?: string;
   phone?: string;
+  avatarUrl?: string;
+  themePreference?: 'light' | 'dark' | 'system';
   /** 绑定的访问角色 id 列表，权限为并集 */
   accessRoleIds: string[];
   /** 用于兼容旧客户端与列展示的主角色（由内建优先级推导） */
@@ -239,6 +250,8 @@ export class AuthService implements OnModuleInit {
       typeof legacyRaw === 'string' && legacyRaw.trim() !== '' ? legacyRaw.trim() : null;
     const accessRoleIds = this.mergeRoleIdsFromRow(row, legacyAccessRoleId);
     const primary = this.pickPrimaryAccessRoleId(accessRoleIds);
+    const avatarRaw = row.avatar_url ?? row.avatarUrl;
+    const themeRaw = row.theme_preference ?? row.themePreference;
     return {
       id: row.id as string,
       username: row.username as string,
@@ -250,6 +263,9 @@ export class AuthService implements OnModuleInit {
         typeof email === 'string' && email.trim() !== '' ? email.trim() : undefined,
       phone:
         typeof phone === 'string' && phone.trim() !== '' ? phone.trim() : undefined,
+      avatarUrl:
+        typeof avatarRaw === 'string' && avatarRaw.trim() !== '' ? avatarRaw.trim() : undefined,
+      themePreference: parseThemePreference(themeRaw),
       accessRoleIds,
       accessRoleId: primary,
       createdAt: this.toIso(row.created_at ?? row.createdAt),
@@ -282,6 +298,8 @@ export class AuthService implements OnModuleInit {
     await this.ensureUserAccessRolesTable();
     await this.migrateLegacyUserRolesIntoJunction();
     await this.ensureAccessRolesTable();
+    await this.ensureUserModelConfigTable();
+    await this.ensureUserGitCredentialsTable();
     await this.seedDefaultAccessRolesIfEmpty();
     await this.ensureBuiltInAccessRolePermissions();
     await this.ensureDefaultAdmin();
@@ -316,6 +334,12 @@ export class AuthService implements OnModuleInit {
     `);
     await this.db.execute(sql`
       ALTER TABLE rd_users ADD COLUMN IF NOT EXISTS feishu_open_id TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+    `);
+    await this.db.execute(sql`
+      ALTER TABLE rd_users ADD COLUMN IF NOT EXISTS theme_preference TEXT;
     `);
     await this.db.execute(sql`
       CREATE UNIQUE INDEX IF NOT EXISTS rd_users_feishu_open_id_uidx
@@ -930,5 +954,258 @@ export class AuthService implements OnModuleInit {
       token,
       user: userView,
     };
+  }
+
+  private async ensureUserModelConfigTable(): Promise<void> {
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_user_model_configs (
+        user_id TEXT PRIMARY KEY REFERENCES rd_users(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL DEFAULT 'volcengine',
+        model_name TEXT NOT NULL DEFAULT 'deepseek-v3-2-251201',
+        api_base_url TEXT NOT NULL DEFAULT '',
+        api_key TEXT NOT NULL DEFAULT '',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+  }
+
+  private rowToUserModelConfig(row: Record<string, unknown>): IUserModelConfig {
+    const provider =
+      typeof row.provider === 'string' && row.provider.trim() ? row.provider.trim() : 'volcengine';
+    const modelName =
+      typeof row.model_name === 'string' && row.model_name.trim()
+        ? row.model_name.trim()
+        : typeof row.modelName === 'string' && row.modelName.trim()
+          ? row.modelName.trim()
+          : DEFAULT_ARK_MODEL;
+    const apiBaseUrl =
+      typeof row.api_base_url === 'string'
+        ? row.api_base_url.trim()
+        : typeof row.apiBaseUrl === 'string'
+          ? row.apiBaseUrl.trim()
+          : '';
+    const apiKey =
+      typeof row.api_key === 'string'
+        ? row.api_key.trim()
+        : typeof row.apiKey === 'string'
+          ? row.apiKey.trim()
+          : '';
+    const updatedAt = this.toIso(row.updated_at ?? row.updatedAt);
+    return { provider, modelName, apiBaseUrl, apiKey, updatedAt };
+  }
+
+  private validateUserModelConfigInput(body: Partial<IUserModelConfig>): IUserModelConfig {
+    const provider = typeof body.provider === 'string' && body.provider.trim() ? body.provider.trim() : 'volcengine';
+    const modelName =
+      typeof body.modelName === 'string' && body.modelName.trim()
+        ? body.modelName.trim()
+        : DEFAULT_ARK_MODEL;
+    const apiBaseUrl = typeof body.apiBaseUrl === 'string' ? body.apiBaseUrl.trim() : '';
+    const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+    if (!apiBaseUrl) {
+      throw new BadRequestException('请填写 API 地址');
+    }
+    if (!/^https?:\/\//i.test(apiBaseUrl)) {
+      throw new BadRequestException('API 地址需以 http:// 或 https:// 开头');
+    }
+    if (!apiKey) {
+      throw new BadRequestException('请填写 API Key');
+    }
+    if (apiKey.length < 8) {
+      throw new BadRequestException('API Key 长度过短');
+    }
+    return { provider, modelName, apiBaseUrl, apiKey };
+  }
+
+  async getUserModelConfig(userId: string): Promise<IUserModelConfig | null> {
+    const uid = userId?.trim();
+    if (!uid) return null;
+    const result = await this.db.execute(sql`
+      SELECT provider, model_name, api_base_url, api_key, updated_at
+      FROM rd_user_model_configs
+      WHERE user_id = ${uid}
+      LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute<Record<string, unknown>>(result);
+    if (!rows[0]) return null;
+    const config = this.rowToUserModelConfig(rows[0]);
+    if (!config.apiBaseUrl && !config.apiKey) return null;
+    return config;
+  }
+
+  async upsertUserModelConfig(
+    userId: string,
+    body: Partial<IUserModelConfig>
+  ): Promise<IUserModelConfig> {
+    const uid = userId?.trim();
+    if (!uid) {
+      throw new BadRequestException('无效用户');
+    }
+    const config = this.validateUserModelConfigInput(body);
+    await this.db.execute(sql`
+      INSERT INTO rd_user_model_configs (
+        user_id, provider, model_name, api_base_url, api_key, updated_at
+      ) VALUES (
+        ${uid},
+        ${config.provider},
+        ${config.modelName},
+        ${config.apiBaseUrl},
+        ${config.apiKey},
+        NOW()
+      )
+      ON CONFLICT (user_id) DO UPDATE SET
+        provider = EXCLUDED.provider,
+        model_name = EXCLUDED.model_name,
+        api_base_url = EXCLUDED.api_base_url,
+        api_key = EXCLUDED.api_key,
+        updated_at = NOW();
+    `);
+    return (await this.getUserModelConfig(uid)) as IUserModelConfig;
+  }
+
+  async deleteUserModelConfig(userId: string): Promise<void> {
+    const uid = userId?.trim();
+    if (!uid) return;
+    await this.db.execute(sql`DELETE FROM rd_user_model_configs WHERE user_id = ${uid};`);
+  }
+
+  private async ensureUserGitCredentialsTable(): Promise<void> {
+    await this.db.execute(sql`
+      CREATE TABLE IF NOT EXISTS rd_user_git_credentials (
+        user_id TEXT PRIMARY KEY REFERENCES rd_users(id) ON DELETE CASCADE,
+        git_username TEXT NOT NULL DEFAULT '',
+        git_pat TEXT NOT NULL DEFAULT '',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+  }
+
+  private rowToUserGitCredentials(row: Record<string, unknown>): IUserGitCredentials {
+    const username =
+      typeof row.git_username === 'string'
+        ? row.git_username.trim()
+        : typeof row.gitUsername === 'string'
+          ? row.gitUsername.trim()
+          : '';
+    const pat =
+      typeof row.git_pat === 'string'
+        ? row.git_pat.trim()
+        : typeof row.gitPat === 'string'
+          ? row.gitPat.trim()
+          : '';
+    return {
+      username,
+      pat,
+      updatedAt: this.toIso(row.updated_at ?? row.updatedAt),
+    };
+  }
+
+  async getUserProfile(userId: string): Promise<IUserView | null> {
+    const uid = userId?.trim();
+    if (!uid) return null;
+    const result = await this.db.execute(sql`
+      SELECT * FROM rd_users WHERE id = ${uid} LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute<Record<string, unknown>>(result);
+    if (!rows[0]) return null;
+    const base = this.rowToUserView(rows[0]);
+    return this.viewWithAccessRoles(base);
+  }
+
+  async updateUserProfile(userId: string, body: IUserProfileInput): Promise<IUserView> {
+    const uid = userId?.trim();
+    if (!uid) {
+      throw new BadRequestException('无效用户');
+    }
+    const existing = await this.getUserProfile(uid);
+    if (!existing) {
+      throw new BadRequestException('用户不存在');
+    }
+
+    const name =
+      body.name !== undefined ? (typeof body.name === 'string' ? body.name.trim() : '') : existing.name ?? '';
+    const email =
+      body.email !== undefined ? (typeof body.email === 'string' ? body.email.trim() : '') : existing.email ?? '';
+    const phone =
+      body.phone !== undefined ? (typeof body.phone === 'string' ? body.phone.trim() : '') : existing.phone ?? '';
+    const avatarUrl =
+      body.avatarUrl !== undefined
+        ? typeof body.avatarUrl === 'string'
+          ? body.avatarUrl.trim()
+          : ''
+        : existing.avatarUrl ?? '';
+    const themePreference =
+      body.themePreference !== undefined
+        ? parseThemePreference(body.themePreference) ?? null
+        : existing.themePreference ?? null;
+
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw new BadRequestException('请输入有效的邮箱地址');
+    }
+    if (avatarUrl && !/^https?:\/\//i.test(avatarUrl) && !avatarUrl.startsWith('data:image/')) {
+      throw new BadRequestException('头像地址需为 http(s) 链接或 data:image 格式');
+    }
+
+    await this.db.execute(sql`
+      UPDATE rd_users SET
+        full_name = ${name || null},
+        email = ${email || null},
+        phone = ${phone || null},
+        avatar_url = ${avatarUrl || null},
+        theme_preference = ${themePreference},
+        updated_at = NOW()
+      WHERE id = ${uid};
+    `);
+
+    return (await this.getUserProfile(uid)) as IUserView;
+  }
+
+  async getUserGitCredentials(userId: string): Promise<IUserGitCredentials | null> {
+    const uid = userId?.trim();
+    if (!uid) return null;
+    const result = await this.db.execute(sql`
+      SELECT git_username, git_pat, updated_at
+      FROM rd_user_git_credentials
+      WHERE user_id = ${uid}
+      LIMIT 1;
+    `);
+    const rows = this.rowsFromExecute<Record<string, unknown>>(result);
+    if (!rows[0]) return null;
+    const creds = this.rowToUserGitCredentials(rows[0]);
+    if (!creds.username && !creds.pat) return null;
+    return creds;
+  }
+
+  async upsertUserGitCredentials(
+    userId: string,
+    body: Partial<IUserGitCredentials>
+  ): Promise<IUserGitCredentials> {
+    const uid = userId?.trim();
+    if (!uid) {
+      throw new BadRequestException('无效用户');
+    }
+    const username = typeof body.username === 'string' ? body.username.trim() : '';
+    const pat = typeof body.pat === 'string' ? body.pat.trim() : '';
+    if (!username && !pat) {
+      throw new BadRequestException('请至少填写 Git 用户名或 PAT');
+    }
+    if (pat && pat.length < 8) {
+      throw new BadRequestException('PAT 长度过短');
+    }
+    await this.db.execute(sql`
+      INSERT INTO rd_user_git_credentials (user_id, git_username, git_pat, updated_at)
+      VALUES (${uid}, ${username}, ${pat}, NOW())
+      ON CONFLICT (user_id) DO UPDATE SET
+        git_username = EXCLUDED.git_username,
+        git_pat = EXCLUDED.git_pat,
+        updated_at = NOW();
+    `);
+    return (await this.getUserGitCredentials(uid)) as IUserGitCredentials;
+  }
+
+  async deleteUserGitCredentials(userId: string): Promise<void> {
+    const uid = userId?.trim();
+    if (!uid) return;
+    await this.db.execute(sql`DELETE FROM rd_user_git_credentials WHERE user_id = ${uid};`);
   }
 }

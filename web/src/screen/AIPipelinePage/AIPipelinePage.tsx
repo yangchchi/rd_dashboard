@@ -63,7 +63,7 @@ import {
 import { gitBlobViewerUrl } from '@/lib/git-web-url';
 import { rdApi } from '@/lib/rd-api';
 import { getAuthToken, isAuthSessionExpiredError } from '@/lib/auth';
-import { defaultGitPatFormFields } from '@/lib/git-pat-storage';
+import { loadGitPatWithMigration } from '@/lib/git-pat-storage';
 import type {
   IAgentSession,
   IGitCommitRecord,
@@ -250,23 +250,20 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
   const [isPublishingDocs, setIsPublishingDocs] = useState(false);
   const [confirmAction, setConfirmAction] = useState<ConfirmActionState | null>(null);
   const [promptAction, setPromptAction] = useState<PromptActionState | null>(null);
-  const [createForm, setCreateForm] = useState<ICreatePipelineForm>(() => {
-    const gitPatDefaults = defaultGitPatFormFields();
-    return {
-      name: '',
-      gitUrl: '',
-      gitAuthMode: 'pat',
-      gitUsername: gitPatDefaults.username,
-      gitPat: gitPatDefaults.pat,
-      sandboxUrl: '',
-      gitBaseBranch: 'main',
-      branch: '',
-      triggerMode: 'manual',
-      priority: 'P1',
-      remarks: '',
-      requirementId: '',
-    };
-  });
+  const [createForm, setCreateForm] = useState<ICreatePipelineForm>(() => ({
+    name: '',
+    gitUrl: '',
+    gitAuthMode: 'pat',
+    gitUsername: '',
+    gitPat: '',
+    sandboxUrl: '',
+    gitBaseBranch: 'main',
+    branch: '',
+    triggerMode: 'manual',
+    priority: 'P1',
+    remarks: '',
+    requirementId: '',
+  }));
   const logsEndRef = useRef<HTMLDivElement>(null);
   const testStreamEndRef = useRef<HTMLDivElement>(null);
 
@@ -340,13 +337,12 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
   const selectedTaskCommitStore = selectedTask?.commitStore;
 
   const resetCreateForm = () => {
-    const gitPatDefaults = defaultGitPatFormFields();
     setCreateForm({
       name: '',
       gitUrl: '',
       gitAuthMode: 'pat',
-      gitUsername: gitPatDefaults.username,
-      gitPat: gitPatDefaults.pat,
+      gitUsername: '',
+      gitPat: '',
       sandboxUrl: '',
       gitBaseBranch: 'main',
       branch: '',
@@ -354,6 +350,14 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
       priority: 'P1',
       remarks: '',
       requirementId: '',
+    });
+    void loadGitPatWithMigration().then((stored) => {
+      if (!stored.username && !stored.pat) return;
+      setCreateForm((prev) => ({
+        ...prev,
+        gitUsername: stored.username,
+        gitPat: stored.pat,
+      }));
     });
   };
 
@@ -425,14 +429,15 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
   /** 创建弹窗打开时，用个人设置中保存的 Git PAT 补全空字段 */
   useEffect(() => {
     if (!isCreateDialogOpen) return;
-    const stored = defaultGitPatFormFields();
-    if (!stored.username && !stored.pat) return;
-    setCreateForm((prev) => {
-      if (prev.gitAuthMode !== 'pat') return prev;
-      const nextUsername = prev.gitUsername.trim() ? prev.gitUsername : stored.username;
-      const nextPat = prev.gitPat.trim() ? prev.gitPat : stored.pat;
-      if (nextUsername === prev.gitUsername && nextPat === prev.gitPat) return prev;
-      return { ...prev, gitUsername: nextUsername, gitPat: nextPat };
+    void loadGitPatWithMigration().then((stored) => {
+      if (!stored.username && !stored.pat) return;
+      setCreateForm((prev) => {
+        if (prev.gitAuthMode !== 'pat') return prev;
+        const nextUsername = prev.gitUsername.trim() ? prev.gitUsername : stored.username;
+        const nextPat = prev.gitPat.trim() ? prev.gitPat : stored.pat;
+        if (nextUsername === prev.gitUsername && nextPat === prev.gitPat) return prev;
+        return { ...prev, gitUsername: nextUsername, gitPat: nextPat };
+      });
     });
   }, [isCreateDialogOpen]);
 

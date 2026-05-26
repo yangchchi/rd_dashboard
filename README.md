@@ -141,14 +141,16 @@ NODE_ENV=production node server/main.js
 - `SERVER_PORT`：后端端口（默认 `3000`）
 - `CLIENT_DEV_PORT`：前端开发端口（默认 `3001`）
 - `API_ORIGIN`：Next 代理后端 API 时使用的 origin（见 `web/next.config.ts`）
-- `ARK_API_KEY`：服务端 AI 能力网关调用 Ark 的私有 Key。不要使用 `NEXT_PUBLIC_ARK_API_KEY` / `VITE_ARK_API_KEY`，生产 AI 调用统一经 `/api/capability/*` 转发。
+- `ARK_API_KEY`：服务端 AI 能力网关调用 Ark 的私有 Key；前端 AI 调用统一经 `/api/capability/*` 转发，不在浏览器侧配置模型 Key。
 - `ARK_MODEL`：服务端默认 Ark 模型，可被数据库中的 AI Skill 配置覆盖
 - `ARK_API_ENDPOINT`：服务端默认 Ark Responses endpoint，可被数据库中的 AI Skill 配置覆盖
 - `AI_DEMO_MODE`：是否允许无模型配置时返回演示 AI 输出；生产环境应显式关闭或保持未设置
 - `LOG_DIR`：开发日志目录（默认 `logs`）
 - `MAX_RESTART_COUNT`：dev 模式最大重启次数（默认 `10`）
 - `RESTART_DELAY`：dev 模式重启初始延迟秒数（默认 `2`）
-
+- `OSS_BUCKET_NAME` / `OSS_ENDPOINT` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_ACCESS_URL`：阿里云 OSS，用于 PRD Markdown 粘贴/上传图片（`POST /api/files/upload-image`）
+- `OSS_PREFIX`：OSS 对象键前缀（默认 `file`）
+- `OSS_MAX_IMAGE_BYTES`：单张图片大小上限（默认 `5242880`，即 5MB）
 
 新增远程仓库
 名称：internal

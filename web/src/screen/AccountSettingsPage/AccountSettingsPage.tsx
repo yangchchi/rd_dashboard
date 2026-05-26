@@ -18,22 +18,32 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { getCurrentUser, updateStoredCurrentUser } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/auth';
 import {
   clearStoredGitPatCredentials,
-  getStoredGitPatCredentials,
-  saveStoredGitPatCredentials,
+  loadGitPatWithMigration,
+  persistRemoteGitPatCredentials,
+  removeRemoteGitPatCredentials,
 } from '@/lib/git-pat-storage';
 import {
   clearStoredModelConfig,
+  DEFAULT_ARK_MODEL,
   defaultModelConfigFormFields,
   getDefaultApiBaseUrl,
   getModelProviderOption,
   getStoredModelConfig,
+  loadModelConfigWithMigration,
   MODEL_PROVIDER_OPTIONS,
-  saveStoredModelConfig,
+  persistRemoteModelConfig,
+  removeRemoteModelConfig,
   type ModelProviderId,
 } from '@/lib/model-config-storage';
+import {
+  applyThemePreference,
+  loadUserProfileWithMigration,
+  persistRemoteUserProfile,
+} from '@/lib/user-profile-storage';
+import type { ThemePreference } from '@shared/user-settings';
 
 const MAX_AVATAR_FILE_BYTES = 512 * 1024;
 
@@ -49,7 +59,7 @@ function isAllowedAvatarUrl(url: string): boolean {
   }
 }
 
-type ThemeChoice = 'light' | 'dark' | 'system';
+type ThemeChoice = ThemePreference;
 
 function ThemeSegmentedControl() {
   const { theme, setTheme } = useTheme();
@@ -87,7 +97,7 @@ function ThemeSegmentedControl() {
             aria-checked={active}
             aria-label={item.label}
             disabled={!mounted}
-            onClick={() => setTheme(item.id)}
+            onClick={() => applyThemePreference(setTheme, item.id)}
             className={cn(
               'relative flex size-9 items-center justify-center rounded-full transition-colors',
               active ? 'text-background' : 'text-foreground hover:bg-accent/80'
@@ -108,6 +118,7 @@ function ThemeSegmentedControl() {
 }
 
 export default function AccountSettingsPage() {
+  const { setTheme } = useTheme();
   const user = useMemo(() => getCurrentUser(), []);
   const [name, setName] = useState(user?.name ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
@@ -117,25 +128,96 @@ export default function AccountSettingsPage() {
   const [gitUsername, setGitUsername] = useState('');
   const [gitPat, setGitPat] = useState('');
   const [savingGitPat, setSavingGitPat] = useState(false);
+  const [loadingGitPat, setLoadingGitPat] = useState(true);
+  const [loadingProfile, setLoadingProfile] = useState(true);
   const [modelProvider, setModelProvider] = useState<ModelProviderId>('volcengine');
+  const [modelName, setModelName] = useState(DEFAULT_ARK_MODEL);
   const [modelApiBaseUrl, setModelApiBaseUrl] = useState('');
   const [modelApiKey, setModelApiKey] = useState('');
   const [savingModelConfig, setSavingModelConfig] = useState(false);
+  const [loadingModelConfig, setLoadingModelConfig] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const username = user?.username ?? '';
 
   useEffect(() => {
-    const stored = getStoredGitPatCredentials();
-    setGitUsername(stored?.username ?? '');
-    setGitPat(stored?.pat ?? '');
+    let cancelled = false;
+    setLoadingProfile(true);
+    void loadUserProfileWithMigration()
+      .then((profile) => {
+        if (cancelled || !profile) return;
+        setName(profile.name ?? '');
+        setEmail(profile.email ?? '');
+        setPhone(profile.phone ?? '');
+        setAvatarUrl(profile.avatarUrl?.trim() ?? '');
+        if (profile.themePreference) {
+          applyThemePreference(setTheme, profile.themePreference);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const current = getCurrentUser();
+        setName(current?.name ?? '');
+        setEmail(current?.email ?? '');
+        setPhone(current?.phone ?? '');
+        setAvatarUrl(current?.avatarUrl?.trim() ?? '');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingProfile(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [setTheme]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingGitPat(true);
+    void loadGitPatWithMigration()
+      .then((stored) => {
+        if (cancelled) return;
+        setGitUsername(stored.username);
+        setGitPat(stored.pat);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGitUsername('');
+          setGitPat('');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingGitPat(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    const fields = defaultModelConfigFormFields();
-    setModelProvider(fields.provider);
-    setModelApiBaseUrl(fields.apiBaseUrl);
-    setModelApiKey(fields.apiKey);
+    let cancelled = false;
+    setLoadingModelConfig(true);
+    void loadModelConfigWithMigration()
+      .then((fields) => {
+        if (cancelled) return;
+        setModelProvider(fields.provider);
+        setModelName(fields.modelName);
+        setModelApiBaseUrl(fields.apiBaseUrl);
+        setModelApiKey(fields.apiKey);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const fields = defaultModelConfigFormFields();
+        setModelProvider(fields.provider);
+        setModelName(fields.modelName);
+        setModelApiBaseUrl(fields.apiBaseUrl);
+        setModelApiKey('');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingModelConfig(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleModelProviderChange = (value: string) => {
@@ -182,24 +264,46 @@ export default function AccountSettingsPage() {
       return;
     }
     setSavingGitPat(true);
-    try {
-      saveStoredGitPatCredentials({ username: trimmedUsername, pat: trimmedPat });
-      toast.success('Git PAT 已保存，创建流水线时将自动填充');
-    } finally {
-      setSavingGitPat(false);
-    }
+    void persistRemoteGitPatCredentials({ username: trimmedUsername, pat: trimmedPat })
+      .then(() => {
+        toast.success('Git PAT 已保存到账号，创建流水线时将自动填充');
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : '保存失败';
+        toast.error('Git PAT 保存失败', { description: msg });
+      })
+      .finally(() => {
+        setSavingGitPat(false);
+      });
   };
 
   const handleClearGitPat = () => {
-    clearStoredGitPatCredentials();
-    setGitUsername('');
-    setGitPat('');
-    toast.success('已清除本机保存的 Git PAT');
+    setSavingGitPat(true);
+    void removeRemoteGitPatCredentials()
+      .then(() => {
+        setGitUsername('');
+        setGitPat('');
+        toast.success('已清除账号中的 Git PAT');
+      })
+      .catch(() => {
+        clearStoredGitPatCredentials();
+        setGitUsername('');
+        setGitPat('');
+        toast.success('已清除本机缓存的 Git PAT');
+      })
+      .finally(() => {
+        setSavingGitPat(false);
+      });
   };
 
   const handleSaveModelConfig = () => {
     const trimmedUrl = modelApiBaseUrl.trim();
     const trimmedKey = modelApiKey.trim();
+    const trimmedModel = modelName.trim();
+    if (!trimmedModel) {
+      toast.error('请填写模型名称');
+      return;
+    }
     if (!trimmedUrl) {
       toast.error('请填写 API 地址');
       return;
@@ -217,29 +321,58 @@ export default function AccountSettingsPage() {
       return;
     }
     setSavingModelConfig(true);
-    try {
-      saveStoredModelConfig({
-        provider: modelProvider,
-        apiBaseUrl: trimmedUrl,
-        apiKey: trimmedKey,
+    void persistRemoteModelConfig({
+      provider: modelProvider,
+      modelName: trimmedModel,
+      apiBaseUrl: trimmedUrl,
+      apiKey: trimmedKey,
+    })
+      .then(() => {
+        toast.success('模型配置已保存到账号');
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : '保存失败';
+        toast.error('模型配置保存失败', { description: msg });
+      })
+      .finally(() => {
+        setSavingModelConfig(false);
       });
-      toast.success('模型配置已保存');
-    } finally {
-      setSavingModelConfig(false);
-    }
   };
 
   const handleClearModelConfig = () => {
-    clearStoredModelConfig();
-    const defaults = defaultModelConfigFormFields();
-    setModelProvider(defaults.provider);
-    setModelApiBaseUrl(defaults.apiBaseUrl);
-    setModelApiKey('');
-    toast.success('已清除本机保存的模型配置');
+    setSavingModelConfig(true);
+    void removeRemoteModelConfig()
+      .then(() => {
+        const defaults = defaultModelConfigFormFields();
+        setModelProvider(defaults.provider);
+        setModelName(defaults.modelName);
+        setModelApiBaseUrl(defaults.apiBaseUrl);
+        setModelApiKey('');
+        toast.success('已清除账号中的模型配置');
+      })
+      .catch(() => {
+        clearStoredModelConfig();
+        const defaults = defaultModelConfigFormFields();
+        setModelProvider(defaults.provider);
+        setModelName(defaults.modelName);
+        setModelApiBaseUrl(defaults.apiBaseUrl);
+        setModelApiKey('');
+        toast.success('已清除本机缓存的模型配置');
+      })
+      .finally(() => {
+        setSavingModelConfig(false);
+      });
   };
 
   const modelProviderPlaceholder =
     getModelProviderOption(modelProvider)?.defaultBaseUrl ?? 'https://your-api-endpoint/v1';
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.location.hash === '#model-config') {
+      document.getElementById('model-config')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, []);
 
   const handleSaveProfile = () => {
     if (!user) {
@@ -257,17 +390,22 @@ export default function AccountSettingsPage() {
       return;
     }
     setSaving(true);
-    try {
-      updateStoredCurrentUser({
-        name: name.trim() || undefined,
-        email: trimmedEmail || undefined,
-        phone: phone.trim() || undefined,
-        avatarUrl: trimmedAvatar || undefined,
+    void persistRemoteUserProfile({
+      name: name.trim() || undefined,
+      email: trimmedEmail || undefined,
+      phone: phone.trim() || undefined,
+      avatarUrl: trimmedAvatar || undefined,
+    })
+      .then(() => {
+        toast.success('基本信息已保存到账号');
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : '保存失败';
+        toast.error('基本信息保存失败', { description: msg });
+      })
+      .finally(() => {
+        setSaving(false);
       });
-      toast.success('基本信息已保存');
-    } finally {
-      setSaving(false);
-    }
   };
 
   return (
@@ -282,7 +420,7 @@ export default function AccountSettingsPage() {
       <Card className="rounded-xl border-border">
         <CardHeader className="space-y-1">
           <CardTitle className="text-lg font-semibold">基本信息</CardTitle>
-          <CardDescription>将保存在本机浏览器中，用于侧边栏与各处展示</CardDescription>
+          <CardDescription>显示姓名、联系方式与头像，保存至当前登录账号</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-center">
@@ -335,7 +473,7 @@ export default function AccountSettingsPage() {
                 autoComplete="off"
               />
               <p className="text-xs text-muted-foreground">
-                支持 https 图片地址；本地上传会以 Base64 存入浏览器（建议小于 512KB）。
+                支持 https 图片地址；本地上传会以 Base64 存入账号（建议小于 512KB）。
               </p>
             </div>
           </div>
@@ -379,18 +517,18 @@ export default function AccountSettingsPage() {
             </div>
           </div>
           <div className="flex justify-end border-t border-border pt-6">
-            <Button type="button" onClick={handleSaveProfile} disabled={saving || !user}>
-              {saving ? '保存中…' : '保存'}
+            <Button type="button" onClick={handleSaveProfile} disabled={saving || loadingProfile || !user}>
+              {saving ? '保存中…' : loadingProfile ? '加载中…' : '保存'}
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="rounded-xl border-border">
+      <Card id="model-config" className="rounded-xl border-border scroll-mt-8">
         <CardHeader className="space-y-1">
           <CardTitle className="text-lg font-semibold">模型配置</CardTitle>
           <CardDescription>
-            配置大模型供应商与 API 凭据；仅保存在本机浏览器，供 AI 能力调用时使用
+            配置大模型供应商与 API 凭据，保存至当前登录账号；调用 AI 能力时优先使用此处配置
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -409,6 +547,19 @@ export default function AccountSettingsPage() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2 sm:col-span-2">
+              <Label htmlFor="settings-model-name">模型名称</Label>
+              <Input
+                id="settings-model-name"
+                value={modelName}
+                onChange={(e) => setModelName(e.target.value)}
+                placeholder={DEFAULT_ARK_MODEL}
+                autoComplete="off"
+              />
+              <p className="text-xs text-muted-foreground">
+                推理端点使用的模型 ID 或部署名，与系统默认 ARK_MODEL 一致时可填 {DEFAULT_ARK_MODEL}
+              </p>
             </div>
             <div className="space-y-2 sm:col-span-2">
               <Label htmlFor="settings-model-api-url">API 地址</Label>
@@ -443,19 +594,20 @@ export default function AccountSettingsPage() {
             </div>
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            不会写入服务端数据库；请勿在公共设备上保存。切换供应商时，若 API 地址仍为默认值将自动更新为对应厂商推荐地址。
+            凭据保存在服务端数据库，仅与您的账号关联；请勿在公共设备上保存 Key。切换供应商时，若 API
+            API 地址仍为默认值将自动更新为对应厂商推荐地址。
           </p>
           <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-6">
             <Button
               type="button"
               variant="outline"
               onClick={handleClearModelConfig}
-              disabled={!modelApiBaseUrl.trim() && !modelApiKey.trim()}
+              disabled={loadingModelConfig || savingModelConfig || (!modelApiBaseUrl.trim() && !modelApiKey.trim())}
             >
               清除
             </Button>
-            <Button type="button" onClick={handleSaveModelConfig} disabled={savingModelConfig}>
-              {savingModelConfig ? '保存中…' : '保存'}
+            <Button type="button" onClick={handleSaveModelConfig} disabled={loadingModelConfig || savingModelConfig}>
+              {savingModelConfig ? '保存中…' : loadingModelConfig ? '加载中…' : '保存'}
             </Button>
           </div>
         </CardContent>
@@ -464,7 +616,7 @@ export default function AccountSettingsPage() {
       <Card className="rounded-xl border-border">
         <CardHeader className="space-y-1">
           <CardTitle className="text-lg font-semibold">外观</CardTitle>
-          <CardDescription>浅色、深色或跟随系统设置</CardDescription>
+          <CardDescription>浅色、深色或跟随系统；偏好保存至当前登录账号</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -478,7 +630,7 @@ export default function AccountSettingsPage() {
         <CardHeader className="space-y-1">
           <CardTitle className="text-lg font-semibold">Git PAT 配置</CardTitle>
           <CardDescription>
-            用于 HTTPS 仓库克隆与推送；凭据仅保存在本机浏览器，创建流水线时自动填入
+            用于 HTTPS 仓库克隆与推送；凭据保存至当前登录账号，创建流水线时自动填入
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -506,19 +658,20 @@ export default function AccountSettingsPage() {
             </div>
           </div>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            不会写入流水线任务元数据或服务端数据库；请勿在公共设备上保存。推送代码时 Agent 工作台也会优先使用此处配置。
+            凭据保存在服务端数据库，仅与您的账号关联；不会写入流水线任务元数据。推送代码时 Agent
+            工作台也会优先使用此处配置。
           </p>
           <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-6">
             <Button
               type="button"
               variant="outline"
               onClick={handleClearGitPat}
-              disabled={!gitUsername.trim() && !gitPat.trim()}
+              disabled={loadingGitPat || savingGitPat || (!gitUsername.trim() && !gitPat.trim())}
             >
               清除
             </Button>
-            <Button type="button" onClick={handleSaveGitPat} disabled={savingGitPat}>
-              {savingGitPat ? '保存中…' : '保存'}
+            <Button type="button" onClick={handleSaveGitPat} disabled={loadingGitPat || savingGitPat}>
+              {savingGitPat ? '保存中…' : loadingGitPat ? '加载中…' : '保存'}
             </Button>
           </div>
         </CardContent>

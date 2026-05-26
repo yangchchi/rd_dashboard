@@ -269,8 +269,10 @@ export interface IUser {
   name?: string;
   email?: string;
   phone?: string;
-  /** 头像地址（https 或 data:image 等，仅存于本机登录态时可由个人设置写入） */
+  /** 头像地址（https 或 data:image 等） */
   avatarUrl?: string;
+  /** 界面主题偏好 */
+  themePreference?: 'light' | 'dark' | 'system';
   /** 与「角色定义」中的角色 id 对应，用于菜单/页面/按钮级权限（并集） */
   accessRoleIds?: string[];
   /** 主展示用角色，与 accessRoleIds 由内建优先级推导同步 */

@@ -22,7 +22,8 @@ function loadEnv() {
     if (eqIdx === -1) continue;
     const key = trimmed.slice(0, eqIdx).trim();
     const value = trimmed.slice(eqIdx + 1).trim();
-    if (!(key in process.env)) {
+    const existing = process.env[key];
+    if (existing === undefined || String(existing).trim() === '') {
       process.env[key] = value;
     }
   }

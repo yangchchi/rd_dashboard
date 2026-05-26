@@ -1,3 +1,5 @@
+import type { IUserModelConfig } from '@shared/model-credentials';
+import type { IUserGitCredentials, IUserProfile, IUserProfileInput } from '@shared/user-settings';
 import type { ILoginResponse, IUser } from './rd-types';
 import type { AccessRoleRecord } from './access-policy-storage';
 import { getAuthToken, rejectIfUnauthorized } from './auth';
@@ -153,6 +155,51 @@ export const authApi = {
   resetAccessRoles() {
     return json<AccessRoleRecord[]>('/access-roles/reset', {
       method: 'POST',
+    });
+  },
+
+  getMyModelConfig() {
+    return json<IUserModelConfig | null>('/me/model-config');
+  },
+
+  saveMyModelConfig(body: Omit<IUserModelConfig, 'updatedAt'>) {
+    return json<IUserModelConfig>('/me/model-config', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  },
+
+  deleteMyModelConfig() {
+    return json<void>('/me/model-config', {
+      method: 'DELETE',
+    });
+  },
+
+  getMyProfile() {
+    return json<IUserProfile | null>('/me/profile');
+  },
+
+  updateMyProfile(body: IUserProfileInput) {
+    return json<IUserProfile>('/me/profile', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  },
+
+  getMyGitCredentials() {
+    return json<IUserGitCredentials | null>('/me/git-credentials');
+  },
+
+  saveMyGitCredentials(body: Omit<IUserGitCredentials, 'updatedAt'>) {
+    return json<IUserGitCredentials>('/me/git-credentials', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  },
+
+  deleteMyGitCredentials() {
+    return json<void>('/me/git-credentials', {
+      method: 'DELETE',
     });
   },
 };
