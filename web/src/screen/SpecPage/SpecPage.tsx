@@ -1,14 +1,14 @@
 'use client';
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SpecPhaseProgress } from '@/components/spec-phase-progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty';
-import { 
+import {
   FileText, 
   Settings2, 
   Code2, 
@@ -22,9 +22,9 @@ import {
   Send,
   XCircle,
   ListChecks,
+  Layers3,
 } from 'lucide-react';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
-import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { Streamdown } from '@/components/ui/streamdown';
 import { capabilityClient } from '@/lib/capability-client';
 import { getCurrentUser } from '@/lib/auth';
@@ -65,6 +65,15 @@ const SpecPage: React.FC = () => {
   const specs = React.useMemo(
     () => mapSpecsToListRows(fullSpecs, prds, requirements, products),
     [fullSpecs, prds, requirements, products]
+  );
+  const specStats = React.useMemo(
+    () => ({
+      total: specs.length,
+      draft: specs.filter((s) => s.status === 'draft').length,
+      reviewing: specs.filter((s) => s.status === 'reviewing').length,
+      approved: specs.filter((s) => s.status === 'approved').length,
+    }),
+    [specs]
   );
   const loading = loadingSpecs;
   const [selectedSpec, setSelectedSpec] = useState<ISpecListRow | null>(null);
@@ -230,241 +239,232 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
 
   return (
     <>
-      <div className="flex w-full animate-in fade-in flex-col gap-6 duration-300">
-        {/* 页面标题 */}
-        <section className="w-full">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="rd-page-header-lead">
-              <RdPageModuleHeading
-                icon={Settings2}
-                title="技术基准"
-                description="构建流程：组织编码约束 → 功能规格 FS（参考 PRD）→ 技术规格 TS（参考 FS + 约束）→ 编程计划 CP（参考 FS + TS），并导出 Machine-Readable JSON"
-              />
-            </div>
-            <Button onClick={handleCreateSpec} className="shrink-0 shadow-sm sm:mt-0">
-              <Plus className="mr-2 h-4 w-4" />
-              新建规格
-            </Button>
+      <div className="flex w-full flex-col gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+        <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-6">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
+              Technical Baseline
+            </p>
+            <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
+              技术基准
+            </h1>
+          </div>
+          <Button
+            onClick={handleCreateSpec}
+            className="h-10 shrink-0 rounded-[20px] px-[18px] text-sm font-bold shadow-none"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            新建规格
+          </Button>
+        </header>
+
+        <section className="overflow-hidden rounded-[24px] bg-[linear-gradient(135deg,rgba(234,221,255,0.94),rgba(159,242,230,0.62))] p-6 text-[#21005d] shadow-[0_10px_28px_rgba(103,80,164,0.07)]">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {(
+              [
+                { label: '规格总数', value: specStats.total, Icon: Layers3, note: 'FS / TS / CP 文档' },
+                { label: '草稿中', value: specStats.draft, Icon: Settings2, note: '等待补充与提交' },
+                { label: '评审中', value: specStats.reviewing, Icon: RefreshCw, note: '技术经理确认中' },
+                { label: '已批准', value: specStats.approved, Icon: CheckCircle, note: '可进入 AI 开发' },
+              ] as const
+            ).map((item) => (
+              <div key={item.label} className="min-h-24 rounded-2xl bg-white/60 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[30px] font-semibold leading-none text-[#21005d] tabular-nums">
+                      {item.value}
+                    </p>
+                    <p className="mt-2 text-[13px] font-bold text-[#21005d]/75">{item.label}</p>
+                    <p className="mt-1 text-xs leading-snug text-[#21005d]/55">{item.note}</p>
+                  </div>
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-white/65 text-[#21005d]">
+                    <item.Icon className="h-5 w-5" strokeWidth={1.75} />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
-        {/* 统计概览 */}
-        <section className="w-full grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-primary/10 rounded-lg">
-                  <FileText className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <p className="text-2xl font-semibold">{specs.length}</p>
-                  <p className="text-xs text-muted-foreground">规格总数</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-slate-500/10 p-2">
-                  <Settings2 className="h-5 w-5 text-slate-600 dark:text-slate-300" />
-                </div>
-                <div>
-                  <p className="text-2xl font-semibold">{specs.filter(s => s.status === 'draft').length}</p>
-                  <p className="text-xs text-muted-foreground">草稿中</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-indigo-500/10 p-2">
-                  <RefreshCw className="h-5 w-5 text-indigo-700 dark:text-indigo-300" />
-                </div>
-                <div>
-                  <p className="text-2xl font-semibold">{specs.filter(s => s.status === 'reviewing').length}</p>
-                  <p className="text-xs text-muted-foreground">评审中</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-green-500/10 p-2">
-                  <CheckCircle className="h-5 w-5 text-green-700 dark:text-green-400" />
-                </div>
-                <div>
-                  <p className="text-2xl font-semibold">{specs.filter(s => s.status === 'approved').length}</p>
-                  <p className="text-xs text-muted-foreground">已批准</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-
-        {/* 规格列表 */}
         <section className="w-full">
-          {specs.length === 0 ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>暂无规格文档</EmptyTitle>
-                <EmptyDescription>点击上方按钮创建新的规格说明书</EmptyDescription>
-              </EmptyHeader>
-              <EmptyContent>
-                <Button onClick={handleCreateSpec} className="shadow-sm">
-                  <Plus className="mr-2 h-4 w-4" />
-                  新建规格
-                </Button>
-              </EmptyContent>
-            </Empty>
-          ) : (
-            <div className="space-y-4">
-              {specs.map((spec) => (
-                <Card
-                  key={spec.id}
-                  className="overflow-hidden rounded-xl border border-border bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/20 hover:shadow-md"
-                >
-                  <div className="flex flex-col md:flex-row">
-                    {/* 左侧状态条 */}
-                    <div 
-                      className={`w-1 md:w-1.5 shrink-0 ${
-                        spec.status === 'approved' ? 'bg-green-500' :
-                        spec.status === 'reviewing' ? 'bg-indigo-500' : 'bg-slate-400'
-                      }`} 
-                    />
-                    
-                    <CardContent className="flex-1 p-5">
-                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                        {/* 左侧信息 */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <button
-                              type="button"
-                              className="text-base font-medium text-foreground truncate hover:underline text-left"
-                              onClick={() => handleViewSpec(spec.id)}
-                            >
-                              {spec.prdTitle}
-                            </button>
-                            {getStatusBadge(spec.status)}
-                            {spec.machineReadableJson && (
-                              <Badge variant="outline" className="text-xs">
-                                <Code2 className="w-3 h-3 mr-1" />
-                                Machine-Ready
-                              </Badge>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            最后更新: {new Date(spec.updatedAt).toLocaleString('zh-CN')}
-                          </p>
-                          {/* 进度条 */}
-                          <div className="mt-4 space-y-3">
-                            <div>
-                              <div className="flex items-center justify-between text-xs mb-1.5">
-                                <span className="flex items-center text-muted-foreground">
-                                  <Settings2 className="w-3.5 h-3.5 mr-1.5" />
-                                  功能规格 (FS)
-                                </span>
-                                <span className="font-medium">{getFSProgress(spec)}%</span>
-                              </div>
-                              <SpecPhaseProgress value={getFSProgress(spec)} />
-                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-muted-foreground">
-                                <span>用户故事 {spec.functionalSpec.userStories}</span>
-                                <span>页面设计 {spec.functionalSpec.pageDesigns}</span>
-                                <span>规则 {spec.functionalSpec.rules}</span>
-                              </div>
-                            </div>
-                            <div>
-                              <div className="flex items-center justify-between text-xs mb-1.5">
-                                <span className="flex items-center text-muted-foreground">
-                                  <Database className="w-3.5 h-3.5 mr-1.5" />
-                                  技术规格 (TS)
-                                </span>
-                                <span className="font-medium">{getTSProgress(spec)}%</span>
-                              </div>
-                              <SpecPhaseProgress value={getTSProgress(spec)} />
-                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-muted-foreground">
-                                <span>数据表 {spec.technicalSpec.tables}</span>
-                                <span>API {spec.technicalSpec.apis}</span>
-                              </div>
-                            </div>
-                            <div>
-                              <div className="flex items-center justify-between text-xs mb-1.5">
-                                <span className="flex items-center text-muted-foreground">
-                                  <ListChecks className="w-3.5 h-3.5 mr-1.5" />
-                                  编程计划 (CP)
-                                </span>
-                                <span className="font-medium">{getCPProgress(spec)}%</span>
-                              </div>
-                              <SpecPhaseProgress value={getCPProgress(spec)} />
-                              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-muted-foreground">
-                                <span>Task {spec.cpSpec.tasks}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* 右侧操作 */}
-                        <div className="flex items-center shrink-0">
-                          <ListRowActionsMenu
-                            onView={() => handleViewSpec(spec.id)}
-                            onEdit={() => handleEditSpec(spec.id)}
-                            onDelete={() => handleDeleteSpec(spec.id)}
-                            extraActions={[
-                              ...(spec.status === 'draft'
-                                ? [
-                                    {
-                                      key: 'submit-review',
-                                      label: '提交审核',
-                                      icon: <Send className="h-4 w-4" />,
-                                      onClick: () => handleSubmitReview(spec.id),
-                                    },
-                                  ]
-                                : []),
-                              ...(spec.status === 'reviewing'
-                                ? [
-                                    {
-                                      key: 'approve',
-                                      label: '通过审核',
-                                      icon: <CheckCircle className="h-4 w-4 text-green-500" />,
-                                      onClick: () => handleApproveSpec(spec.id),
-                                    },
-                                    {
-                                      key: 'reject',
-                                      label: '驳回',
-                                      icon: <XCircle className="h-4 w-4" />,
-                                      onClick: () => handleRejectSpec(spec.id),
-                                      variant: 'destructive' as const,
-                                    },
-                                  ]
-                                : []),
-                              {
-                                key: 'ai-review',
-                                label: 'AI预评审',
-                                icon: <ShieldAlert className="h-4 w-4" />,
-                                onClick: () => handleAIReview(spec),
-                              },
-                            ]}
-                          />
-                        </div>
-                      </div>
-                      {spec.reviews && spec.reviews.length > 0 && (
-                        <div className="mt-3 text-xs text-muted-foreground">
-                          最近审核：{spec.reviews[spec.reviews.length - 1].reviewer}
-                          {' · '}
-                          {new Date(spec.reviews[spec.reviews.length - 1].createdAt).toLocaleString('zh-CN')}
-                          {spec.reviews[spec.reviews.length - 1].comment
-                            ? ` · ${spec.reviews[spec.reviews.length - 1].comment}`
-                            : ''}
-                        </div>
-                      )}
-                    </CardContent>
-                  </div>
-                </Card>
-              ))}
+          <div className="overflow-hidden rounded-[24px] bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+            <div className="flex items-center justify-between border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+              <div className="flex items-center gap-3">
+                <div className="rd-list-section-icon">
+                  <Settings2 className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold tracking-normal text-foreground">规格文档列表</h2>
+                  <p className="text-sm text-muted-foreground">
+                    共 <span className="font-bold text-primary">{specs.length}</span> 个技术基准
+                  </p>
+                </div>
+              </div>
             </div>
-          )}
+
+            {specs.length === 0 ? (
+              <div className="p-12">
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyTitle>暂无规格文档</EmptyTitle>
+                    <EmptyDescription>点击上方按钮创建新的规格说明书</EmptyDescription>
+                  </EmptyHeader>
+                  <EmptyContent>
+                    <Button onClick={handleCreateSpec} className="rounded-[20px] shadow-none">
+                      <Plus className="mr-2 h-4 w-4" />
+                      新建规格
+                    </Button>
+                  </EmptyContent>
+                </Empty>
+              </div>
+            ) : (
+              <div className="space-y-4 px-4 pb-5 pt-4 sm:px-5">
+                {specs.map((spec) => (
+                  <article
+                    key={spec.id}
+                    className="overflow-hidden rounded-[22px] bg-[#f5eff7] transition-colors duration-200 hover:bg-[#f1eaf4] dark:bg-muted"
+                  >
+                    <div className="flex flex-col md:flex-row">
+                      <div
+                        className={`h-1 shrink-0 md:h-auto md:w-1.5 ${
+                          spec.status === 'approved'
+                            ? 'bg-green-500'
+                            : spec.status === 'reviewing'
+                              ? 'bg-indigo-500'
+                              : 'bg-slate-400'
+                        }`}
+                      />
+
+                      <div className="flex-1 p-5">
+                        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                className="truncate text-left text-base font-semibold text-foreground hover:text-primary"
+                                onClick={() => handleViewSpec(spec.id)}
+                              >
+                                {spec.prdTitle}
+                              </button>
+                              {getStatusBadge(spec.status)}
+                              {spec.machineReadableJson && (
+                                <Badge variant="outline" className="rounded-xl border-0 bg-[#fffbff] px-3 py-1 text-xs font-bold text-muted-foreground dark:bg-card/90">
+                                  <Code2 className="mr-1 h-3 w-3" />
+                                  Machine-Ready
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              最后更新: {new Date(spec.updatedAt).toLocaleString('zh-CN')}
+                            </p>
+
+                            <div className="mt-4 grid gap-3 xl:grid-cols-3">
+                              <div className="rounded-2xl bg-[#fffbff] p-4 dark:bg-card/90">
+                                <div className="mb-2 flex items-center justify-between text-xs">
+                                  <span className="flex items-center text-muted-foreground">
+                                    <Settings2 className="mr-1.5 h-3.5 w-3.5" />
+                                    功能规格 FS
+                                  </span>
+                                  <span className="font-semibold text-foreground">{getFSProgress(spec)}%</span>
+                                </div>
+                                <SpecPhaseProgress value={getFSProgress(spec)} />
+                                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                  <span>用户故事 {spec.functionalSpec.userStories}</span>
+                                  <span>页面设计 {spec.functionalSpec.pageDesigns}</span>
+                                  <span>规则 {spec.functionalSpec.rules}</span>
+                                </div>
+                              </div>
+                              <div className="rounded-2xl bg-[#fffbff] p-4 dark:bg-card/90">
+                                <div className="mb-2 flex items-center justify-between text-xs">
+                                  <span className="flex items-center text-muted-foreground">
+                                    <Database className="mr-1.5 h-3.5 w-3.5" />
+                                    技术规格 TS
+                                  </span>
+                                  <span className="font-semibold text-foreground">{getTSProgress(spec)}%</span>
+                                </div>
+                                <SpecPhaseProgress value={getTSProgress(spec)} />
+                                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                  <span>数据表 {spec.technicalSpec.tables}</span>
+                                  <span>API {spec.technicalSpec.apis}</span>
+                                </div>
+                              </div>
+                              <div className="rounded-2xl bg-[#fffbff] p-4 dark:bg-card/90">
+                                <div className="mb-2 flex items-center justify-between text-xs">
+                                  <span className="flex items-center text-muted-foreground">
+                                    <ListChecks className="mr-1.5 h-3.5 w-3.5" />
+                                    编程计划 CP
+                                  </span>
+                                  <span className="font-semibold text-foreground">{getCPProgress(spec)}%</span>
+                                </div>
+                                <SpecPhaseProgress value={getCPProgress(spec)} />
+                                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                  <span>Task {spec.cpSpec.tasks}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex shrink-0 items-center">
+                            <ListRowActionsMenu
+                              triggerClassName="text-muted-foreground hover:bg-[#fffbff] hover:text-foreground dark:hover:bg-secondary/70"
+                              onView={() => handleViewSpec(spec.id)}
+                              onEdit={() => handleEditSpec(spec.id)}
+                              onDelete={() => handleDeleteSpec(spec.id)}
+                              extraActions={[
+                                ...(spec.status === 'draft'
+                                  ? [
+                                      {
+                                        key: 'submit-review',
+                                        label: '提交审核',
+                                        icon: <Send className="h-4 w-4" />,
+                                        onClick: () => handleSubmitReview(spec.id),
+                                      },
+                                    ]
+                                  : []),
+                                ...(spec.status === 'reviewing'
+                                  ? [
+                                      {
+                                        key: 'approve',
+                                        label: '通过审核',
+                                        icon: <CheckCircle className="h-4 w-4 text-green-500" />,
+                                        onClick: () => handleApproveSpec(spec.id),
+                                      },
+                                      {
+                                        key: 'reject',
+                                        label: '驳回',
+                                        icon: <XCircle className="h-4 w-4" />,
+                                        onClick: () => handleRejectSpec(spec.id),
+                                        variant: 'destructive' as const,
+                                      },
+                                    ]
+                                  : []),
+                                {
+                                  key: 'ai-review',
+                                  label: 'AI预评审',
+                                  icon: <ShieldAlert className="h-4 w-4" />,
+                                  onClick: () => handleAIReview(spec),
+                                },
+                              ]}
+                            />
+                          </div>
+                        </div>
+                        {spec.reviews && spec.reviews.length > 0 && (
+                          <div className="mt-4 rounded-2xl bg-[#fffbff] px-4 py-3 text-xs text-muted-foreground dark:bg-card/90">
+                            最近审核：{spec.reviews[spec.reviews.length - 1].reviewer}
+                            {' · '}
+                            {new Date(spec.reviews[spec.reviews.length - 1].createdAt).toLocaleString('zh-CN')}
+                            {spec.reviews[spec.reviews.length - 1].comment
+                              ? ` · ${spec.reviews[spec.reviews.length - 1].comment}`
+                              : ''}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
         </section>
 
         {/* AI预评审弹窗 */}

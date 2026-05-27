@@ -888,70 +888,113 @@ const SpecEditPage: React.FC = () => {
     );
     const candidatePrds = allPrds.filter((p) => p.requirementId === selectedRequirementId);
     return (
-      <div className="w-full space-y-6">
-        <section className="w-full">
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => router.push('/specification')}>
+      <div className="flex w-full flex-col gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+        <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10 rounded-[20px] bg-[#f5eff7] text-muted-foreground shadow-none hover:bg-[#f1eaf4] hover:text-foreground dark:bg-muted"
+              onClick={() => router.push('/specification')}
+              aria-label="返回技术基准"
+            >
               <ArrowLeft className="size-4" />
             </Button>
-            <div>
-              <h1 className="text-2xl font-semibold">新建规格说明书</h1>
-              <p className="text-sm text-muted-foreground mt-1">按需求主线创建：需求 → PRD → 规格</p>
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
+                New Technical Baseline
+              </p>
+              <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
+                新建规格说明书
+              </h1>
             </div>
+          </div>
+
+          <Button
+            onClick={() => void createSpecFromRequirement()}
+            disabled={!selectedRequirementId || !selectedPrdId}
+            className="h-10 shrink-0 rounded-[20px] px-[18px] text-sm font-bold shadow-none"
+          >
+            <CheckCircle className="mr-2 size-4" />
+            创建规格
+          </Button>
+        </header>
+
+        <section className="overflow-hidden rounded-[24px] bg-[linear-gradient(135deg,rgba(234,221,255,0.94),rgba(159,242,230,0.62))] p-6 text-[#21005d] shadow-[0_10px_28px_rgba(103,80,164,0.07)]">
+          <div className="grid gap-3 md:grid-cols-3">
+            {[
+              { label: '创建路径', value: '需求', note: '选择未生成规格的需求' },
+              { label: '文档来源', value: 'PRD', note: '绑定同一需求下的 PRD' },
+              { label: '目标产物', value: 'FS / TS / CP', note: '生成规格草稿后继续完善' },
+            ].map((item) => (
+              <div key={item.label} className="min-h-24 rounded-2xl bg-white/60 p-4">
+                <div className="text-[28px] font-semibold leading-none">{item.value}</div>
+                <div className="mt-2 text-[13px] font-bold text-[#21005d]/75">{item.label}</div>
+                <div className="mt-1 text-xs leading-snug text-[#21005d]/55">{item.note}</div>
+              </div>
+            ))}
           </div>
         </section>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>选择需求并创建规格</CardTitle>
-            <CardDescription>先选需求，再选择该需求下的 PRD，系统将创建对应规格草稿。</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>需求</Label>
-              <select
-                className="w-full p-2 border rounded-md bg-card"
-                value={selectedRequirementId}
-                onChange={(e) => setSelectedRequirementId(e.target.value)}
-              >
-                <option value="">请选择需求</option>
-                {candidateRequirements.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {formatProductDashRequirementTitle(r, allProducts) || r.title} ({r.id})
-                  </option>
-                ))}
-              </select>
+        <section className="w-full">
+          <div className="overflow-hidden rounded-[24px] bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+            <div className="border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+              <h2 className="text-xl font-semibold tracking-normal text-foreground">选择需求并创建规格</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                先选需求，再选择该需求下的 PRD，系统将创建对应规格草稿。
+              </p>
             </div>
-            <div className="space-y-2">
-              <Label>关联 PRD</Label>
-              <select
-                className="w-full p-2 border rounded-md bg-card"
-                value={selectedPrdId}
-                onChange={(e) => setSelectedPrdId(e.target.value)}
-                disabled={!selectedRequirementId}
-              >
-                <option value="">{selectedRequirementId ? '请选择 PRD' : '请先选择需求'}</option>
-                {candidatePrds.map((p) => {
-                  const reqForP = allRequirements.find((r) => r.id === p.requirementId);
-                  const label =
-                    formatPrdListTitle(reqForP as IRequirement | undefined, allProducts, p.title) ||
-                    p.title ||
-                    p.id;
-                  return (
-                    <option key={p.id} value={p.id}>
-                      {label} ({p.status})
+            <div className="grid gap-4 p-5 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>需求</Label>
+                <select
+                  className="h-12 w-full rounded-[24px] border-0 bg-[#f5eff7] px-4 text-sm text-foreground shadow-none outline-none focus:ring-1 focus:ring-ring dark:bg-muted"
+                  value={selectedRequirementId}
+                  onChange={(e) => setSelectedRequirementId(e.target.value)}
+                >
+                  <option value="">请选择需求</option>
+                  {candidateRequirements.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {formatProductDashRequirementTitle(r, allProducts) || r.title} ({r.id})
                     </option>
-                  );
-                })}
-              </select>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label>关联 PRD</Label>
+                <select
+                  className="h-12 w-full rounded-[24px] border-0 bg-[#f5eff7] px-4 text-sm text-foreground shadow-none outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 dark:bg-muted"
+                  value={selectedPrdId}
+                  onChange={(e) => setSelectedPrdId(e.target.value)}
+                  disabled={!selectedRequirementId}
+                >
+                  <option value="">{selectedRequirementId ? '请选择 PRD' : '请先选择需求'}</option>
+                  {candidatePrds.map((p) => {
+                    const reqForP = allRequirements.find((r) => r.id === p.requirementId);
+                    const label =
+                      formatPrdListTitle(reqForP as IRequirement | undefined, allProducts, p.title) ||
+                      p.title ||
+                      p.id;
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {label} ({p.status})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
             </div>
-            <div className="pt-2">
-              <Button onClick={() => void createSpecFromRequirement()} disabled={!selectedRequirementId || !selectedPrdId}>
+            <div className="flex justify-end border-t border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+              <Button
+                onClick={() => void createSpecFromRequirement()}
+                disabled={!selectedRequirementId || !selectedPrdId}
+                className="h-10 rounded-[20px] px-[18px] text-sm font-bold shadow-none"
+              >
                 创建规格
               </Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       </div>
     );
   }

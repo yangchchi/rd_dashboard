@@ -142,8 +142,8 @@ export const BrownfieldAcceptancePanel: React.FC<IBrownfieldAcceptancePanelProps
   }
 
   return (
-    <Card className="border-indigo-500/20 bg-indigo-500/[0.04]">
-      <CardHeader className="pb-2">
+    <Card className="overflow-hidden rounded-[22px] border-0 bg-[#f5eff7] shadow-none dark:bg-muted">
+      <CardHeader className="border-b border-[#e8def8]/70 px-4 py-3 dark:border-border/25">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold">
           <Sparkles className="h-4 w-4 text-indigo-600" />
           Brownfield 验收对比（基线 vs 本次交付）
@@ -168,7 +168,7 @@ export const BrownfieldAcceptancePanel: React.FC<IBrownfieldAcceptancePanelProps
           <p className="text-xs text-amber-700">未加载到产品基线</p>
         )}
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-4 p-4">
         <div className="grid gap-3 lg:grid-cols-3">
           <CompareColumn title="基线能力（原杯子）">
             {loading ? (
@@ -180,7 +180,7 @@ export const BrownfieldAcceptancePanel: React.FC<IBrownfieldAcceptancePanelProps
             ) : (
               <ul className="space-y-1.5 text-xs">
                 {(baseline?.capabilities ?? []).map((c) => (
-                  <li key={c.id} className="rounded border border-border/60 bg-background/80 px-2 py-1">
+                  <li key={c.id} className="rounded-[14px] bg-[#f5eff7] px-3 py-2 dark:bg-muted">
                     <span className="font-medium">{c.domain ? `${c.domain}/` : ''}{c.name}</span>
                     {c.description ? (
                       <p className="mt-0.5 text-muted-foreground line-clamp-2">{c.description}</p>
@@ -234,7 +234,7 @@ export const BrownfieldAcceptancePanel: React.FC<IBrownfieldAcceptancePanelProps
         </div>
 
         {deltaSections.untouched ? (
-          <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs">
+          <div className="rounded-[18px] bg-[#fffbff] px-4 py-3 text-xs dark:bg-card/90">
             <p className="font-medium mb-1">不变更声明</p>
             <p className="text-muted-foreground whitespace-pre-wrap line-clamp-4">
               {deltaSections.untouched.replace(/^##\s*不变更声明\s*/i, '')}
@@ -247,6 +247,7 @@ export const BrownfieldAcceptancePanel: React.FC<IBrownfieldAcceptancePanelProps
             type="button"
             size="sm"
             variant="outline"
+            className="h-8 rounded-[16px] border-0 bg-[#fffbff] text-xs shadow-none hover:bg-[#fff7ff] dark:bg-card/90"
             disabled={generatingSummary}
             onClick={() => void generateChangeSummary()}
           >
@@ -257,13 +258,20 @@ export const BrownfieldAcceptancePanel: React.FC<IBrownfieldAcceptancePanelProps
             )}
             生成变更摘要
           </Button>
-          <Button type="button" size="sm" variant="ghost" disabled={!changeSummary.trim()} onClick={() => void copySummary()}>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-8 rounded-[16px] text-xs shadow-none hover:bg-[#fffbff] dark:hover:bg-card/90"
+            disabled={!changeSummary.trim()}
+            onClick={() => void copySummary()}
+          >
             <Copy className="mr-1 h-3.5 w-3.5" />
             复制摘要
           </Button>
         </div>
         {changeSummary ? (
-          <div className="rounded-md border border-border bg-background p-3 text-sm">
+          <div className="rounded-[18px] bg-[#fffbff] p-4 text-sm dark:bg-card/90">
             <Streamdown>{changeSummary}</Streamdown>
           </div>
         ) : null}
@@ -274,7 +282,7 @@ export const BrownfieldAcceptancePanel: React.FC<IBrownfieldAcceptancePanelProps
 
 function CompareColumn({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-border/60 bg-background/90 p-3 min-h-[12rem]">
+    <div className="min-h-[12rem] rounded-[18px] bg-[#fffbff] p-3 dark:bg-card/90">
       <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">{title}</p>
       {children}
     </div>

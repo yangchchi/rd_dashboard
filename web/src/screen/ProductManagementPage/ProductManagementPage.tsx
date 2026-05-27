@@ -7,14 +7,6 @@ import { Input } from '@/components/ui/input';
 import { Label, RequiredMark } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -39,8 +31,9 @@ import { toast } from 'sonner';
 import { toastApiError } from '@/lib/api-error';
 import Link from 'next/link';
 import { ExternalLink, Package, Pencil, Plus, Trash2 } from 'lucide-react';
-import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
-import { cn } from '@/lib/utils';
+
+const PRODUCT_PRIMARY_BUTTON =
+  'bg-[#6750a4] text-white shadow-none hover:bg-[#5b4694] focus-visible:ring-[#6750a4]/35';
 
 function newProductId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -171,163 +164,163 @@ const ProductManagementPage: React.FC = () => {
     }
   };
 
-  const UrlCell = ({ url }: { url?: string }) => {
+  const UrlCell = ({ label, url }: { label: string; url?: string }) => {
     const t = (url || '').trim();
-    if (!t) return <span className="text-muted-foreground">—</span>;
+    if (!t) {
+      return (
+        <span className="inline-flex h-8 items-center rounded-[16px] bg-[#fffbff] px-3 text-xs text-muted-foreground dark:bg-card/90">
+          {label} 未配置
+        </span>
+      );
+    }
     const href = hrefWithProtocol(t);
-    const display = t.length > 32 ? `${t.slice(0, 30)}…` : t;
     return (
       <a
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex max-w-[200px] items-center gap-1 truncate font-mono text-sm text-primary hover:underline"
+        className="inline-flex h-8 items-center gap-1 rounded-[16px] bg-[#fffbff] px-3 text-xs font-medium text-[#6750a4] hover:bg-[#f1eaf4] dark:bg-card/90"
         title={t}
       >
-        <span className="truncate">{display}</span>
+        <span>{label}</span>
         <ExternalLink className="size-3.5 shrink-0 opacity-70" aria-hidden />
       </a>
     );
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="rd-page-header-lead">
-          <RdPageModuleHeading
-            icon={Package}
-            title="产品主数据"
-            description="维护产品线与部署、仓库等元数据"
-          />
+    <div className="flex w-full flex-col gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-6">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
+            Product Master Data
+          </p>
+          <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
+            产品主数据
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            维护产品线、环境地址、仓库与责任人元数据。
+          </p>
         </div>
-        <Button type="button" className="shrink-0 gap-2" onClick={openCreate}>
+        <Button
+          type="button"
+          className={`h-10 shrink-0 gap-2 rounded-[20px] px-[18px] text-sm font-bold ${PRODUCT_PRIMARY_BUTTON}`}
+          onClick={openCreate}
+        >
           <Plus className="size-4" />
           新增产品
         </Button>
-      </div>
+      </header>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center gap-3 space-y-0 pb-2">
-          <div className="flex size-10 items-center justify-center rounded-lg border border-border bg-muted/40">
-            <Package className="size-5 text-primary" />
+      <section className="overflow-hidden rounded-[24px] bg-[linear-gradient(135deg,rgba(234,221,255,0.94),rgba(159,242,230,0.52))] p-6 text-[#21005d] shadow-[0_10px_28px_rgba(103,80,164,0.07)]">
+        <div className="grid gap-3 md:grid-cols-3">
+          {[
+            { label: '产品总数', value: products.length, note: '当前纳入主数据的产品' },
+            { label: '已配置 Git', value: products.filter((p) => p.gitUrl?.trim()).length, note: '可带入交付流水线' },
+            { label: '已配置沙箱', value: products.filter((p) => p.sandboxUrl?.trim()).length, note: '可用于验收与联调' },
+          ].map((item) => (
+            <div key={item.label} className="min-h-24 rounded-2xl bg-white/60 p-4">
+              <div className="text-[30px] font-semibold leading-none">{item.value}</div>
+              <div className="mt-2 text-[13px] font-bold text-[#21005d]/75">{item.label}</div>
+              <div className="mt-1 text-xs leading-snug text-[#21005d]/55">{item.note}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <Card className="overflow-hidden rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+        <CardHeader className="flex flex-row items-center gap-3 space-y-0 border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+          <div className="flex size-10 items-center justify-center rounded-[20px] bg-[#eaddff]">
+            <Package className="size-5 text-[#6750a4]" />
           </div>
-          <CardTitle className="text-base">产品列表</CardTitle>
+          <div>
+            <CardTitle className="text-xl font-semibold tracking-normal">产品列表</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">点击产品名称进入产品 Hub，维护基线与能力目录。</p>
+          </div>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent className="p-5">
           {loading ? (
-            <p className="text-sm text-muted-foreground">加载中…</p>
+            <p className="rounded-[22px] bg-[#f5eff7] px-4 py-10 text-center text-sm text-muted-foreground dark:bg-muted">加载中…</p>
           ) : products.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无产品，点击「新增产品」创建。</p>
+            <p className="rounded-[22px] bg-[#f5eff7] px-4 py-10 text-center text-sm text-muted-foreground dark:bg-muted">暂无产品，点击「新增产品」创建。</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    产品编码
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    产品标识
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    产品名称
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    产品负责人
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    技术经理
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    产品类型
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    沙箱
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    生产
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Git
-                  </TableHead>
-                  <TableHead className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    更新于
-                  </TableHead>
-                  <TableHead className="w-[100px] text-right text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    操作
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {products.map((p) => (
-                  <TableRow key={p.id} className="border-border">
-                    <TableCell className="max-w-[120px] font-mono text-sm">
-                      {p.code?.trim() ? (
-                        <span title={p.code}>{p.code}</span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="max-w-[140px] font-mono text-sm">
-                      {p.identifier?.trim() ? (
-                        <span title={p.identifier}>{p.identifier}</span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="max-w-[220px]">
-                      <Link
-                        href={`/products/${encodeURIComponent(p.id)}`}
-                        className="font-medium text-foreground hover:underline"
-                      >
-                        {p.name}
-                      </Link>
-                      {p.description ? (
-                        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{p.description}</p>
+            <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+              {products.map((p) => (
+                <article
+                  key={p.id}
+                  className="flex min-h-[224px] flex-col rounded-[22px] bg-[#f5eff7] p-4 transition-colors hover:bg-[#f1eaf4] dark:bg-muted dark:hover:bg-secondary/35"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      {p.code?.trim() || p.identifier?.trim() ? (
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          {p.code?.trim() ? (
+                            <span className="rounded-full bg-[#fffbff] px-2.5 py-0.5 font-mono text-xs text-muted-foreground dark:bg-card/90">
+                              {p.code}
+                            </span>
+                          ) : null}
+                          {p.identifier?.trim() ? (
+                            <span className="rounded-full bg-[#fffbff] px-2.5 py-0.5 font-mono text-xs text-muted-foreground dark:bg-card/90">
+                              {p.identifier}
+                            </span>
+                          ) : null}
+                        </div>
                       ) : null}
-                    </TableCell>
-                    <TableCell className="text-sm">{p.owner?.trim() || '—'}</TableCell>
-                    <TableCell className="text-sm">{p.technicalManager?.trim() || '—'}</TableCell>
-                    <TableCell className="text-sm">{p.productType?.trim() || '—'}</TableCell>
-                    <TableCell>
-                      <UrlCell url={p.sandboxUrl} />
-                    </TableCell>
-                    <TableCell>
-                      <UrlCell url={p.productionUrl} />
-                    </TableCell>
-                    <TableCell>
-                      <UrlCell url={p.gitUrl} />
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                      {new Date(p.updatedAt).toLocaleString()}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-8"
-                          onClick={() => openEdit(p)}
-                          aria-label="编辑"
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <Link
+                          href={`/products/${encodeURIComponent(p.id)}`}
+                          className="min-w-0 truncate text-lg font-semibold text-foreground hover:text-[#6750a4]"
                         >
-                          <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(p)}
-                          aria-label="删除"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
+                          {p.name}
+                        </Link>
+                        <span className="shrink-0 rounded-[14px] bg-[#eaddff] px-2.5 py-1 text-xs font-medium text-[#6750a4]">
+                          {p.productType?.trim() || '未分类'}
+                        </span>
                       </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-9 rounded-[18px] hover:bg-[#fffbff] dark:hover:bg-card/90"
+                        onClick={() => openEdit(p)}
+                        aria-label="编辑"
+                      >
+                        <Pencil className="size-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-9 rounded-[18px] text-destructive hover:bg-red-500/10 hover:text-destructive"
+                        onClick={() => setDeleteTarget(p)}
+                        aria-label="删除"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+                    {p.description?.trim() || '暂无产品描述'}
+                  </p>
+
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs leading-5 text-muted-foreground">
+                    <span>产品负责人：{p.owner?.trim() || '未配置'}</span>
+                    <span>技术经理：{p.technicalManager?.trim() || '未配置'}</span>
+                    <span>更新：{new Date(p.updatedAt).toLocaleDateString()}</span>
+                  </div>
+
+                  <div className="mt-auto flex min-w-0 flex-wrap gap-2 pt-4">
+                    <UrlCell label="沙箱" url={p.sandboxUrl} />
+                    <UrlCell label="生产" url={p.productionUrl} />
+                    <UrlCell label="Git" url={p.gitUrl} />
+                  </div>
+                </article>
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>
@@ -339,8 +332,8 @@ const ProductManagementPage: React.FC = () => {
           if (!open) setEditingId(null);
         }}
       >
-        <DialogContent className="flex max-h-[85vh] w-full max-w-2xl flex-col gap-0 overflow-hidden p-0">
-          <DialogHeader className="shrink-0 space-y-2 border-b border-border px-6 pt-6 pb-4 text-left">
+        <DialogContent className="flex max-h-[85vh] w-full max-w-2xl flex-col gap-0 overflow-hidden rounded-[24px] border-0 bg-[#fffbff] p-0 shadow-[0_18px_48px_rgba(29,27,32,0.14)] dark:bg-card">
+          <DialogHeader className="shrink-0 space-y-2 border-b border-[#e8def8]/70 px-6 pt-6 pb-4 text-left dark:border-border/25">
             <DialogTitle>{editingId ? '编辑产品' : '新增产品'}</DialogTitle>
             <DialogDescription>
               填写基础标识、职责分工与类型，并维护沙箱、生产与 Git 仓库地址，便于流水线一键带入。
@@ -349,10 +342,7 @@ const ProductManagementPage: React.FC = () => {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-5">
             <section
-              className={cn(
-                'space-y-4 rounded-lg border border-border bg-muted/20 p-4',
-                'shadow-sm',
-              )}
+              className="space-y-4 rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted"
               aria-labelledby="pm-section-identity"
             >
               <div className="space-y-1">
@@ -373,7 +363,7 @@ const ProductManagementPage: React.FC = () => {
                     value={form.code}
                     onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
                     placeholder="例如：PRD-CORE-001"
-                    className="rd-input-glass font-mono text-sm"
+                    className="h-11 rounded-[22px] border-0 bg-[#fffbff] font-mono text-sm shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90"
                   />
                 </div>
                 <div className="space-y-2">
@@ -385,7 +375,7 @@ const ProductManagementPage: React.FC = () => {
                     value={form.identifier}
                     onChange={(e) => setForm((f) => ({ ...f, identifier: e.target.value }))}
                     placeholder="例如：core-trading、数据中台-dw"
-                    className="rd-input-glass font-mono text-sm"
+                    className="h-11 rounded-[22px] border-0 bg-[#fffbff] font-mono text-sm shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90"
                   />
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     系统内稳定引用，建议使用小写英文、数字与短横线；与「产品编码」可同时维护。
@@ -400,14 +390,14 @@ const ProductManagementPage: React.FC = () => {
                     value={form.name}
                     onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                     placeholder="例如：核心交易平台"
-                    className="rd-input-glass"
+                    className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90"
                   />
                 </div>
               </div>
             </section>
 
             <section
-              className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 shadow-sm"
+              className="space-y-4 rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted"
               aria-labelledby="pm-section-roles"
             >
               <div className="space-y-1">
@@ -428,7 +418,7 @@ const ProductManagementPage: React.FC = () => {
                     value={form.owner}
                     onChange={(e) => setForm((f) => ({ ...f, owner: e.target.value }))}
                     placeholder="姓名或账号"
-                    className="rd-input-glass"
+                    className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90"
                   />
                 </div>
                 <div className="space-y-2">
@@ -440,7 +430,7 @@ const ProductManagementPage: React.FC = () => {
                     value={form.technicalManager}
                     onChange={(e) => setForm((f) => ({ ...f, technicalManager: e.target.value }))}
                     placeholder="姓名或账号"
-                    className="rd-input-glass"
+                    className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90"
                   />
                 </div>
                 <div className="space-y-2 sm:col-span-2">
@@ -452,14 +442,14 @@ const ProductManagementPage: React.FC = () => {
                     value={form.productType}
                     onChange={(e) => setForm((f) => ({ ...f, productType: e.target.value }))}
                     placeholder="例如：自研业务系统、平台型产品、商业套件"
-                    className="rd-input-glass"
+                    className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90"
                   />
                 </div>
               </div>
             </section>
 
             <section
-              className="space-y-3 rounded-lg border border-border bg-muted/20 p-4 shadow-sm"
+              className="space-y-3 rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted"
               aria-labelledby="pm-section-desc"
             >
               <h3 id="pm-section-desc" className="text-sm font-semibold text-foreground">
@@ -474,13 +464,13 @@ const ProductManagementPage: React.FC = () => {
                   value={form.description}
                   onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
                   placeholder="产品定位、边界说明等"
-                  className="min-h-[88px] rd-input-glass"
+                  className="min-h-[88px] rounded-[22px] border-0 bg-[#fffbff] shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90"
                 />
               </div>
             </section>
 
             <section
-              className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 shadow-sm"
+              className="space-y-4 rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted"
               aria-labelledby="pm-section-env"
             >
               <div className="space-y-1">
@@ -501,7 +491,7 @@ const ProductManagementPage: React.FC = () => {
                     value={form.sandboxUrl}
                     onChange={(e) => setForm((f) => ({ ...f, sandboxUrl: e.target.value }))}
                     placeholder="https://sandbox.example.com"
-                    className="rd-input-glass font-mono text-sm"
+                    className="h-11 rounded-[22px] border-0 bg-[#fffbff] font-mono text-sm shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90"
                   />
                 </div>
                 <div className="space-y-2">
@@ -513,7 +503,7 @@ const ProductManagementPage: React.FC = () => {
                     value={form.productionUrl}
                     onChange={(e) => setForm((f) => ({ ...f, productionUrl: e.target.value }))}
                     placeholder="https://app.example.com"
-                    className="rd-input-glass font-mono text-sm"
+                    className="h-11 rounded-[22px] border-0 bg-[#fffbff] font-mono text-sm shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90"
                   />
                 </div>
                 <div className="space-y-2">
@@ -525,7 +515,7 @@ const ProductManagementPage: React.FC = () => {
                     value={form.gitUrl}
                     onChange={(e) => setForm((f) => ({ ...f, gitUrl: e.target.value }))}
                     placeholder="https://github.com/org/repo.git"
-                    className="rd-input-glass font-mono text-sm"
+                    className="h-11 rounded-[22px] border-0 bg-[#fffbff] font-mono text-sm shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90"
                   />
                   <p className="text-xs text-muted-foreground leading-relaxed">
                     与流水线默认 PAT 认证一致时，请填写以 <code className="font-mono text-[11px]">https://</code> 开头的克隆地址。
@@ -535,11 +525,22 @@ const ProductManagementPage: React.FC = () => {
             </section>
           </div>
 
-          <DialogFooter className="shrink-0 gap-2 border-t border-border bg-background px-6 py-4 sm:justify-end">
-            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={submitting}>
+          <DialogFooter className="shrink-0 gap-2 border-t border-[#e8def8]/70 bg-[#fffbff] px-6 py-4 sm:justify-end dark:border-border/25 dark:bg-card">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-[20px] border-0 bg-[#f5eff7] shadow-none hover:bg-[#f1eaf4] dark:bg-muted"
+              onClick={() => setDialogOpen(false)}
+              disabled={submitting}
+            >
               取消
             </Button>
-            <Button type="button" onClick={() => void handleSubmit()} disabled={submitting}>
+            <Button
+              type="button"
+              className={`rounded-[20px] px-4 font-bold ${PRODUCT_PRIMARY_BUTTON}`}
+              onClick={() => void handleSubmit()}
+              disabled={submitting}
+            >
               {submitting ? '保存中…' : editingId ? '保存更改' : '创建产品'}
             </Button>
           </DialogFooter>
@@ -547,7 +548,7 @@ const ProductManagementPage: React.FC = () => {
       </Dialog>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent className="rounded-[24px] border-0 bg-[#fffbff] shadow-[0_18px_48px_rgba(29,27,32,0.14)] dark:bg-card">
           <AlertDialogHeader>
             <AlertDialogTitle>删除产品？</AlertDialogTitle>
             <AlertDialogDescription>
@@ -555,9 +556,9 @@ const ProductManagementPage: React.FC = () => {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogCancel className="rounded-[20px] border-0 bg-[#f5eff7] shadow-none hover:bg-[#f1eaf4] dark:bg-muted">取消</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="rounded-[20px] bg-destructive text-destructive-foreground shadow-none hover:bg-destructive/90"
               onClick={() => void handleDelete()}
             >
               删除

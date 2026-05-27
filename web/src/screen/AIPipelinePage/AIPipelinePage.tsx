@@ -39,7 +39,6 @@ import {
   Play,
   FlaskConical,
 } from 'lucide-react';
-import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import {
   ConfirmActionDialog,
@@ -1140,7 +1139,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
         }
       `}</style>
 
-      <div className="flex w-full flex-col gap-6">
+      <div className="flex w-full flex-col gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
         <ConfirmActionDialog
           state={confirmAction}
           onOpenChange={(open) => {
@@ -1153,81 +1152,87 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
             if (!open) setPromptAction(null);
           }}
         />
-        {/* 页面标题 */}
-        <section className="w-full">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="rd-page-header-lead">
-              <RdPageModuleHeading
-                icon={Cpu}
-                title={isDetail ? '交付引擎详情' : '交付引擎'}
-                description={
-                  isDetail
-                    ? tasksLoading
-                      ? '加载交付任务…'
-                      : selectedTask ? resolveTaskCardTitle(selectedTask) : '交付引擎详情'
-                    : '实时监控 AI 代码生成、测试与部署全流程'
-                }
-                leading={
-                  isDetail ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => router.push('/ai-pipeline')}
-                      aria-label="返回交付引擎列表"
-                    >
-                      <ArrowLeft className="size-4" />
-                    </Button>
-                  ) : undefined
-                }
-                
-              />
+        <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-6">
+          <div className="flex min-w-0 items-center gap-3">
+            {isDetail ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 rounded-[20px] bg-[#f5eff7] text-muted-foreground shadow-none hover:bg-[#f1eaf4] hover:text-foreground dark:bg-muted"
+                onClick={() => router.push('/ai-pipeline')}
+                aria-label="返回交付引擎列表"
+              >
+                <ArrowLeft className="size-4" />
+              </Button>
+            ) : null}
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
+                Delivery Engine
+              </p>
+              <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
+                {isDetail ? '交付引擎详情' : '交付引擎'}
+              </h1>
+              {isDetail ? (
+                <p className="mt-1 truncate text-sm text-muted-foreground">
+                  {tasksLoading ? '加载交付任务…' : selectedTask ? resolveTaskCardTitle(selectedTask) : '交付引擎详情'}
+                </p>
+              ) : null}
             </div>
+          </div>
             {isList ? (
-              <div className="flex shrink-0 flex-col items-stretch gap-3 sm:items-end">
-                <Button onClick={() => setIsCreateDialogOpen(true)} className="shrink-0 shadow-sm sm:mt-0">
+              <div className="flex shrink-0 flex-wrap items-center gap-3">
+                <Button
+                  onClick={() => setIsCreateDialogOpen(true)}
+                  className="h-10 shrink-0 rounded-[20px] px-[18px] text-sm font-bold shadow-none"
+                >
                   <Plus className="size-4 mr-2" />
                   创建流水线
                 </Button>
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-1">
-                    <div className="h-2 w-2 animate-pulse-dot rounded-full bg-purple-500" />
-                    <span>运行中: {pipelineBoardStats.running}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <div className="h-2 w-2 rounded-full bg-green-500" />
-                    <span>已完成: {pipelineBoardStats.completed}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <div className="h-2 w-2 rounded-full bg-red-500" />
-                    <span>失败: {pipelineBoardStats.failed}</span>
-                  </div>
-                </div>
               </div>
             ) : null}
-          </div>
-        </section>
+        </header>
+
+        {isList ? (
+          <section className="overflow-hidden rounded-[24px] bg-[linear-gradient(135deg,rgba(234,221,255,0.94),rgba(159,242,230,0.62))] p-6 text-[#21005d] shadow-[0_10px_28px_rgba(103,80,164,0.07)]">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {[
+                { label: '运行中', value: pipelineBoardStats.running, note: '代码生成、测试、构建或部署' },
+                { label: '已完成', value: pipelineBoardStats.completed, note: '完成交付的流水线' },
+                { label: '失败', value: pipelineBoardStats.failed, note: '等待重试或处理' },
+              ].map((item) => (
+                <div key={item.label} className="min-h-24 rounded-2xl bg-white/60 p-4">
+                  <div className="text-[30px] font-semibold leading-none">{item.value}</div>
+                  <div className="mt-2 text-[13px] font-bold text-[#21005d]/75">{item.label}</div>
+                  <div className="mt-1 text-xs leading-snug text-[#21005d]/55">{item.note}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {/* 流水线看板（仅列表页） */}
         {isList ? (
         <section className="w-full">
-          <Card className="overflow-hidden border-border shadow-sm ring-1 ring-black/[0.03]">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Activity className="size-4 text-primary" />
-                交付引擎看板
-              </CardTitle>
-              <CardDescription className="text-xs text-muted-foreground">
-                点击卡片进入详情；快捷操作请使用卡片上的按钮或「···」菜单。
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
+          <div className="overflow-hidden rounded-[24px] bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+            <div className="flex items-center justify-between border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+              <div className="flex items-center gap-3">
+                <div className="rd-list-section-icon">
+                  <Activity className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold tracking-normal text-foreground">交付引擎看板</h2>
+                  <p className="text-sm text-muted-foreground">点击卡片进入详情，快捷操作保留在卡片底部。</p>
+                </div>
+              </div>
+            </div>
+            <div className="p-5">
               {tasksLoading ? (
                 <div className="flex justify-center py-16">
                   <Loader2 className="size-8 animate-spin text-muted-foreground" />
                 </div>
               ) : tasks.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border/80 bg-muted/20 px-6 py-16 text-center">
+                <div className="rounded-[22px] border border-dashed border-[#e8def8] bg-[#f5eff7] px-6 py-16 text-center dark:border-border/45 dark:bg-muted">
                   <Cpu className="mx-auto mb-3 size-10 text-muted-foreground/60" aria-hidden />
                   <p className="text-sm font-medium text-foreground">暂无流水线任务</p>
                   <p className="mt-1 text-sm text-muted-foreground">
@@ -1235,7 +1240,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                   </p>
                 </div>
               ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                 {tasks.map(task => {
                   const latestSession = pickLatestAgentSessionForRequirement(
                     task.requirementId,
@@ -1264,8 +1269,8 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                       tabIndex={0}
                       aria-label={`${resolveTaskCardTitle(task)}，${cardExecLabel}，阶段进度 ${cardProgressPct}%`}
                       className={cn(
-                        'group relative cursor-pointer overflow-hidden rounded-lg border border-border bg-card shadow-sm transition-all duration-200',
-                        'hover:-translate-y-0.5 hover:shadow-md',
+                        'group relative cursor-pointer overflow-hidden rounded-[22px] border-0 bg-[#f5eff7] shadow-none transition-colors duration-200 dark:bg-muted',
+                        'hover:bg-[#f1eaf4] dark:hover:bg-secondary/35',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
                       )}
                       onClick={() => router.push(`/ai-pipeline/${encodeURIComponent(task.id)}`)}
@@ -1280,7 +1285,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                         className={cn('absolute left-0 top-0 z-[1] h-full w-1 rounded-r', accent)}
                         aria-hidden
                       />
-                      <CardContent className="relative p-4 pl-5">
+                      <CardContent className="relative p-5 pl-6">
                         <div className="mb-2 flex items-start justify-between gap-2">
                           {task.status === 'code_generating' && codingFinishedOnCard ? (
                             <Badge
@@ -1325,11 +1330,11 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                             className="h-2 bg-muted/80 [&_[data-slot=progress-indicator]]:duration-500 [&_[data-slot=progress-indicator]]:ease-out"
                           />
                         </div>
-                        <div className="mt-3 flex items-center justify-between gap-2 border-t pt-3">
+                        <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#e8def8]/70 pt-3 dark:border-border/35">
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-7 px-2 text-xs"
+                            className="h-8 rounded-[16px] px-3 text-xs hover:bg-[#fffbff] dark:hover:bg-card/90"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleDownloadDocs(task);
@@ -1339,6 +1344,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                           </Button>
                           <ListRowActionsMenu
                             stopPropagation
+                            triggerClassName="text-muted-foreground hover:bg-[#fffbff] hover:text-foreground dark:hover:bg-secondary/70"
                             onView={() => handleViewTask(task.id)}
                             onEdit={() => handleEditTask(task.id)}
                             onDelete={() => handleDeleteTask(task.id)}
@@ -1381,8 +1387,8 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                 })}
               </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </section>
         ) : null}
 
@@ -1393,237 +1399,249 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
           </div>
         ) : null}
         {isDetail && selectedTask ? (
+          <section className="overflow-hidden rounded-[24px] bg-[linear-gradient(135deg,rgba(234,221,255,0.94),rgba(159,242,230,0.62))] p-6 text-[#21005d] shadow-[0_10px_28px_rgba(103,80,164,0.07)]">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+              {[
+                {
+                  label: '当前阶段',
+                  value: pipelineStatusConfig[selectedTask.status]?.label ?? selectedTask.stage,
+                  note: PIPELINE_CARD_STAGE_LABEL[selectedTask.status],
+                },
+                {
+                  label: '阶段进度',
+                  value: `${displayPipelineCardProgressPct(selectedTask)}%`,
+                  note: '按状态与实际进度合并展示',
+                },
+                { label: '开始时间', value: selectedTask.startTime || '—', note: '流水线创建时间' },
+                { label: '预计完成', value: selectedTask.estimatedEndTime || '—', note: '交付计划时间' },
+              ].map((item) => (
+                <div key={item.label} className="min-h-24 rounded-2xl bg-white/60 p-4">
+                  <div className="line-clamp-1 text-[24px] font-semibold leading-tight">{item.value}</div>
+                  <div className="mt-2 text-[13px] font-bold text-[#21005d]/75">{item.label}</div>
+                  <div className="mt-1 text-xs leading-snug text-[#21005d]/55">{item.note}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+        {isDetail && selectedTask ? (
           <section className="w-full">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full max-w-full grid-cols-6">
-                <TabsTrigger value="overview">概览</TabsTrigger>
-                <TabsTrigger value="agent">Agent工作台</TabsTrigger>
-                <TabsTrigger value="code">项目代码</TabsTrigger>
-                <TabsTrigger value="logs">实时日志</TabsTrigger>
-                <TabsTrigger value="tests">测试报告</TabsTrigger>
-                <TabsTrigger value="commits">Commit记录</TabsTrigger>
-              </TabsList>
+              <div className="overflow-x-auto rounded-[24px] bg-[#f5eff7] p-1.5 shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+                <TabsList className="inline-flex h-auto min-w-max gap-1.5 bg-transparent p-0">
+                  <TabsTrigger
+                    value="overview"
+                    className="h-10 rounded-[20px] px-4 text-muted-foreground transition-colors hover:bg-[#fffbff] hover:text-foreground data-[state=active]:bg-[#6750a4] data-[state=active]:text-white data-[state=active]:shadow-[0_6px_14px_rgba(103,80,164,0.22)]"
+                  >
+                    概览
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="agent"
+                    className="h-10 rounded-[20px] px-4 text-muted-foreground transition-colors hover:bg-[#fffbff] hover:text-foreground data-[state=active]:bg-[#6750a4] data-[state=active]:text-white data-[state=active]:shadow-[0_6px_14px_rgba(103,80,164,0.22)]"
+                  >
+                    Agent工作台
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="code"
+                    className="h-10 rounded-[20px] px-4 text-muted-foreground transition-colors hover:bg-[#fffbff] hover:text-foreground data-[state=active]:bg-[#6750a4] data-[state=active]:text-white data-[state=active]:shadow-[0_6px_14px_rgba(103,80,164,0.22)]"
+                  >
+                    项目代码
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="logs"
+                    className="h-10 rounded-[20px] px-4 text-muted-foreground transition-colors hover:bg-[#fffbff] hover:text-foreground data-[state=active]:bg-[#6750a4] data-[state=active]:text-white data-[state=active]:shadow-[0_6px_14px_rgba(103,80,164,0.22)]"
+                  >
+                    实时日志
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="tests"
+                    className="h-10 rounded-[20px] px-4 text-muted-foreground transition-colors hover:bg-[#fffbff] hover:text-foreground data-[state=active]:bg-[#6750a4] data-[state=active]:text-white data-[state=active]:shadow-[0_6px_14px_rgba(103,80,164,0.22)]"
+                  >
+                    测试报告
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="commits"
+                    className="h-10 rounded-[20px] px-4 text-muted-foreground transition-colors hover:bg-[#fffbff] hover:text-foreground data-[state=active]:bg-[#6750a4] data-[state=active]:text-white data-[state=active]:shadow-[0_6px_14px_rgba(103,80,164,0.22)]"
+                  >
+                    Commit记录
+                  </TabsTrigger>
+                </TabsList>
+              </div>
 
               <TabsContent value="overview" className="mt-4">
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  {/* 质量指标 */}
-                  <Card className="lg:col-span-2">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <BarChart3 className="size-4 text-primary" />
-                        质量指标面板
-                      </CardTitle>
-                      <CardDescription>
-                        AI生成代码的质量评估结果
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                  <section className="overflow-hidden rounded-[24px] bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+                      <div className="flex items-center gap-3">
+                        <div className="rd-list-section-icon">
+                          <BarChart3 className="h-5 w-5 text-primary" />
+                        </div>
+                        <div>
+                          <h2 className="text-xl font-semibold tracking-normal text-foreground">质量指标面板</h2>
+                          <p className="text-sm text-muted-foreground">AI 生成代码的质量评估结果。</p>
+                        </div>
+                      </div>
+                      {selectedTask.status !== 'failed' ? (
+                        <Button
+                          size="sm"
+                          onClick={handleCodeReview}
+                          disabled={isReviewing}
+                          className="h-9 rounded-[18px] px-4 text-xs font-bold shadow-none"
+                        >
+                          {isReviewing ? (
+                            <>
+                              <Loader2 className="mr-1 size-3 animate-spin" />
+                              分析中...
+                            </>
+                          ) : (
+                            '启动审查'
+                          )}
+                        </Button>
+                      ) : null}
+                    </div>
+                    <div className="space-y-5 p-5">
                       {selectedTask.qualityMetrics ? (
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          <div className="text-center p-4 bg-muted/50 rounded-lg">
-                            <div className="text-2xl font-bold text-primary">
-                              {selectedTask.qualityMetrics.specConsistency}%
+                        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                          {[
+                            { label: '规格一致性', value: selectedTask.qualityMetrics.specConsistency, tone: 'text-primary' },
+                            { label: 'API覆盖度', value: selectedTask.qualityMetrics.apiCoverage, tone: 'text-indigo-600' },
+                            { label: '代码质量', value: selectedTask.qualityMetrics.codeQuality, tone: 'text-purple-600' },
+                            { label: '测试通过率', value: selectedTask.qualityMetrics.testPassRate, tone: 'text-green-600' },
+                          ].map((metric) => (
+                            <div key={metric.label} className="rounded-[22px] bg-[#f5eff7] p-4 text-center dark:bg-muted">
+                              <div className={`text-3xl font-semibold tabular-nums ${metric.tone}`}>{metric.value}%</div>
+                              <div className="mt-1 text-xs text-muted-foreground">{metric.label}</div>
                             </div>
-                            <div className="text-xs text-muted-foreground mt-1">规格一致性</div>
-                          </div>
-                          <div className="text-center p-4 bg-muted/50 rounded-lg">
-                            <div className="text-2xl font-bold text-indigo-500">
-                              {selectedTask.qualityMetrics.apiCoverage}%
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-1">API覆盖度</div>
-                          </div>
-                          <div className="text-center p-4 bg-muted/50 rounded-lg">
-                            <div className="text-2xl font-bold text-purple-500">
-                              {selectedTask.qualityMetrics.codeQuality}%
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-1">代码质量</div>
-                          </div>
-                          <div className="text-center p-4 bg-muted/50 rounded-lg">
-                            <div className="text-2xl font-bold text-green-500">
-                              {selectedTask.qualityMetrics.testPassRate}%
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-1">测试通过率</div>
-                          </div>
+                          ))}
                         </div>
                       ) : (
-                        <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                          <Activity className="size-12 mb-2 opacity-50" />
+                        <div className="flex min-h-40 flex-col items-center justify-center rounded-[22px] bg-[#f5eff7] py-8 text-center text-muted-foreground dark:bg-muted">
+                          <Activity className="mb-2 size-12 opacity-50" />
                           <p>任务进行中，质量指标将在代码生成完成后显示</p>
                         </div>
                       )}
 
-                      {selectedTask.status !== 'failed' && (
-                        <div className="mt-6 pt-6 border-t">
-                          <div className="flex items-center justify-between mb-4">
-                            <h4 className="font-medium flex items-center gap-2">
-                              <Code2 className="size-4" />
-                              AI代码审查
-                            </h4>
-                            <Button 
-                              size="sm" 
-                              onClick={handleCodeReview}
-                              disabled={isReviewing}
-                            >
-                              {isReviewing ? (
-                                <>
-                                  <Loader2 className="size-3 mr-1 animate-spin" />
-                                  分析中...
-                                </>
-                              ) : (
-                                '启动审查'
-                              )}
-                            </Button>
-                          </div>
-                          {reviewResult && (
-                            <div className="bg-muted/30 rounded-lg p-4">
-                              <Streamdown>{reviewResult}</Streamdown>
-                            </div>
-                          )}
-                          {selectedTask.codeReviewHistory &&
-                            selectedTask.codeReviewHistory.length > 0 && (
-                              <div className="mt-4 space-y-2">
-                                <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                                  <History className="size-3.5 shrink-0" />
-                                  审查记录（点击切换查看）
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                  {[...selectedTask.codeReviewHistory].reverse().map((rec) => (
-                                    <Button
-                                      key={rec.id}
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-8 text-xs font-normal"
-                                      onClick={() => setReviewResult(rec.summaryMarkdown)}
-                                    >
-                                      {new Date(rec.createdAt).toLocaleString('zh-CN', {
-                                        month: '2-digit',
-                                        day: '2-digit',
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                      })}
-                                    </Button>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
+                      {reviewResult ? (
+                        <div className="rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted">
+                          <Streamdown>{reviewResult}</Streamdown>
                         </div>
-                      )}
-                    </CardContent>
-                  </Card>
+                      ) : null}
+                      {selectedTask.codeReviewHistory && selectedTask.codeReviewHistory.length > 0 ? (
+                        <div className="space-y-2 rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted">
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                            <History className="size-3.5 shrink-0" />
+                            审查记录（点击切换查看）
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {[...selectedTask.codeReviewHistory].reverse().map((rec) => (
+                              <Button
+                                key={rec.id}
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 rounded-[16px] border-0 bg-[#fffbff] text-xs font-normal shadow-none hover:bg-[#fff7ff] dark:bg-card/90"
+                                onClick={() => setReviewResult(rec.summaryMarkdown)}
+                              >
+                                {new Date(rec.createdAt).toLocaleString('zh-CN', {
+                                  month: '2-digit',
+                                  day: '2-digit',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </section>
 
-                  {/* 任务信息 */}
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-base">任务信息</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div>
-                        <div className="text-xs text-muted-foreground mb-1">关联需求</div>
-                        <div className="font-medium text-sm">{resolveTaskCardTitle(selectedTask)}</div>
-                      </div>
-                      {selectedTask.pipelineMeta?.gitUrl && (
-                        <>
-                          <div>
-                            <div className="text-xs text-muted-foreground mb-1">Git地址</div>
-                            <div className="font-mono text-xs break-all">{selectedTask.pipelineMeta.gitUrl}</div>
+                  <aside className="overflow-hidden rounded-[24px] bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+                    <div className="border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+                      <h2 className="text-xl font-semibold tracking-normal text-foreground">任务信息</h2>
+                    </div>
+                    <div className="space-y-3 p-5">
+                      {[
+                        { label: '关联需求', value: resolveTaskCardTitle(selectedTask) },
+                        ...(selectedTask.pipelineMeta?.gitUrl
+                          ? [
+                              { label: 'Git地址', value: selectedTask.pipelineMeta.gitUrl, mono: true },
+                              ...(selectedTask.pipelineMeta.sandboxUrl?.trim()
+                                ? [{ label: '沙箱环境', value: selectedTask.pipelineMeta.sandboxUrl, mono: true }]
+                                : []),
+                              { label: '目标分支', value: selectedTask.pipelineMeta.branch, mono: true },
+                              { label: '关联PRD', value: (selectedTask.pipelineMeta.prdIds ?? []).join('、') || '—' },
+                              { label: '关联规格', value: (selectedTask.pipelineMeta.specIds ?? []).join('、') || '—' },
+                            ]
+                          : []),
+                      ].map((item) => (
+                        <div key={item.label} className="rounded-[18px] bg-[#f5eff7] px-4 py-3 dark:bg-muted">
+                          <div className="mb-1 text-xs text-muted-foreground">{item.label}</div>
+                          <div className={cn('break-all text-sm font-medium text-foreground', item.mono && 'font-mono text-xs')}>
+                            {item.value}
                           </div>
-                          {selectedTask.pipelineMeta.sandboxUrl?.trim() && (
-                            <div>
-                              <div className="text-xs text-muted-foreground mb-1">沙箱环境</div>
-                              <div className="font-mono text-xs break-all">{selectedTask.pipelineMeta.sandboxUrl}</div>
-                            </div>
-                          )}
-                          <div>
-                            <div className="text-xs text-muted-foreground mb-1">目标分支</div>
-                            <div className="font-mono text-sm">{selectedTask.pipelineMeta.branch}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted-foreground mb-1">关联PRD</div>
-                            <div className="text-sm">{(selectedTask.pipelineMeta.prdIds ?? []).join('、')}</div>
-                          </div>
-                          <div>
-                            <div className="text-xs text-muted-foreground mb-1">关联规格</div>
-                            <div className="text-sm">{(selectedTask.pipelineMeta.specIds ?? []).join('、')}</div>
-                          </div>
-                          {selectedTask.pipelineMeta.publishedDocuments &&
-                            selectedTask.pipelineMeta.publishedDocuments.length > 0 && (
-                              <div className="pt-2">
-                                <div className="text-xs text-muted-foreground mb-2">Git 文档（PRD / FS / TS / plan.md）</div>
-                                <ul className="space-y-1.5 text-sm">
-                                  {selectedTask.pipelineMeta.publishedDocuments.map((doc) => {
-                                    const href = gitBlobViewerUrl(
-                                      selectedTask.pipelineMeta!.gitUrl!,
-                                      selectedTask.pipelineMeta!.branch!,
-                                      doc.path
-                                    );
-                                    const kindLabel =
-                                      doc.kind === 'prd'
-                                        ? 'PRD'
-                                        : doc.kind === 'fs'
-                                          ? 'FS'
-                                          : doc.kind === 'cp'
-                                            ? 'CP'
-                                            : 'TS';
-                                    return (
-                                      <li key={doc.path} className="break-all">
-                                        {href ? (
-                                          <a
-                                            href={href}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="font-medium text-primary underline-offset-4 hover:underline"
-                                          >
-                                            <ExternalLink className="mr-1 inline size-3.5 shrink-0 align-text-bottom" />
-                                            [{kindLabel}] {doc.title}
-                                          </a>
-                                        ) : (
-                                          <span className="text-muted-foreground">
-                                            <span className="font-medium text-foreground">[{kindLabel}]</span>{' '}
-                                            <span className="font-mono text-xs">{doc.path}</span>
-                                            <span className="ml-1 text-xs">（当前仓库托管方无法自动生成浏览链接）</span>
-                                          </span>
-                                        )}
-                                      </li>
-                                    );
-                                  })}
-                                </ul>
-                              </div>
-                            )}
-                        </>
-                      )}
-                      <div>
-                        <div className="text-xs text-muted-foreground mb-1">开始时间</div>
-                        <div className="text-sm">{selectedTask.startTime}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-muted-foreground mb-1">预计完成</div>
-                        <div className="text-sm">{selectedTask.estimatedEndTime}</div>
-                      </div>
-                      <div className="pt-4 border-t">
-                        <Button 
-                          variant="outline" 
-                          className="w-full"
-                          onClick={() => router.push(`/requirements/${selectedTask.requirementId}`)}
-                        >
-                          查看需求详情
-                        </Button>
-                      </div>
-                      {selectedTask.status === 'completed' && selectedTask.pipelineMeta?.sandboxUrl?.trim() && (
+                        </div>
+                      ))}
+
+                      {selectedTask.pipelineMeta?.publishedDocuments?.length ? (
+                        <div className="rounded-[18px] bg-[#f5eff7] px-4 py-3 dark:bg-muted">
+                          <div className="mb-2 text-xs text-muted-foreground">Git 文档（PRD / FS / TS / plan.md）</div>
+                          <ul className="space-y-1.5 text-sm">
+                            {selectedTask.pipelineMeta.publishedDocuments.map((doc) => {
+                              const href = gitBlobViewerUrl(
+                                selectedTask.pipelineMeta!.gitUrl!,
+                                selectedTask.pipelineMeta!.branch!,
+                                doc.path
+                              );
+                              const kindLabel =
+                                doc.kind === 'prd' ? 'PRD' : doc.kind === 'fs' ? 'FS' : doc.kind === 'cp' ? 'CP' : 'TS';
+                              return (
+                                <li key={doc.path} className="break-all">
+                                  {href ? (
+                                    <a
+                                      href={href}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="font-medium text-primary underline-offset-4 hover:underline"
+                                    >
+                                      <ExternalLink className="mr-1 inline size-3.5 shrink-0 align-text-bottom" />
+                                      [{kindLabel}] {doc.title}
+                                    </a>
+                                  ) : (
+                                    <span className="text-muted-foreground">
+                                      <span className="font-medium text-foreground">[{kindLabel}]</span>{' '}
+                                      <span className="font-mono text-xs">{doc.path}</span>
+                                    </span>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      <Button
+                        variant="outline"
+                        className="w-full rounded-[20px] border-0 bg-[#f5eff7] shadow-none hover:bg-[#f1eaf4] dark:bg-muted"
+                        onClick={() => router.push(`/requirements/${selectedTask.requirementId}`)}
+                      >
+                        查看需求详情
+                      </Button>
+                      {selectedTask.status === 'completed' && selectedTask.pipelineMeta?.sandboxUrl?.trim() ? (
                         <Button
                           type="button"
-                          className="w-full"
+                          className="w-full rounded-[20px] font-bold shadow-none"
                           onClick={() => {
                             const u = selectedTask.pipelineMeta!.sandboxUrl!.trim();
                             window.open(u, '_blank', 'noopener,noreferrer');
                           }}
                         >
-                          <ExternalLink className="size-4 mr-2" />
+                          <ExternalLink className="mr-2 size-4" />
                           访问沙箱环境
                         </Button>
-                      )}
-                    </CardContent>
-                  </Card>
+                      ) : null}
+                    </div>
+                  </aside>
                 </div>
               </TabsContent>
 
@@ -1635,9 +1653,9 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
               </TabsContent>
 
               <TabsContent value="code" className="mt-4">
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
+                <Card className="overflow-hidden rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+                  <CardHeader className="border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+                    <CardTitle className="flex items-center gap-2 text-base">
                       <Code2 className="size-4 text-primary" />
                       代码
                     </CardTitle>
@@ -1645,31 +1663,37 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                       在 Agent Workspace 的 worktree 中浏览源文件（只读），样式类似本地 IDE。
                     </CardDescription>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-5">
                     <AgentWorkspaceCodePanel task={selectedTask} />
                   </CardContent>
                 </Card>
               </TabsContent>
 
               <TabsContent value="logs" className="mt-4">
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
+                <Card className="overflow-hidden rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+                  <CardHeader className="border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+                    <CardTitle className="flex items-center gap-2 text-base">
                       <Terminal className="size-4 text-primary" />
                       实时日志
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <ScrollArea className="h-[400px] w-full rounded-md border log-terminal p-4 font-mono text-sm">
-                      {selectedTask.logs.map((log) => (
-                        <div key={log.id} className="flex gap-3 py-1">
-                          <span className="text-slate-500 shrink-0 w-[80px]">[{log.timestamp}]</span>
-                          <span className={`shrink-0 w-[50px] font-medium ${pipelineLogLevelColors[log.level]}`}>
-                            {log.level.toUpperCase()}
-                          </span>
-                          <span className="text-slate-300 break-all">{log.message}</span>
+                  <CardContent className="p-5">
+                    <ScrollArea className="h-[420px] w-full rounded-[22px] border-0 log-terminal p-4 font-mono text-sm shadow-inner shadow-black/5">
+                      {selectedTask.logs.length ? (
+                        selectedTask.logs.map((log) => (
+                          <div key={log.id} className="flex gap-3 py-1">
+                            <span className="text-slate-500 shrink-0 w-[80px]">[{log.timestamp}]</span>
+                            <span className={`shrink-0 w-[50px] font-medium ${pipelineLogLevelColors[log.level]}`}>
+                              {log.level.toUpperCase()}
+                            </span>
+                            <span className="text-slate-300 break-all">{log.message}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="flex h-full min-h-[360px] items-center justify-center text-center text-sm text-slate-400">
+                          <span>暂无实时日志</span>
                         </div>
-                      ))}
+                      )}
                       {selectedTask.status === 'code_generating' && (
                         <div className="flex gap-3 py-1 animate-pulse">
                           <span className="text-slate-500 shrink-0 w-[80px]">[{new Date().toLocaleTimeString()}]</span>
@@ -1684,9 +1708,9 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
               </TabsContent>
 
               <TabsContent value="tests" className="mt-4">
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
+                <Card className="overflow-hidden rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+                  <CardHeader className="border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+                    <CardTitle className="flex items-center gap-2 text-base">
                       <FileCheck className="size-4 text-primary" />
                       测试报告与自动化用例
                     </CardTitle>
@@ -1694,7 +1718,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                       测试用例依据 FS、TS 与 Agent Workspace 中的生成代码由 AI 推导；每次执行测试会更新当前报告并追加一条历史快照（与代码审查记录类似）。
                     </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-6">
+                  <CardContent className="space-y-6 p-5">
                     <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                       <p className="text-xs text-muted-foreground">
                         已解析关联规格 {selectedTaskLinkedSpecs.length} 份
@@ -1706,6 +1730,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                         <Button
                           type="button"
                           size="sm"
+                          className="rounded-[18px] shadow-none"
                           onClick={() => void handleGeneratePipelineTestCases()}
                           disabled={
                             isGeneratingTestCases ||
@@ -1730,6 +1755,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                           type="button"
                           variant="secondary"
                           size="sm"
+                          className="rounded-[18px] shadow-none"
                           onClick={() => void handleRunPipelineTests()}
                           disabled={
                             isGeneratingTestCases ||
@@ -1754,7 +1780,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                     </div>
 
                     {(testStreamPhase !== null || testStreamMarkdown.trim().length > 0) && (
-                      <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-muted/30 p-4 space-y-2">
+                      <div className="min-w-0 space-y-3 overflow-hidden rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted">
                         <div className="flex items-center justify-between gap-2 shrink-0">
                           <h4 className="font-medium text-sm flex items-center gap-2 min-w-0">
                             {testStreamPhase === 'execute_tests' ? (
@@ -1786,7 +1812,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                         <div
                           className={cn(
                             'h-[min(38vh,360px)] max-h-[50vh] w-full min-h-[8rem] shrink-0 overflow-y-auto overflow-x-auto',
-                            'rounded-md border border-border bg-card p-3 text-sm overscroll-y-contain',
+                            'rounded-[18px] border-0 bg-[#fffbff] p-3 text-sm overscroll-y-contain shadow-inner shadow-black/5 dark:bg-card/90',
                             '[scrollbar-gutter:stable]',
                           )}
                           role="region"
@@ -1805,22 +1831,22 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                     )}
 
                     {(selectedTask.generatedTestCases ?? []).length > 0 ? (
-                      <div className="border border-border rounded-lg overflow-hidden">
-                        <div className="bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      <div className="overflow-hidden rounded-[22px] bg-[#f5eff7] dark:bg-muted">
+                        <div className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                           测试用例（自动生成 · 执行依据）
                         </div>
                         <div className="overflow-x-auto">
                           <table className="w-full text-sm">
-                            <thead className="bg-muted/30 border-b border-border">
+                            <thead className="border-y border-[#e8def8]/70 bg-[#fffbff]/60 dark:border-border/25 dark:bg-card/70">
                               <tr>
                                 <th className="text-left p-3 font-medium">标题 / 追溯</th>
                                 <th className="text-left p-3 font-medium w-[120px]">依据</th>
                                 <th className="text-left p-3 font-medium">步骤与期望</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-border">
+                            <tbody className="divide-y divide-[#e8def8]/70 dark:divide-border/25">
                               {(selectedTask.generatedTestCases ?? []).map((tc) => (
-                                <tr key={tc.id} className="hover:bg-muted/30">
+                                <tr key={tc.id} className="hover:bg-[#fffbff]/70 dark:hover:bg-card/40">
                                   <td className="p-3 align-top">
                                     <div className="font-medium text-foreground">{tc.title}</div>
                                     <div className="text-xs text-muted-foreground mt-1 font-mono">{tc.trace}</div>
@@ -1836,9 +1862,9 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                                           variant="outline"
                                           className={cn(
                                             'text-[10px] px-1.5 py-0 font-normal',
-                                            b === 'fs' && 'border-slate-400/50 text-slate-700',
-                                            b === 'ts' && 'border-indigo-400/50 text-indigo-800',
-                                            b === 'code' && 'border-purple-400/50 text-purple-800',
+                                            b === 'fs' && 'border-0 bg-slate-500/10 text-slate-700',
+                                            b === 'ts' && 'border-0 bg-indigo-500/10 text-indigo-800',
+                                            b === 'code' && 'border-0 bg-purple-500/10 text-purple-800',
                                           )}
                                         >
                                           {b.toUpperCase()}
@@ -1867,7 +1893,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                     {displayTestReport ? (
                       <div className="space-y-4">
                         {testRunPreview ? (
-                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-xs">
+                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-[18px] bg-[#f5eff7] px-4 py-3 text-xs dark:bg-muted">
                             <span className="text-muted-foreground">
                               查看历史快照：
                               {new Date(testRunPreview.createdAt).toLocaleString('zh-CN')}
@@ -1876,7 +1902,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                               type="button"
                               variant="ghost"
                               size="sm"
-                              className="h-7 text-xs"
+                              className="h-7 rounded-[14px] text-xs"
                               onClick={() => setTestRunPreview(null)}
                             >
                               返回当前 / 最新结果
@@ -1888,27 +1914,27 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                         ) : null}
 
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                          <div className="text-center p-4 bg-muted/50 rounded-lg border border-border">
+                          <div className="rounded-[20px] bg-[#f5eff7] p-4 text-center dark:bg-muted">
                             <div className="text-2xl font-bold">{displayTestReport.total}</div>
                             <div className="text-xs text-muted-foreground mt-1">总测试数</div>
                           </div>
-                          <div className="text-center p-4 bg-green-500/10 rounded-lg border border-green-500/20">
+                          <div className="rounded-[20px] bg-green-500/10 p-4 text-center">
                             <div className="text-2xl font-bold text-green-700">{displayTestReport.passed}</div>
                             <div className="text-xs text-muted-foreground mt-1">通过</div>
                           </div>
-                          <div className="text-center p-4 bg-red-500/10 rounded-lg border border-red-500/20">
+                          <div className="rounded-[20px] bg-red-500/10 p-4 text-center">
                             <div className="text-2xl font-bold text-red-700">{displayTestReport.failed}</div>
                             <div className="text-xs text-muted-foreground mt-1">失败</div>
                           </div>
-                          <div className="text-center p-4 bg-primary/10 rounded-lg border border-primary/20">
+                          <div className="rounded-[20px] bg-primary/10 p-4 text-center">
                             <div className="text-2xl font-bold text-primary">{displayTestReport.coverage}%</div>
                             <div className="text-xs text-muted-foreground mt-1">代码覆盖率</div>
                           </div>
                         </div>
 
-                        <div className="border border-border rounded-lg overflow-hidden">
+                        <div className="overflow-hidden rounded-[22px] bg-[#f5eff7] dark:bg-muted">
                           <table className="w-full text-sm">
-                            <thead className="bg-muted/50 border-b border-border">
+                            <thead className="border-b border-[#e8def8]/70 bg-[#fffbff]/60 dark:border-border/25 dark:bg-card/70">
                               <tr>
                                 <th className="text-left p-3 font-medium">测试用例</th>
                                 <th className="text-left p-3 font-medium">状态</th>
@@ -1916,13 +1942,13 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                                 <th className="text-left p-3 font-medium">错误信息</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-border">
+                            <tbody className="divide-y divide-[#e8def8]/70 dark:divide-border/25">
                               {displayTestReport.details.map((test, idx) => (
-                                <tr key={`${test.name}-${idx}`} className="hover:bg-muted/30">
+                                <tr key={`${test.name}-${idx}`} className="hover:bg-[#fffbff]/70 dark:hover:bg-card/40">
                                   <td className="p-3 font-mono text-xs">{test.name}</td>
                                   <td className="p-3">
                                     {test.status === 'passed' ? (
-                                      <Badge variant="default" className="bg-green-600 gap-1">
+                                      <Badge variant="default" className="gap-1 border-0 bg-green-600">
                                         <CheckCircle2 className="size-3" />
                                         通过
                                       </Badge>
@@ -1942,7 +1968,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                         </div>
                       </div>
                     ) : (
-                      <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground border border-dashed border-border rounded-lg">
+                      <div className="flex flex-col items-center justify-center rounded-[22px] border border-dashed border-[#d0c4d5] bg-[#f5eff7] py-10 text-center text-muted-foreground dark:border-border dark:bg-muted">
                         <FileCheck className="size-12 mb-2 opacity-50" />
                         <p>尚无测试报告</p>
                         <p className="text-sm mt-1 max-w-md">
@@ -1952,7 +1978,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                     )}
 
                     {selectedTask.testRunHistory && selectedTask.testRunHistory.length > 0 ? (
-                      <div className="pt-2 border-t border-border">
+                      <div className="rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted">
                         <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-2">
                           <History className="size-3.5 shrink-0" />
                           测试执行历史（点击切换快照）
@@ -1962,7 +1988,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                             type="button"
                             variant={testRunPreview ? 'outline' : 'default'}
                             size="sm"
-                            className="h-8 text-xs font-normal"
+                            className="h-8 rounded-[16px] border-0 text-xs font-normal shadow-none"
                             onClick={() => setTestRunPreview(null)}
                           >
                             当前 / 最新
@@ -1973,7 +1999,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                               type="button"
                               variant={testRunPreview?.id === rec.id ? 'default' : 'outline'}
                               size="sm"
-                              className="h-8 text-xs font-normal"
+                              className="h-8 rounded-[16px] border-0 text-xs font-normal shadow-none"
                               onClick={() => setTestRunPreview(rec)}
                             >
                               {new Date(rec.createdAt).toLocaleString('zh-CN', {
@@ -1994,9 +2020,9 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
               </TabsContent>
 
               <TabsContent value="commits" className="mt-4">
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base flex items-center gap-2">
+                <Card className="overflow-hidden rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+                  <CardHeader className="border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+                    <CardTitle className="flex items-center gap-2 text-base">
                       <GitCommitHorizontal className="size-4 text-primary" />
                       Commit记录
                     </CardTitle>
@@ -2004,15 +2030,15 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                       展示流水线关联 Git 仓库最近提交记录（已保存至数据库）
                     </CardDescription>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="p-5">
                     {selectedTaskCommitStore?.records?.length ? (
                       <div className="space-y-3">
                         <div className="text-xs text-muted-foreground">
                           仓库：{selectedTaskCommitStore.gitUrl} | 分支：{selectedTaskCommitStore.branch}
                         </div>
-                        <div className="rounded-md border overflow-hidden">
+                        <div className="overflow-hidden rounded-[22px] bg-[#f5eff7] dark:bg-muted">
                           <table className="w-full text-sm">
-                            <thead className="bg-muted/50">
+                            <thead className="border-b border-[#e8def8]/70 bg-[#fffbff]/60 dark:border-border/25 dark:bg-card/70">
                               <tr>
                                 <th className="text-left p-3 font-medium">Hash</th>
                                 <th className="text-left p-3 font-medium">提交信息</th>
@@ -2020,9 +2046,9 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                                 <th className="text-left p-3 font-medium">时间</th>
                               </tr>
                             </thead>
-                            <tbody>
+                            <tbody className="divide-y divide-[#e8def8]/70 dark:divide-border/25">
                               {selectedTaskCommitStore.records.map((record) => (
-                                <tr key={`${record.hash}-${record.date}`} className="border-t">
+                                <tr key={`${record.hash}-${record.date}`} className="hover:bg-[#fffbff]/70 dark:hover:bg-card/40">
                                   <td className="p-3 font-mono text-xs">{record.hash}</td>
                                   <td className="p-3">{record.message}</td>
                                   <td className="p-3">{record.author}</td>
@@ -2034,7 +2060,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                         </div>
                       </div>
                     ) : (
-                      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                      <div className="flex flex-col items-center justify-center rounded-[22px] bg-[#f5eff7] py-12 text-muted-foreground dark:bg-muted">
                         <GitCommitHorizontal className="size-12 mb-2 opacity-50" />
                         <p>暂无 commit 记录</p>
                         <p className="text-sm mt-1">请先创建并提交该流水线文档到 Git</p>
@@ -2050,8 +2076,8 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
 
       {isList ? (
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="flex max-h-[85vh] w-full max-w-2xl flex-col gap-0 overflow-hidden p-0">
-          <DialogHeader className="shrink-0 space-y-2 border-b border-border px-6 pt-6 pb-4 text-left">
+        <DialogContent className="flex max-h-[85vh] w-full max-w-2xl flex-col gap-0 overflow-hidden rounded-[24px] border-0 bg-[#fffbff] p-0 shadow-[0_18px_48px_rgba(29,27,32,0.14)] dark:bg-card">
+          <DialogHeader className="shrink-0 space-y-2 border-b border-[#e8def8]/70 px-6 pt-6 pb-4 text-left dark:border-border/25">
             <DialogTitle>创建流水线</DialogTitle>
             <DialogDescription>
               选择已具备 PRD 与规格的需求，配置 Git 与运行环境；提交后将写入文档并生成可追踪的流水线记录。
@@ -2060,7 +2086,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-5 pr-1">
             <section
-              className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 shadow-sm"
+              className="space-y-4 rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted"
               aria-labelledby="cp-section-req"
             >
               <div className="space-y-1">
@@ -2080,7 +2106,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                     value={createForm.requirementId}
                     onValueChange={syncPipelineNameByRequirement}
                   >
-                    <SelectTrigger id="cp-requirement" className="w-full">
+                    <SelectTrigger id="cp-requirement" className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none dark:bg-card/90">
                       <SelectValue placeholder="请先选择需求" />
                     </SelectTrigger>
                     <SelectContent>
@@ -2098,6 +2124,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                   </Label>
                   <Input
                     id="cp-name"
+                    className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-card/90"
                     placeholder={defaultPipelineName || '例如：支付网关-生产流水线'}
                     value={createForm.name}
                     onChange={(e) => setCreateForm((prev) => ({ ...prev, name: e.target.value }))}
@@ -2107,7 +2134,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
             </section>
 
             <section
-              className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 shadow-sm"
+              className="space-y-4 rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted"
               aria-labelledby="cp-section-git"
             >
               <div className="space-y-1">
@@ -2132,7 +2159,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                       }))
                     }
                   >
-                    <SelectTrigger id="cp-git-auth" className="w-full">
+                    <SelectTrigger id="cp-git-auth" className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none dark:bg-card/90">
                       <SelectValue placeholder="选择认证方式" />
                     </SelectTrigger>
                     <SelectContent>
@@ -2151,7 +2178,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                       setCreateForm((prev) => ({ ...prev, triggerMode: value }))
                     }
                   >
-                    <SelectTrigger id="cp-trigger" className="w-full">
+                    <SelectTrigger id="cp-trigger" className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none dark:bg-card/90">
                       <SelectValue placeholder="选择触发方式" />
                     </SelectTrigger>
                     <SelectContent>
@@ -2171,7 +2198,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                       setCreateForm((prev) => ({ ...prev, priority: value }))
                     }
                   >
-                    <SelectTrigger id="cp-priority" className="w-full">
+                    <SelectTrigger id="cp-priority" className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none dark:bg-card/90">
                       <SelectValue placeholder="选择优先级" />
                     </SelectTrigger>
                     <SelectContent>
@@ -2186,7 +2213,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
 
               {createForm.gitAuthMode === 'pat' && (
                 <div
-                  className="rounded-md border border-border bg-background/80 px-3 py-2.5 text-xs text-muted-foreground"
+                  className="rounded-2xl bg-[#fffbff] px-3 py-2.5 text-xs text-muted-foreground dark:bg-card/90"
                   role="note"
                 >
                   <span className="font-medium text-foreground">PAT 说明：</span>
@@ -2216,7 +2243,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                 </Label>
                 <Input
                   id="cp-git-url"
-                  className="font-mono text-sm"
+                  className="h-11 rounded-[22px] border-0 bg-[#fffbff] font-mono text-sm shadow-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-card/90"
                   placeholder={
                     createForm.gitAuthMode === 'pat'
                       ? 'https://github.com/org/repo.git'
@@ -2240,6 +2267,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                     </Label>
                     <Input
                       id="cp-git-user"
+                      className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-card/90"
                       placeholder="未填写时默认 git"
                       value={createForm.gitUsername}
                       onChange={(e) => setCreateForm((prev) => ({ ...prev, gitUsername: e.target.value }))}
@@ -2252,6 +2280,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                     <Input
                       id="cp-git-pat"
                       type="password"
+                      className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-card/90"
                       placeholder="可在「个人设置」保存默认 PAT；不会写入流水线持久化元数据"
                       value={createForm.gitPat}
                       onChange={(e) => setCreateForm((prev) => ({ ...prev, gitPat: e.target.value }))}
@@ -2262,7 +2291,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
             </section>
 
             <section
-              className="space-y-4 rounded-lg border border-border bg-muted/20 p-4 shadow-sm"
+              className="space-y-4 rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted"
               aria-labelledby="cp-section-run"
             >
               <h3 id="cp-section-run" className="text-sm font-semibold text-foreground">
@@ -2275,7 +2304,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                   </Label>
                   <Input
                     id="cp-sandbox"
-                    className="font-mono text-sm"
+                    className="h-11 rounded-[22px] border-0 bg-[#fffbff] font-mono text-sm shadow-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-card/90"
                     placeholder="https://sandbox.example.com"
                     value={createForm.sandboxUrl}
                     onChange={(e) => setCreateForm((prev) => ({ ...prev, sandboxUrl: e.target.value }))}
@@ -2287,7 +2316,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                   </Label>
                   <Input
                     id="cp-branch"
-                    className="font-mono text-sm"
+                    className="h-11 rounded-[22px] border-0 bg-[#fffbff] font-mono text-sm shadow-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-card/90"
                     placeholder={createForm.requirementId || 'req_…'}
                     value={createForm.branch}
                     onChange={(e) => setCreateForm((prev) => ({ ...prev, branch: e.target.value }))}
@@ -2301,7 +2330,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
             </section>
 
             <div
-              className="space-y-2 rounded-lg border border-border border-l-4 border-l-primary bg-muted/20 p-4 text-sm shadow-sm"
+              className="space-y-2 rounded-[22px] bg-[#f5eff7] p-4 text-sm dark:bg-muted"
               role="status"
             >
               <p className="font-semibold text-foreground">交付前核对</p>
@@ -2314,7 +2343,7 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
               </ul>
             </div>
 
-            <section className="space-y-3 rounded-lg border border-border bg-muted/20 p-4 shadow-sm">
+            <section className="space-y-3 rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted">
               <div className="space-y-2">
                 <Label htmlFor="cp-remarks" className="text-sm font-medium">
                   备注
@@ -2324,15 +2353,16 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
                   placeholder="可填写执行策略、环境变量说明等"
                   value={createForm.remarks}
                   onChange={(e) => setCreateForm((prev) => ({ ...prev, remarks: e.target.value }))}
-                  className="min-h-[88px]"
+                  className="min-h-[88px] rounded-[22px] border-0 bg-[#fffbff] shadow-none focus-visible:ring-1 focus-visible:ring-ring dark:bg-card/90"
                 />
               </div>
             </section>
           </div>
 
-          <DialogFooter className="shrink-0 gap-2 border-t border-border bg-background px-6 py-4 sm:justify-end">
+          <DialogFooter className="shrink-0 gap-2 border-t border-[#e8def8]/70 bg-[#fffbff] px-6 py-4 sm:justify-end dark:border-border/25 dark:bg-card">
             <Button
               variant="outline"
+              className="rounded-[20px] border-0 bg-[#f5eff7] shadow-none hover:bg-[#f1eaf4] dark:bg-muted"
               onClick={() => {
                 setIsCreateDialogOpen(false);
                 resetCreateForm();
@@ -2340,7 +2370,11 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
             >
               取消
             </Button>
-            <Button onClick={handleCreatePipeline} disabled={isPublishingDocs}>
+            <Button
+              onClick={handleCreatePipeline}
+              disabled={isPublishingDocs}
+              className="rounded-[20px] px-[18px] font-bold shadow-none"
+            >
               {isPublishingDocs ? (
                 <>
                   <Loader2 className="size-4 mr-2 animate-spin" />

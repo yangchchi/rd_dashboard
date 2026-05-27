@@ -118,11 +118,11 @@ const isActivePath = (pathname: string, itemPath: string) => {
 
 const menuButtonClass = (isActive: boolean) =>
   cn(
-    "rounded-xl transition-colors duration-200",
+    "rounded-2xl transition-colors duration-200",
     "group-data-[collapsible=icon]:[&_svg]:!size-5",
     isActive
-      ? "border border-primary/30 bg-primary/15 shadow-[inset_0_1px_0_0_hsl(0_0%_100%_/_0.06)]"
-      : "border border-transparent hover:border-sidebar-border hover:bg-sidebar-accent/80"
+      ? "border border-transparent bg-sidebar-accent text-sidebar-accent-foreground shadow-none"
+      : "border border-transparent hover:bg-sidebar-accent/65"
   );
 
 /** 展开/收起均为 20px（size-5），收起时加粗描边并覆盖 sidebar 默认 [&>svg]:size-4 */
@@ -130,7 +130,7 @@ const navIconClass = (isActive: boolean) =>
   cn(
     "size-5 shrink-0 stroke-[1.75]",
     "group-data-[collapsible=icon]:!size-5 group-data-[collapsible=icon]:!h-5 group-data-[collapsible=icon]:!w-5 group-data-[collapsible=icon]:stroke-[2]",
-    isActive ? "text-primary" : "text-sidebar-foreground/65"
+    isActive ? "text-primary" : "text-sidebar-foreground/62"
   );
 
 const LayoutContent = ({ children }: { children: ReactNode }) => {
@@ -233,22 +233,22 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                     title={!isMobile && state === "collapsed" ? "点击展开侧边栏" : undefined}
                     className="min-w-0 gap-3 items-center"
                   >
-                    <span className="flex shrink-0">
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-sidebar-accent text-primary">
                       <ShipWheel
-                        className="h-8 w-8 text-blue-700 dark:text-white"
+                        className="h-6 w-6"
                         aria-hidden
                       />
                     </span>
                     <div className="grid min-w-0 flex-1 gap-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
-                      <span className="truncate bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-600 bg-clip-text text-lg font-extrabold leading-none tracking-widest text-transparent drop-shadow-[0_2px_4px_rgba(59,130,246,0.35)] dark:bg-none dark:text-white dark:drop-shadow-none">
+                      <span className="truncate text-lg font-semibold leading-none tracking-normal text-sidebar-foreground">
                         HAI智研平台
                       </span>
                       <div className="flex min-w-0 max-w-full items-center gap-1.5">
-                        <span className="h-px w-4 shrink-0 bg-gradient-to-r from-transparent via-blue-500/70 to-blue-500/30 dark:via-white/35 dark:to-white/15" />
-                        <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-700/90 dark:text-white/90">
+                        <span className="h-px w-4 shrink-0 bg-sidebar-border" />
+                        <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/58">
                           AI-Driven SDLC
                         </span>
-                        <span className="h-px w-4 shrink-0 bg-gradient-to-l from-transparent via-blue-500/70 to-blue-500/30 dark:via-white/35 dark:to-white/15" />
+                        <span className="h-px w-4 shrink-0 bg-sidebar-border" />
                       </div>
                     </div>
                   </Link>
@@ -511,8 +511,8 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                 side="top"
                 align="end"
                 className={cn(
-                  "min-w-48 border-border bg-popover/95 text-foreground backdrop-blur-xl",
-                  "shadow-md"
+                  "min-w-48 border-0 bg-popover text-foreground",
+                  "shadow-sm"
                 )}
               >
                 <DropdownMenuItem
@@ -523,7 +523,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                     <span className="text-sm text-muted-foreground">主题</span>
                     <div
                       className={cn(
-                        "inline-flex rounded-full border border-border bg-card p-1 shadow-sm",
+                        "inline-flex rounded-2xl border-0 bg-muted p-1 shadow-none",
                         !themeMounted && "pointer-events-none opacity-60"
                       )}
                       role="radiogroup"
@@ -546,12 +546,12 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                             disabled={!themeMounted}
                             onClick={() => applyThemePreference(setTheme, item.id as "light" | "dark" | "system")}
                             className={cn(
-                              "relative flex size-8 items-center justify-center rounded-full transition-colors",
+                              "relative flex size-8 items-center justify-center rounded-xl transition-colors",
                               active ? "text-background" : "text-foreground hover:bg-accent/80"
                             )}
                           >
                             {active ? (
-                              <span className="absolute inset-0 rounded-full bg-foreground shadow-sm" aria-hidden />
+                              <span className="absolute inset-0 rounded-xl bg-foreground shadow-none" aria-hidden />
                             ) : null}
                             <Icon className="relative z-[1] size-4 shrink-0" strokeWidth={active ? 2.25 : 1.75} />
                           </button>
@@ -608,9 +608,9 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
               <DropdownMenuContent
                 side="top"
                 align="end"
-                className="w-[min(100vw-2rem,24rem)] max-h-[min(80vh,28rem)] overflow-hidden border-border bg-popover/95 p-0 backdrop-blur-xl shadow-md"
+                className="w-[min(100vw-2rem,24rem)] max-h-[min(80vh,28rem)] overflow-hidden border-0 bg-popover p-0 shadow-sm"
               >
-                <div className="border-b border-border px-3 py-2">
+                <div className="border-b border-border/35 px-3 py-2">
                   <p className="text-xs font-semibold text-foreground">站内信</p>
                   <p className="text-[11px] text-muted-foreground">悬赏与系统通知</p>
                 </div>
@@ -654,7 +654,7 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
 
       <SidebarInset className="relative min-w-0 flex-1 overflow-x-hidden">
         <SidebarTrigger
-          className="absolute left-3 top-3 z-30 size-10 shrink-0 rounded-lg border border-border bg-card/95 text-muted-foreground shadow-sm backdrop-blur-sm hover:bg-accent hover:text-primary md:hidden"
+          className="absolute left-3 top-3 z-30 size-10 shrink-0 rounded-2xl border-0 bg-card text-muted-foreground shadow-sm hover:bg-accent hover:text-primary md:hidden"
           aria-label="打开菜单"
         />
         <div className="rd-content-canvas min-h-0 min-w-0 w-full flex-1 px-4 pb-6 pt-14 sm:px-6 sm:pb-8 md:px-6 md:py-8 md:pt-8 lg:px-8">
