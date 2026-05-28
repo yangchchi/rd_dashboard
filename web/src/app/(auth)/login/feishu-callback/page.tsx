@@ -1,23 +1,23 @@
 'use client';
 
-import React, { Suspense, useEffect } from 'react';
+import React, { Suspense, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { authApi } from '@/lib/auth-api';
 import { saveAuthSession } from '@/lib/auth';
 import { FEISHU_OAUTH_STATE_KEY, getFeishuRedirectUri } from '@/lib/feishu-oauth';
 import { toast } from 'sonner';
 
-/** 避免 React Strict Mode 或重复渲染导致授权码被使用两次 */
-let feishuCallbackInflight: Promise<void> | null = null;
-
 function FeishuCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const hasHandledRef = useRef(false);
 
   useEffect(() => {
-    if (feishuCallbackInflight) return;
+    // 避免在路由切换中重复执行 replace，触发更新风暴
+    if (hasHandledRef.current) return;
+    hasHandledRef.current = true;
 
-    feishuCallbackInflight = (async () => {
+    void (async () => {
       const error = searchParams.get('error');
       const state = searchParams.get('state');
       const code = searchParams.get('code');
@@ -59,9 +59,7 @@ function FeishuCallbackContent() {
         toast.error(e instanceof Error ? e.message : '飞书登录失败');
         router.replace('/login');
       }
-    })().finally(() => {
-      feishuCallbackInflight = null;
-    });
+    })();
   }, [router, searchParams]);
 
   return (

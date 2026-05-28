@@ -132,12 +132,11 @@ const LoginPage: React.FC = () => {
           </CardContent>
         </Card>
 
-        <div className="space-y-4 pt-1">
-       
+        <div className="flex gap-3 pt-1">
           <Button
             type="button"
             variant="outline"
-            className="w-full border-white/[0.1] bg-white/[0.04] text-foreground shadow-none backdrop-blur-sm hover:bg-white/[0.08] hover:text-foreground"
+            className="flex-1 border-white/[0.1] bg-white/[0.04] text-foreground shadow-none backdrop-blur-sm hover:bg-white/[0.08] hover:text-foreground"
             onClick={startFeishuLogin}
           >
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-[#3370FF] text-[11px] font-bold leading-none text-white">
@@ -145,11 +144,10 @@ const LoginPage: React.FC = () => {
             </span>
             飞书登录
           </Button>
-         
           <Button
             type="button"
             variant="outline"
-            className="w-full border-white/[0.1] bg-white/[0.04] text-foreground shadow-none backdrop-blur-sm hover:bg-white/[0.08] hover:text-foreground"
+            className="flex-1 border-white/[0.1] bg-white/[0.04] text-foreground shadow-none backdrop-blur-sm hover:bg-white/[0.08] hover:text-foreground"
             onClick={() => toast.info('微信登录功能开发中')}
           >
             <img
@@ -161,7 +159,6 @@ const LoginPage: React.FC = () => {
             />
             微信登录
           </Button>
-        
         </div>
       </div>
     </div>

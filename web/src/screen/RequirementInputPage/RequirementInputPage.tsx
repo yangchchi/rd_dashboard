@@ -105,6 +105,7 @@ function difficultyFromCoins(coins: number): 'normal' | 'hard' | 'epic' {
 const RequirementInputPage: React.FC = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const searchProductId = searchParams.get('productId') || '';
   const queryClient = useQueryClient();
   const userInfo = useCurrentUserProfile();
   const upsertRequirement = useUpsertRequirement();
@@ -326,14 +327,13 @@ const RequirementInputPage: React.FC = () => {
   };
 
   useEffect(() => {
-    const pid = searchParams.get('productId');
-    if (!pid || products.length === 0) return;
-    const hit = products.find((p) => p.id === pid);
-    if (hit) {
-      setProductId(hit.id);
-      setProduct(hit.name);
-    }
-  }, [searchParams, products]);
+    if (!searchProductId || products.length === 0) return;
+    const hit = products.find((p) => p.id === searchProductId);
+    if (!hit) return;
+    if (productId === hit.id && product === hit.name) return;
+    setProductId(hit.id);
+    setProduct(hit.name);
+  }, [searchProductId, products, productId, product]);
 
   const handleSubmit = async () => {
     if (!title.trim()) {
