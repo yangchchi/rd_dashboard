@@ -37,7 +37,6 @@ import { toast } from 'sonner';
 import { toastApiError } from '@/lib/api-error';
 import { REQUIREMENT_KANBAN_COLUMNS } from '@/lib/requirement-status-present';
 
-const LEADERBOARD_TOP = 10;
 const ROLE_SELECTED_ONCE_PREFIX = '__rd_role_selected_once_';
 
 const ROLE_OPTIONS = [
@@ -94,8 +93,7 @@ function buildRankingAgg(
   }
   return Array.from(map.entries())
     .map(([actorKey, v]) => ({ actorKey, actorLabel: v.label, count: v.count, coins: v.coins }))
-    .sort((a, b) => b.count - a.count || b.coins - a.coins)
-    .slice(0, LEADERBOARD_TOP);
+    .sort((a, b) => b.count - a.count || b.coins - a.coins);
 }
 
 function pickAcceptedRoleActor(r: IRequirement, role: 'pm' | 'tm'): LeaderboardActor | null {
@@ -127,7 +125,7 @@ function DashboardSurface({
 }) {
   return (
     <section
-      className={`overflow-hidden rounded-[24px] bg-card/90 shadow-[0_8px_22px_rgba(29,27,32,0.045)] ${className}`}
+      className={`overflow-hidden rounded-[24px] bg-card/95 shadow-[0_18px_46px_rgba(29,27,32,0.085)] ring-1 ring-[#e8def8]/30 dark:bg-card/95 dark:shadow-[0_24px_64px_rgba(0,0,0,0.34)] dark:ring-[#263454]/28 ${className}`}
     >
       {children}
     </section>
@@ -157,43 +155,46 @@ function DashboardCardHeader({
 }
 
 function LeaderboardGroupCard({ group }: { group: LeaderboardGroup }) {
-  const rows = group.rows.slice(0, 3);
+  const rows = group.rows;
   const rankTones = [
     'bg-amber-300 text-amber-950 dark:bg-amber-400/85 dark:text-amber-950',
     'bg-slate-300 text-slate-900 dark:bg-slate-300/80 dark:text-slate-950',
     'bg-orange-300 text-orange-950 dark:bg-orange-400/80 dark:text-orange-950',
   ];
   return (
-    <div className="rounded-[18px] bg-muted/70 px-4 py-3">
-      <div className="mb-2 flex items-center justify-between gap-3">
+    <div className="flex min-h-[360px] flex-col rounded-[20px] bg-[#f5eff7]/90 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] dark:bg-[#11192b]/90 dark:shadow-[inset_0_1px_0_rgba(116,139,190,0.10)]">
+      <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-bold text-foreground">{group.title}</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">{group.subtitle}</p>
+          <h3 className="text-base font-bold text-foreground">{group.title}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">{group.subtitle}</p>
         </div>
+        <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-extrabold text-[#21005d] dark:text-foreground">
+          {rows.length} 人
+        </span>
       </div>
       {rows.length > 0 ? (
-        <div className="space-y-1.5">
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
           {rows.map((row, index) => (
             <div
               key={row.actorKey}
-              className="grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-3 rounded-[14px] bg-card/80 px-3 py-2"
+              className="grid min-h-[58px] grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 rounded-[16px] bg-[#fffbff]/92 px-3.5 py-2.5 shadow-[0_7px_18px_rgba(29,27,32,0.055)] dark:bg-[#182238]/90 dark:shadow-[0_10px_24px_rgba(0,0,0,0.22)]"
             >
-              <span className={`flex h-7 w-7 items-center justify-center rounded-[10px] text-xs font-extrabold ${rankTones[index] ?? 'bg-muted text-muted-foreground'}`}>
+              <span className={`flex h-8 w-8 items-center justify-center rounded-[12px] text-xs font-extrabold ${rankTones[index] ?? 'bg-secondary text-secondary-foreground'}`}>
                 {index + 1}
               </span>
               <div className="min-w-0">
                 <p className="truncate text-sm font-bold text-foreground">{row.actorLabel}</p>
-                <p className="text-xs text-muted-foreground">{row.count} 条需求</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">{row.count} 条需求</p>
               </div>
               <div className="text-right">
-                <p className="text-sm font-extrabold text-foreground">{row.coins}</p>
+                <p className="text-base font-extrabold tabular-nums text-foreground">{row.coins}</p>
                 <p className="text-[10px] text-muted-foreground">金币</p>
               </div>
             </div>
           ))}
         </div>
       ) : (
-        <p className="rounded-[14px] bg-card/80 px-3 py-3 text-sm text-muted-foreground">暂无排行数据</p>
+        <p className="rounded-[14px] bg-[#fffbff]/92 px-3 py-3 text-sm text-muted-foreground shadow-[0_7px_18px_rgba(29,27,32,0.055)] dark:bg-[#182238]/90 dark:shadow-[0_10px_24px_rgba(0,0,0,0.22)]">暂无排行数据</p>
       )}
     </div>
   );
@@ -467,28 +468,37 @@ const DashboardPage: React.FC = () => {
           </div>
         </header>
 
+        <DashboardSurface className="mb-6 min-h-[236px] bg-[linear-gradient(135deg,rgba(234,221,255,0.96),rgba(159,242,230,0.72))] p-7 text-[#21005d] shadow-[0_10px_28px_rgba(103,80,164,0.08)]">
+          <div className="flex flex-wrap items-start justify-between gap-6">
+            <div>
+              <h2 className="max-w-[860px] text-[42px] font-medium leading-[1.08] tracking-normal">
+                研发效能监控与 AI 交付协同
+              </h2>
+            </div>
+            <div className="inline-flex h-8 items-center gap-2 rounded-2xl bg-white/55 px-3.5 text-[13px] font-bold">
+              <Sparkles className="h-4 w-4" />
+              AI 摘要已更新
+            </div>
+          </div>
+
+          <div className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {summaryItems.map((item) => (
+              <div key={item.label} className="min-h-28 rounded-2xl bg-white/60 p-[18px]">
+                <div className="text-[32px] font-semibold leading-none">{item.value}</div>
+                <div className="mt-2.5 text-[13px] font-bold text-[#21005d]/75">{item.label}</div>
+                <div className="mt-1.5 text-xs leading-snug text-[#21005d]/55">{item.note}</div>
+              </div>
+            ))}
+          </div>
+        </DashboardSurface>
+
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
           <div className="min-w-0">
-            <DashboardSurface className="min-h-[236px] bg-[linear-gradient(135deg,rgba(234,221,255,0.96),rgba(159,242,230,0.72))] p-7 text-[#21005d] shadow-[0_10px_28px_rgba(103,80,164,0.08)]">
-              <div className="flex flex-wrap items-start justify-between gap-6">
-                <div>
-                  <h2 className="max-w-[620px] text-[42px] font-medium leading-[1.08] tracking-normal">
-                    研发效能监控与 AI 交付协同
-                  </h2>
-                </div>
-                <div className="inline-flex h-8 items-center gap-2 rounded-2xl bg-white/55 px-3.5 text-[13px] font-bold">
-                  <Sparkles className="h-4 w-4" />
-                  AI 摘要已更新
-                </div>
-              </div>
-
-              <div className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {summaryItems.map((item) => (
-                  <div key={item.label} className="min-h-28 rounded-2xl bg-white/60 p-[18px]">
-                    <div className="text-[32px] font-semibold leading-none">{item.value}</div>
-                    <div className="mt-2.5 text-[13px] font-bold text-[#21005d]/75">{item.label}</div>
-                    <div className="mt-1.5 text-xs leading-snug text-[#21005d]/55">{item.note}</div>
-                  </div>
+            <DashboardSurface>
+              <DashboardCardHeader title="需求排行榜" description="金主 / 产品经理 / 技术经理" />
+              <div className="grid grid-cols-1 gap-3.5 px-6 pb-6 lg:grid-cols-3">
+                {leaderboardGroups.map((group) => (
+                  <LeaderboardGroupCard key={`${group.title}-${group.subtitle}`} group={group} />
                 ))}
               </div>
             </DashboardSurface>
@@ -643,14 +653,6 @@ const DashboardPage: React.FC = () => {
               </div>
             </DashboardSurface>
 
-            <DashboardSurface>
-              <DashboardCardHeader title="需求排行榜" description="按发起人与 PM/TM 领取贡献分别统计。" />
-              <div className="space-y-3 px-6 pb-6">
-                {leaderboardGroups.map((group) => (
-                  <LeaderboardGroupCard key={`${group.title}-${group.subtitle}`} group={group} />
-                ))}
-              </div>
-            </DashboardSurface>
           </div>
         </section>
 
