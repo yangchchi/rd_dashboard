@@ -371,34 +371,21 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
             <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
               验收中心
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              对比原始需求与实际实现，完成最终验收闭环。
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {[
-              { label: '待验收', value: pendingRequirements.length },
-              { label: '已通过', value: approvedHistoryCount },
-              { label: '已驳回', value: rejectedHistoryCount },
-            ].map((item) => (
-              <div key={item.label} className="min-w-24 rounded-[20px] bg-[#f5eff7] px-4 py-3 text-right dark:bg-muted">
-                <div className="text-2xl font-semibold tabular-nums text-[#21005d] dark:text-foreground">{item.value}</div>
-                <div className="text-xs text-muted-foreground">{item.label}</div>
-              </div>
-            ))}
           </div>
         </header>
 
         <section className="overflow-hidden rounded-[24px] bg-[linear-gradient(135deg,rgba(234,221,255,0.94),rgba(159,242,230,0.62))] p-6 text-[#21005d] shadow-[0_10px_28px_rgba(103,80,164,0.07)]">
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {[
-              { label: '验收对象', value: '需求交付', note: '核对 PRD、实现结果与沙箱环境' },
-              { label: '验收动作', value: '通过 / 驳回', note: '通过发布，驳回可发起 RFC' },
-              { label: '存量变更', value: '基线对比', note: 'Brownfield 需求保留能力差异核对' },
+              { label: '待验收', value: pendingRequirements.length, note: '等待确认' },
+              { label: '已通过', value: approvedHistoryCount, note: '完成发布' },
+              { label: '已驳回', value: rejectedHistoryCount, note: '退回处理' },
             ].map((item) => (
-              <div key={item.label} className="min-h-24 rounded-2xl bg-white/60 p-4">
-                <div className="text-[28px] font-semibold leading-none">{item.value}</div>
+              <div
+                key={item.label}
+                className="min-h-24 rounded-2xl bg-white/60 p-4"
+              >
+                <div className="text-[30px] font-semibold leading-none tabular-nums">{item.value}</div>
                 <div className="mt-2 text-[13px] font-bold text-[#21005d]/75">{item.label}</div>
                 <div className="mt-1 text-xs leading-snug text-[#21005d]/55">{item.note}</div>
               </div>

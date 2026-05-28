@@ -60,6 +60,7 @@ const ROLE_OPTIONS = [
 
 type LeaderboardActor = { id?: string | null; name?: string | null };
 type LeaderboardRow = { actorKey: string; actorLabel: string; count: number; coins: number };
+type LeaderboardGroup = { title: string; subtitle: string; rows: LeaderboardRow[] };
 
 function normalizeActorLabel(actor: LeaderboardActor): string {
   const n = actor.name?.trim();
@@ -95,6 +96,15 @@ function buildRankingAgg(
     .map(([actorKey, v]) => ({ actorKey, actorLabel: v.label, count: v.count, coins: v.coins }))
     .sort((a, b) => b.count - a.count || b.coins - a.coins)
     .slice(0, LEADERBOARD_TOP);
+}
+
+function pickAcceptedRoleActor(r: IRequirement, role: 'pm' | 'tm'): LeaderboardActor | null {
+  const accepted = (r.taskAcceptances ?? []).find((x) => x.role === role);
+  const fallbackId = role === 'pm' ? r.pm : r.tm;
+  const id = accepted?.userId?.trim() || fallbackId?.trim();
+  const name = accepted?.userName?.trim();
+  if (!id && !name) return null;
+  return { id, name };
 }
 
 type FilterType = 'all' | 'mine' | 'submitted';
@@ -142,6 +152,49 @@ function DashboardCardHeader({
         ) : null}
       </div>
       {action}
+    </div>
+  );
+}
+
+function LeaderboardGroupCard({ group }: { group: LeaderboardGroup }) {
+  const rows = group.rows.slice(0, 3);
+  const rankTones = [
+    'bg-amber-300 text-amber-950 dark:bg-amber-400/85 dark:text-amber-950',
+    'bg-slate-300 text-slate-900 dark:bg-slate-300/80 dark:text-slate-950',
+    'bg-orange-300 text-orange-950 dark:bg-orange-400/80 dark:text-orange-950',
+  ];
+  return (
+    <div className="rounded-[18px] bg-muted/70 px-4 py-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-foreground">{group.title}</h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">{group.subtitle}</p>
+        </div>
+      </div>
+      {rows.length > 0 ? (
+        <div className="space-y-1.5">
+          {rows.map((row, index) => (
+            <div
+              key={row.actorKey}
+              className="grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-3 rounded-[14px] bg-card/80 px-3 py-2"
+            >
+              <span className={`flex h-7 w-7 items-center justify-center rounded-[10px] text-xs font-extrabold ${rankTones[index] ?? 'bg-muted text-muted-foreground'}`}>
+                {index + 1}
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-foreground">{row.actorLabel}</p>
+                <p className="text-xs text-muted-foreground">{row.count} 条需求</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-extrabold text-foreground">{row.coins}</p>
+                <p className="text-[10px] text-muted-foreground">金币</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-[14px] bg-card/80 px-3 py-3 text-sm text-muted-foreground">暂无排行数据</p>
+      )}
     </div>
   );
 }
@@ -235,6 +288,32 @@ const DashboardPage: React.FC = () => {
         (r) => Number(r.bountyPoints ?? 0) || 0
       ),
     [filteredRequirements]
+  );
+  const rankingPmHunters = useMemo(
+    () =>
+      buildRankingAgg(
+        filteredRequirements,
+        (r) => pickAcceptedRoleActor(r, 'pm'),
+        (r) => Number(r.pmCoins ?? 0) || 0
+      ),
+    [filteredRequirements]
+  );
+  const rankingTmHunters = useMemo(
+    () =>
+      buildRankingAgg(
+        filteredRequirements,
+        (r) => pickAcceptedRoleActor(r, 'tm'),
+        (r) => Number(r.tmCoins ?? 0) || 0
+      ),
+    [filteredRequirements]
+  );
+  const leaderboardGroups = useMemo<LeaderboardGroup[]>(
+    () => [
+      { title: '金主', subtitle: '发起人', rows: rankingSubmitters },
+      { title: '赏金猎人', subtitle: '产品经理', rows: rankingPmHunters },
+      { title: '赏金猎人', subtitle: '技术经理', rows: rankingTmHunters },
+    ],
+    [rankingPmHunters, rankingSubmitters, rankingTmHunters]
   );
   const filterLabels: Record<FilterType, string> = {
     all: '全部需求',
@@ -492,7 +571,7 @@ const DashboardPage: React.FC = () => {
                         <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
                         {item.label}
                       </div>
-                      <div className="h-2.5 overflow-hidden rounded-full bg-[#e6e0e9]">
+                      <div className="h-2.5 overflow-hidden rounded-full bg-[#e6e0e9] dark:bg-slate-700/45">
                         <span
                           className="block h-full rounded-full"
                           style={{ width: `${fill}%`, backgroundColor: item.color }}
@@ -553,7 +632,7 @@ const DashboardPage: React.FC = () => {
                           </div>
                           <div className="text-[13px] font-extrabold text-foreground">12%</div>
                         </div>
-                        <div className="mt-3.5 h-2.5 overflow-hidden rounded-full bg-[#e6e0e9]">
+                        <div className="mt-3.5 h-2.5 overflow-hidden rounded-full bg-[#e6e0e9] dark:bg-slate-700/45">
                           <span className="block h-full w-[12%] rounded-full bg-[#7c43bd]" />
                         </div>
                       </div>
@@ -565,24 +644,11 @@ const DashboardPage: React.FC = () => {
             </DashboardSurface>
 
             <DashboardSurface>
-              <DashboardCardHeader title="需求排行榜" description="保留贡献摘要，完整统计进入详情。" />
-              <div className="px-6 pb-6">
-                {rankingSubmitters.slice(0, 3).length > 0 ? (
-                  rankingSubmitters.slice(0, 3).map((row) => (
-                    <div
-                      key={row.actorKey}
-                      className="flex items-center justify-between gap-4 border-t border-border/25 py-[15px]"
-                    >
-                      <div>
-                        <div className="text-sm font-bold text-foreground">{row.actorLabel}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">发起人</div>
-                      </div>
-                      <div className="text-[13px] font-extrabold text-foreground">{row.coins}</div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="border-t border-border/25 py-6 text-sm text-muted-foreground">暂无排行数据</p>
-                )}
+              <DashboardCardHeader title="需求排行榜" description="按发起人与 PM/TM 领取贡献分别统计。" />
+              <div className="space-y-3 px-6 pb-6">
+                {leaderboardGroups.map((group) => (
+                  <LeaderboardGroupCard key={`${group.title}-${group.subtitle}`} group={group} />
+                ))}
               </div>
             </DashboardSurface>
           </div>
