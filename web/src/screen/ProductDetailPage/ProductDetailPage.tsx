@@ -15,7 +15,6 @@ import {
   Sparkles,
 } from 'lucide-react';
 
-import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,6 +44,9 @@ import { getCurrentUser } from '@/lib/auth';
 import { formatRequirementChangeBadge } from '@/lib/requirement-change-present';
 import { getRequirementStatusPresentation } from '@/lib/requirement-status-present';
 import { diffBaselineCapabilities } from '@shared/baseline-capability-diff';
+
+const PRODUCT_PRIMARY_BUTTON =
+  'bg-[#6750a4] text-white shadow-none hover:bg-[#5b4694] focus-visible:ring-[#6750a4]/35';
 
 function hrefWithProtocol(u: string): string {
   const t = u.trim();
@@ -170,27 +172,42 @@ const ProductDetailPage: React.FC = () => {
   }
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="rd-page-header-lead min-w-0">
-          <RdPageModuleHeading
-            icon={Package}
-            title={product?.name ?? '产品 Hub'}
-            description="以产品为锚点查看基线、能力与进行中需求"
-            leading={
-              <Button type="button" variant="outline" size="icon" onClick={() => router.push('/products')}>
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            }
-          />
+    <div className="flex w-full min-w-0 flex-col gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-6">
+        <div className="flex min-w-0 items-center gap-3">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-10 w-10 rounded-[20px] bg-[#f5eff7] text-muted-foreground shadow-none hover:bg-[#f1eaf4] hover:text-foreground dark:bg-muted"
+            onClick={() => router.push('/products')}
+          >
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
+              Product Hub
+            </p>
+            <h1 className="mt-1 truncate text-[34px] font-medium leading-tight tracking-normal text-foreground">
+              {product?.name ?? '产品 Hub'}
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              以产品为锚点查看基线、能力与进行中需求。
+            </p>
+          </div>
         </div>
-        <Button type="button" className="shrink-0" asChild disabled={!product}>
+        <Button
+          type="button"
+          className={`h-10 shrink-0 rounded-[20px] px-[18px] text-sm font-bold ${PRODUCT_PRIMARY_BUTTON}`}
+          asChild
+          disabled={!product}
+        >
           <Link href={enhancementHref}>
             <Sparkles className="mr-2 h-4 w-4" />
             新建增强需求
           </Link>
         </Button>
-      </div>
+      </header>
 
       {loading ? (
         <p className="text-sm text-muted-foreground">加载中…</p>
@@ -198,20 +215,32 @@ const ProductDetailPage: React.FC = () => {
         <p className="text-sm text-muted-foreground">产品不存在</p>
       ) : (
         <Tabs defaultValue="overview" className="w-full space-y-6">
-          <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4">
-            <TabsTrigger value="overview">概览</TabsTrigger>
-            <TabsTrigger value="capabilities">能力目录</TabsTrigger>
-            <TabsTrigger value="requirements">产品需求</TabsTrigger>
-            <TabsTrigger value="baselines">基线历史</TabsTrigger>
-          </TabsList>
+          <div className="overflow-x-auto rounded-[24px] bg-[#f5eff7] p-1.5 shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+            <TabsList className="inline-flex h-auto min-w-max gap-1.5 bg-transparent p-0">
+              {[
+                ['overview', '概览'],
+                ['capabilities', '能力目录'],
+                ['requirements', '产品需求'],
+                ['baselines', '基线历史'],
+              ].map(([value, label]) => (
+                <TabsTrigger
+                  key={value}
+                  value={value}
+                  className="h-10 rounded-[20px] px-4 text-muted-foreground transition-colors hover:bg-[#fffbff] hover:text-foreground data-[state=active]:bg-[#6750a4] data-[state=active]:text-white data-[state=active]:shadow-[0_6px_14px_rgba(103,80,164,0.22)]"
+                >
+                  {label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
 
           <TabsContent value="overview" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">产品概览</CardTitle>
+            <Card className="overflow-hidden rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+              <CardHeader className="border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+                <CardTitle className="text-xl font-semibold tracking-normal">产品概览</CardTitle>
                 <CardDescription>环境链接与当前默认基线</CardDescription>
               </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
+              <CardContent className="grid gap-4 p-5 md:grid-cols-2">
                 <OverviewRow label="产品编码" value={product.code || '—'} />
                 <OverviewRow label="产品标识" value={product.identifier || '—'} mono />
                 <OverviewRow label="产品负责人" value={product.owner || '—'} />
@@ -243,22 +272,23 @@ const ProductDetailPage: React.FC = () => {
           </TabsContent>
 
           <TabsContent value="capabilities" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">能力目录</CardTitle>
+            <Card className="overflow-hidden rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+              <CardHeader className="border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+                <CardTitle className="text-xl font-semibold tracking-normal">能力目录</CardTitle>
                 <CardDescription>
                   {latestBaseline
                     ? `来自基线 ${latestBaseline.version}（冻结于 ${new Date(latestBaseline.frozenAt).toLocaleString('zh-CN')}）`
                     : '请先冻结产品基线'}
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-4 p-5">
                 {latestCapabilities.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">暂无结构化能力条目</p>
+                  <p className="rounded-[22px] bg-[#f5eff7] px-4 py-10 text-center text-sm text-muted-foreground dark:bg-muted">暂无结构化能力条目</p>
                 ) : (
+                  <div className="overflow-hidden rounded-[22px] bg-[#f5eff7] dark:bg-muted">
                   <div className="overflow-x-auto">
                   <Table>
-                    <TableHeader>
+                    <TableHeader className="bg-[#fffbff]/70 dark:bg-card/70">
                       <TableRow>
                         <TableHead>功能域</TableHead>
                         <TableHead>能力名</TableHead>
@@ -268,7 +298,7 @@ const ProductDetailPage: React.FC = () => {
                     </TableHeader>
                     <TableBody>
                       {latestCapabilities.map((c, i) => (
-                        <TableRow key={`${c.domain}-${c.name}-${i}`}>
+                        <TableRow key={`${c.domain}-${c.name}-${i}`} className="border-[#e8def8]/70 hover:bg-[#fffbff]/70 dark:border-border/25">
                           <TableCell>{c.domain || '—'}</TableCell>
                           <TableCell className="font-medium">{c.name}</TableCell>
                           <TableCell className="max-w-md text-sm text-muted-foreground">
@@ -282,9 +312,10 @@ const ProductDetailPage: React.FC = () => {
                     </TableBody>
                   </Table>
                   </div>
+                  </div>
                 )}
                 {latestBaseline?.asBuiltMarkdown?.trim() ? (
-                  <div className="rounded-lg border border-border bg-muted/30 p-4">
+                  <div className="rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted">
                     <p className="mb-2 text-xs font-medium text-muted-foreground">As-Built 备注</p>
                     <pre className="whitespace-pre-wrap text-sm font-mono">{latestBaseline.asBuiltMarkdown}</pre>
                   </div>
@@ -294,25 +325,26 @@ const ProductDetailPage: React.FC = () => {
           </TabsContent>
 
           <TabsContent value="requirements" className="space-y-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <Card className="overflow-hidden rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
                 <div>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <ListTodo className="h-4 w-4" />
+                  <CardTitle className="flex items-center gap-2 text-xl font-semibold tracking-normal">
+                    <ListTodo className="h-5 w-5 text-[#6750a4]" />
                     产品需求
                   </CardTitle>
                   <CardDescription>共 {productRequirements.length} 条，其中 {activeRequirements.length} 条进行中</CardDescription>
                 </div>
-                <Button type="button" variant="outline" size="sm" asChild>
+                <Button type="button" variant="outline" size="sm" className="rounded-[18px] border-0 bg-[#f5eff7] shadow-none hover:bg-[#f1eaf4] dark:bg-muted" asChild>
                   <Link href={enhancementHref}>新建增强需求</Link>
                 </Button>
               </CardHeader>
-              <CardContent className="overflow-x-auto">
+              <CardContent className="overflow-x-auto p-5">
                 {productRequirements.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">暂无关联需求</p>
+                  <p className="rounded-[22px] bg-[#f5eff7] px-4 py-10 text-center text-sm text-muted-foreground dark:bg-muted">暂无关联需求</p>
                 ) : (
+                  <div className="overflow-hidden rounded-[22px] bg-[#f5eff7] dark:bg-muted">
                   <Table>
-                    <TableHeader>
+                    <TableHeader className="bg-[#fffbff]/70 dark:bg-card/70">
                       <TableRow>
                         <TableHead>标题</TableHead>
                         <TableHead>变更类型</TableHead>
@@ -327,6 +359,7 @@ const ProductDetailPage: React.FC = () => {
                       ))}
                     </TableBody>
                   </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -334,27 +367,27 @@ const ProductDetailPage: React.FC = () => {
 
           <TabsContent value="baselines" className="space-y-6">
             <div className="grid gap-8 lg:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Layers className="h-4 w-4" />
+              <Card className="overflow-hidden rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+                <CardHeader className="border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+                  <CardTitle className="flex items-center gap-2 text-xl font-semibold tracking-normal">
+                    <Layers className="h-5 w-5 text-[#6750a4]" />
                     冻结新基线
                   </CardTitle>
-                  <CardDescription>记录「原杯子」当前能力与 Git 锚点</CardDescription>
+                  <CardDescription>记录当前能力与 Git 锚点</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-4 p-5">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label>
                         基线版本 <RequiredMark />
                       </Label>
-                      <Input value={version} onChange={(e) => setVersion(e.target.value)} placeholder="如 v1.2" />
+                      <Input className="h-11 rounded-[22px] border-0 bg-[#f5eff7] shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-muted" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="如 v1.2" />
                     </div>
                     <div className="space-y-2">
                       <Label>
                         Git 引用 <RequiredMark />
                       </Label>
-                      <Input value={gitRef} onChange={(e) => setGitRef(e.target.value)} placeholder="tag 或 commit" />
+                      <Input className="h-11 rounded-[22px] border-0 bg-[#f5eff7] shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-muted" value={gitRef} onChange={(e) => setGitRef(e.target.value)} placeholder="tag 或 commit" />
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -362,43 +395,44 @@ const ProductDetailPage: React.FC = () => {
                     <Textarea
                       value={asBuiltMarkdown}
                       onChange={(e) => setAsBuiltMarkdown(e.target.value)}
-                      placeholder="如：已有密封圈、防滑杯底…"
-                      className="min-h-[100px]"
+                      placeholder="如：已有登录、权限、报表等能力…"
+                      className="min-h-[100px] rounded-[22px] border-0 bg-[#f5eff7] shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-muted"
                     />
                   </div>
-                  <div className="rounded-md border border-border p-3 space-y-3">
+                  <div className="space-y-3 rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted">
                     <p className="text-xs font-medium text-muted-foreground">可选：添加一条结构化能力</p>
                     <div className="grid gap-2 sm:grid-cols-2">
-                      <Input value={capDomain} onChange={(e) => setCapDomain(e.target.value)} placeholder="功能域" />
-                      <Input value={capName} onChange={(e) => setCapName(e.target.value)} placeholder="能力名" />
+                      <Input className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90" value={capDomain} onChange={(e) => setCapDomain(e.target.value)} placeholder="功能域" />
+                      <Input className="h-11 rounded-[22px] border-0 bg-[#fffbff] shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90" value={capName} onChange={(e) => setCapName(e.target.value)} placeholder="能力名" />
                     </div>
                     <Textarea
                       value={capDescription}
                       onChange={(e) => setCapDescription(e.target.value)}
                       placeholder="能力描述"
+                      className="rounded-[22px] border-0 bg-[#fffbff] shadow-none focus-visible:ring-1 focus-visible:ring-[#6750a4] dark:bg-card/90"
                       rows={2}
                     />
                   </div>
-                  <Button type="button" onClick={() => void handleFreezeBaseline()} disabled={createBaseline.isPending}>
+                  <Button type="button" className={`rounded-[20px] px-4 font-bold ${PRODUCT_PRIMARY_BUTTON}`} onClick={() => void handleFreezeBaseline()} disabled={createBaseline.isPending}>
                     <Plus className="mr-2 h-4 w-4" />
                     {createBaseline.isPending ? '冻结中…' : '冻结基线'}
                   </Button>
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">基线历史</CardTitle>
+              <Card className="overflow-hidden rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+                <CardHeader className="border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+                  <CardTitle className="text-xl font-semibold tracking-normal">基线历史</CardTitle>
                   <CardDescription>Brownfield 需求须选择其一</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="space-y-3 p-5">
                   {baselinesLoading ? (
                     <p className="text-sm text-muted-foreground">加载中…</p>
                   ) : sortedBaselines.length === 0 ? (
                     <p className="text-sm text-muted-foreground">暂无基线，请先冻结一版</p>
                   ) : (
                     sortedBaselines.map((bl) => (
-                      <div key={bl.id} className="rounded-lg border border-border p-3 space-y-1">
+                      <div key={bl.id} className="space-y-1 rounded-[20px] bg-[#f5eff7] p-4 dark:bg-muted">
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-medium">{bl.version}</span>
                           <Badge variant="secondary" className="font-mono text-xs">
@@ -417,17 +451,17 @@ const ProductDetailPage: React.FC = () => {
             </div>
 
             {sortedBaselines.length >= 2 ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">基线版本对比</CardTitle>
+              <Card className="overflow-hidden rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+                <CardHeader className="border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
+                  <CardTitle className="text-xl font-semibold tracking-normal">基线版本对比</CardTitle>
                   <CardDescription>对比结构化能力条目的新增与移除</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="space-y-4 p-5">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label>基准版本（旧）</Label>
                       <Select value={compareBaseId} onValueChange={setCompareBaseId}>
-                        <SelectTrigger>
+                        <SelectTrigger className="h-11 rounded-[22px] border-0 bg-[#f5eff7] shadow-none focus:ring-1 focus:ring-[#6750a4] dark:bg-muted">
                           <SelectValue placeholder="选择基线" />
                         </SelectTrigger>
                         <SelectContent>
@@ -442,7 +476,7 @@ const ProductDetailPage: React.FC = () => {
                     <div className="space-y-2">
                       <Label>对比版本（新）</Label>
                       <Select value={compareTargetId} onValueChange={setCompareTargetId}>
-                        <SelectTrigger>
+                        <SelectTrigger className="h-11 rounded-[22px] border-0 bg-[#f5eff7] shadow-none focus:ring-1 focus:ring-[#6750a4] dark:bg-muted">
                           <SelectValue placeholder="选择基线" />
                         </SelectTrigger>
                         <SelectContent>
@@ -483,7 +517,7 @@ function OverviewRow({
   mono?: boolean;
 }) {
   return (
-    <div>
+    <div className="rounded-[20px] bg-[#f5eff7] p-4 dark:bg-muted">
       <p className="text-xs text-muted-foreground mb-1">{label}</p>
       <p className={mono ? 'text-sm font-mono text-foreground' : 'text-sm text-foreground'}>{value}</p>
     </div>
@@ -493,14 +527,14 @@ function OverviewRow({
 function OverviewLink({ label, url }: { label: string; url?: string }) {
   const href = url?.trim() ? hrefWithProtocol(url) : '';
   return (
-    <div>
+    <div className="rounded-[20px] bg-[#f5eff7] p-4 dark:bg-muted">
       <p className="text-xs text-muted-foreground mb-1">{label}</p>
       {href && href !== '#' ? (
         <a
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          className="inline-flex items-center gap-1 break-all text-sm text-[#6750a4] hover:underline"
         >
           {url}
           <ExternalLink className="h-3 w-3" />
@@ -514,10 +548,10 @@ function OverviewLink({ label, url }: { label: string; url?: string }) {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <Card>
-      <CardContent className="pt-6">
+    <Card className="rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+      <CardContent className="p-5">
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
+        <p className="mt-1 text-2xl font-semibold tabular-nums text-[#6750a4]">{value}</p>
       </CardContent>
     </Card>
   );
@@ -533,9 +567,9 @@ function RequirementRow({
   const baseline = baselines.find((b) => b.id === r.baselineId);
   const st = getRequirementStatusPresentation(r.status);
   return (
-    <TableRow>
+    <TableRow className="border-[#e8def8]/70 hover:bg-[#fffbff]/70 dark:border-border/25">
       <TableCell>
-        <Link href={`/requirements/${r.id}`} className="font-medium hover:underline">
+        <Link href={`/requirements/${r.id}`} className="font-medium hover:text-[#6750a4]">
           {r.title}
         </Link>
       </TableCell>
@@ -549,7 +583,7 @@ function RequirementRow({
       </TableCell>
       <TableCell>{r.priority}</TableCell>
       <TableCell className="text-right">
-        <Button type="button" variant="ghost" size="sm" asChild>
+        <Button type="button" variant="ghost" size="sm" className="rounded-[16px] hover:bg-[#fffbff] dark:hover:bg-card/90" asChild>
           <Link href={`/requirements/${r.id}`}>查看</Link>
         </Button>
       </TableCell>
@@ -569,7 +603,7 @@ function DiffList({
   tone: 'added' | 'removed';
 }) {
   return (
-    <div className="rounded-lg border border-border p-3">
+    <div className="rounded-[22px] bg-[#f5eff7] p-4 dark:bg-muted">
       <p className="mb-2 text-sm font-medium">{title}</p>
       {items.length === 0 ? (
         <p className="text-xs text-muted-foreground">{emptyText}</p>

@@ -2184,6 +2184,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       {step3StatusBadge}
       <Button
         size="sm"
+        className="h-9 rounded-[18px] px-4 text-xs font-bold shadow-none"
         onClick={() => void handleRunCoding()}
         disabled={!step2Done || !readyWorkspace || isCodingToolRunning || !isCodingToolRunnable(codingTool)}
       >
@@ -2193,6 +2194,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
       <Button
         size="sm"
         variant="outline"
+        className="h-9 rounded-[18px] border-0 bg-[#f5eff7] px-4 text-xs font-bold shadow-none hover:bg-[#f1eaf4] dark:bg-muted"
         onClick={handleCancelCodex}
         disabled={!runningCodingToolCall || !isCodingToolRunning || cancelCodexExecution.isPending}
       >
@@ -2205,7 +2207,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   const stepper = (
     <div className="space-y-6">
       {isAutoSettingUp ? (
-        <Alert className="border-primary/25 bg-primary/5">
+        <Alert className="rounded-[22px] border-0 bg-[#f5eff7] dark:bg-muted">
           <Loader2 className="size-4 animate-spin text-primary" />
           <AlertTitle>正在自动准备工作台</AlertTitle>
           <AlertDescription>
@@ -2214,11 +2216,11 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         </Alert>
       ) : null}
       <div
-        className="w-full overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm"
+        className="w-full overflow-hidden rounded-[24px] bg-[#f5eff7] shadow-inner shadow-black/5 dark:bg-muted"
         role="group"
         aria-label="Agent 工作台步骤与快捷技能"
       >
-        <div className="flex items-center justify-between gap-3 bg-muted/40 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-3 px-3 py-3">
           <div className="inline-flex max-w-full flex-wrap items-center gap-1.5 overflow-x-auto sm:gap-2">
             {(
               [
@@ -2241,9 +2243,9 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
                   aria-expanded={isStepExpanded}
                   onClick={() => handleSetupStepClick(step.id)}
                   className={cn(
-                    'inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors sm:px-3.5 sm:text-sm',
+                    'inline-flex shrink-0 items-center gap-2 rounded-[18px] px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors sm:px-3.5 sm:text-sm',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-muted/40',
-                    isStepExpanded && 'bg-background text-foreground shadow-sm ring-1 ring-border/50',
+                    isStepExpanded && 'bg-[#6750a4] text-white shadow-[0_6px_14px_rgba(103,80,164,0.22)]',
                     !isStepExpanded && step.done && 'bg-green-500/10 text-foreground hover:bg-green-500/15',
                     !isStepExpanded &&
                       !step.done &&
@@ -2272,7 +2274,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
             type="button"
             variant="ghost"
             size="sm"
-            className="h-8 shrink-0 gap-1.5 border border-border/50 bg-background/80 px-2.5 text-xs shadow-none hover:bg-background"
+            className="h-8 shrink-0 gap-1.5 rounded-[16px] bg-[#fffbff] px-3 text-xs shadow-none hover:bg-[#fff7ff] dark:bg-card/90"
             aria-expanded={setupPropertiesOpen}
             aria-controls="agent-workbench-setup-properties"
             onClick={() => {
@@ -2294,12 +2296,11 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         {setupPropertiesOpen && expandedSetupStep === 'thread' ? (
           <div
             id="agent-workbench-setup-properties"
-            className="border-t border-border/40 bg-muted/20 px-3 py-3 outline-none animate-in fade-in-0 slide-in-from-top-1 duration-200"
+            className="border-t border-[#e8def8]/70 bg-[#f5eff7] px-3 py-3 outline-none animate-in fade-in-0 slide-in-from-top-1 duration-200 dark:border-border/25 dark:bg-muted"
           >
           <div
             className={cn(
-              'rounded-lg bg-background p-4 shadow-none',
-              'border-l-[3px] border-l-primary',
+              'rounded-[22px] bg-[#fffbff] p-4 shadow-none dark:bg-card/90',
             )}
           >
             {requirementChangeBadge ? (
@@ -2351,11 +2352,10 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
           </div>
         ) : null}
         {setupPropertiesOpen && expandedSetupStep === 'workspace' ? (
-          <div className="border-t border-border/40 bg-muted/20 px-3 py-3 outline-none animate-in fade-in-0 slide-in-from-top-1 duration-200">
-          <div
-            className={cn(
-              'rounded-lg bg-background p-4 shadow-none',
-              'border-l-[3px] border-l-primary',
+          <div className="border-t border-[#e8def8]/70 bg-[#f5eff7] px-3 py-3 outline-none animate-in fade-in-0 slide-in-from-top-1 duration-200 dark:border-border/25 dark:bg-muted">
+            <div
+              className={cn(
+              'rounded-[22px] bg-[#fffbff] p-4 shadow-none dark:bg-card/90',
             )}
           >
             <p className="mb-3 text-xs text-muted-foreground">
@@ -2393,12 +2393,11 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
         {setupPropertiesOpen && expandedSetupStep === 'tool' ? (
           <div
             id="agent-workbench-setup-properties"
-            className="border-t border-border/40 bg-muted/20 px-3 py-3 outline-none animate-in fade-in-0 slide-in-from-top-1 duration-200"
+            className="border-t border-[#e8def8]/70 bg-[#f5eff7] px-3 py-3 outline-none animate-in fade-in-0 slide-in-from-top-1 duration-200 dark:border-border/25 dark:bg-muted"
           >
           <div
             className={cn(
-              'rounded-lg bg-background p-4 shadow-none',
-              'border-l-[3px] border-l-primary',
+              'rounded-[22px] bg-[#fffbff] p-4 shadow-none dark:bg-card/90',
             )}
           >
             <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
@@ -3266,8 +3265,8 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
   );
 
   return (
-    <Card className="border-0 shadow-md shadow-black/[0.04] ring-1 ring-border/30">
-      <CardHeader className="border-b border-border/40 bg-muted/20 pb-3">
+    <Card className="overflow-hidden rounded-[24px] border-0 bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+      <CardHeader className="border-b border-[#e8def8]/70 bg-[#fffbff] px-5 py-4 dark:border-border/25 dark:bg-card/90">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0 flex-1 space-y-1.5">
             <CardTitle className="text-lg flex items-center gap-2">
@@ -3281,7 +3280,7 @@ export function AgentWorkbenchPanel({ task, operatorName }: IAgentWorkbenchPanel
           {codingToolbar}
         </div>
       </CardHeader>
-      <CardContent className="pt-2">{stepper}</CardContent>
+      <CardContent className="p-5">{stepper}</CardContent>
     </Card>
   );
 }

@@ -9,6 +9,7 @@ import { saveAuthSession } from '@/lib/auth';
 import { shouldTriggerAuthSubmitOnKeyDown } from '@/lib/auth-form';
 import {
   buildFeishuAuthorizeUrl,
+  createFeishuOauthState,
   FEISHU_OAUTH_STATE_KEY,
   getFeishuRedirectUri,
 } from '@/lib/feishu-oauth';
@@ -33,7 +34,7 @@ const LoginPage: React.FC = () => {
       toast.error('无法构造飞书回调地址');
       return;
     }
-    const state = crypto.randomUUID();
+    const state = createFeishuOauthState();
     sessionStorage.setItem(FEISHU_OAUTH_STATE_KEY, state);
     const url = buildFeishuAuthorizeUrl({
       clientId,

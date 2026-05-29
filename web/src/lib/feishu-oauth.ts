@@ -11,6 +11,25 @@ export const FEISHU_OAUTH_STATE_KEY = 'feishu_oauth_state';
 /** 需在飞书开放平台「权限管理」中申请；获取 user_info 基础字段通常需含用户身份读权限 */
 export const FEISHU_OAUTH_DEFAULT_SCOPE = 'auth:user.id:read';
 
+export function createFeishuOauthState(): string {
+  const cryptoSource = globalThis.crypto;
+  if (typeof cryptoSource?.randomUUID === 'function') {
+    return cryptoSource.randomUUID();
+  }
+
+  const timestamp = Date.now().toString(36);
+  if (typeof cryptoSource?.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    cryptoSource.getRandomValues(bytes);
+    const randomPart = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    return `state_${timestamp}_${randomPart}`;
+  }
+
+  return `state_${timestamp}_${Math.random().toString(36).slice(2)}${Math.random()
+    .toString(36)
+    .slice(2)}`;
+}
+
 export function getFeishuRedirectUri(): string {
   if (typeof window === 'undefined') return '';
   return `${window.location.origin}/login/feishu-callback`;

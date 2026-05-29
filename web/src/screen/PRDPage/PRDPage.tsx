@@ -48,7 +48,6 @@ import { rdAuditCreate, rdAuditUpdate } from '@/lib/rd-actor';
 import { capabilityClient } from '@/lib/capability-client';
 import { getRequirementStatusPresentation } from '@/lib/requirement-status-present';
 import { cn } from '@/lib/utils';
-import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { Label } from '@/components/ui/label';
 import type { IPrd, IRequirement } from '@/lib/rd-types';
 import { isBrownfieldChangeType } from '@/lib/rd-types';
@@ -201,25 +200,25 @@ const STATUS_BADGES: Record<
     label: '草稿',
     variant: 'secondary',
     className:
-      'no-default-hover-elevate border-slate-500/25 bg-slate-500/10 text-slate-200 shadow-none',
+      'no-default-hover-elevate border-0 bg-slate-500/10 text-slate-700 shadow-none dark:text-slate-300',
   },
   reviewing: {
     label: '评审中',
     variant: 'outline',
     className:
-      'no-default-hover-elevate border-blue-500/30 bg-blue-500/10 text-blue-300 shadow-none',
+      'no-default-hover-elevate border-0 bg-blue-500/10 text-blue-700 shadow-none dark:text-blue-300',
   },
   approved: {
     label: '已通过',
     variant: 'default',
     className:
-      'no-default-hover-elevate border-emerald-500/25 bg-emerald-500/10 text-emerald-300 shadow-none',
+      'no-default-hover-elevate border-0 bg-emerald-500/10 text-emerald-700 shadow-none dark:text-emerald-300',
   },
   rejected: {
     label: '已驳回',
     variant: 'destructive',
     className:
-      'no-default-hover-elevate border-red-500/25 bg-red-500/10 text-red-300 shadow-none',
+      'no-default-hover-elevate border-0 bg-red-500/10 text-red-700 shadow-none dark:text-red-300',
   },
 };
 
@@ -708,99 +707,96 @@ const PRDPage: React.FC = () => {
 
   return (
     <>
-      <div className="flex w-full flex-col gap-6">
-        {/* 页面标题 */}
-        <section className="w-full">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="rd-page-header-lead">
-              <RdPageModuleHeading
-                icon={FileText}
-                title="智能文档"
-                description="管理产品需求文档，支持AI辅助生成"
-              />
-            </div>
-            <Button
-              onClick={() => {
-                setPrdPreviewTab('edit');
-                setReferencePrdId('');
-                resetPrdSupplementaryState(
-                  setUploadedSupplementaryDocs,
-                  setPastedSupplementary,
-                  supplementaryFileInputRef.current
-                );
-                setShowGenerateDialog(true);
-              }}
-              className="shrink-0 shadow-sm sm:mt-0"
-            >
-              <Sparkles className="mr-2 h-4 w-4" />
-              AI生成PRD
-            </Button>
+      <div className="flex w-full flex-col gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+        <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-6">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
+              Smart Documents
+            </p>
+            <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
+              智能文档
+            </h1>
           </div>
-        </section>
 
-        {/* 统计：左色条 + 图标，减少空白、数字更醒目 */}
-        <section className="w-full">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Button
+            onClick={() => {
+              setPrdPreviewTab('edit');
+              setReferencePrdId('');
+              resetPrdSupplementaryState(
+                setUploadedSupplementaryDocs,
+                setPastedSupplementary,
+                supplementaryFileInputRef.current
+              );
+              setShowGenerateDialog(true);
+            }}
+            className="h-10 shrink-0 rounded-[20px] px-[18px] text-sm font-bold shadow-none"
+          >
+            <Sparkles className="mr-2 h-4 w-4" />
+            AI生成PRD
+          </Button>
+        </header>
+
+        <section className="overflow-hidden rounded-[24px] bg-[linear-gradient(135deg,rgba(234,221,255,0.94),rgba(159,242,230,0.62))] p-6 text-[#21005d] shadow-[0_10px_28px_rgba(103,80,164,0.07)]">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {(
               [
                 {
                   label: '全部PRD',
                   value: prdStats.total,
                   Icon: Files,
-                  bar: 'bg-slate-400',
-                  iconWrap: 'border-white/10 bg-white/[0.06] text-slate-200',
-                  valueClass: 'text-foreground tabular-nums',
+                  iconWrap: 'bg-white/65 text-[#21005d]',
+                  valueClass: 'text-[#21005d] tabular-nums',
+                  note: '当前文档总量',
                 },
                 {
                   label: '草稿',
                   value: prdStats.draft,
                   Icon: PenLine,
-                  bar: 'bg-slate-500',
-                  iconWrap: 'border-white/10 bg-white/[0.06] text-slate-300',
-                  valueClass: 'text-slate-200 tabular-nums',
+                  iconWrap: 'bg-white/65 text-slate-700',
+                  valueClass: 'text-[#21005d] tabular-nums',
+                  note: '待补全文档',
                 },
                 {
                   label: '评审中',
                   value: prdStats.reviewing,
                   Icon: Send,
-                  bar: 'bg-primary',
-                  iconWrap: 'border-primary/25 bg-primary/15 text-primary',
-                  valueClass: 'text-primary tabular-nums',
+                  iconWrap: 'bg-white/65 text-blue-700',
+                  valueClass: 'text-[#21005d] tabular-nums',
+                  note: '等待确认',
                 },
                 {
                   label: '已通过',
                   value: prdStats.approved,
                   Icon: CircleCheck,
-                  bar: 'bg-emerald-500',
-                  iconWrap: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-400',
-                  valueClass: 'text-emerald-400 tabular-nums',
+                  iconWrap: 'bg-white/65 text-emerald-700',
+                  valueClass: 'text-[#21005d] tabular-nums',
+                  note: '可进入规格阶段',
                 },
               ] as const
             ).map((item) => (
               <div
                 key={item.label}
-                className="relative overflow-hidden rounded-2xl border border-white/[0.1] bg-card/80 py-3.5 pl-4 pr-3 shadow-[inset_0_1px_0_0_hsl(0_0%_100%/0.06)] backdrop-blur-xl"
+                className="min-h-24 rounded-2xl bg-white/60 p-4"
               >
-                <span
-                  className={cn('absolute left-0 top-3 bottom-3 w-1 rounded-r', item.bar)}
-                  aria-hidden
-                />
-                <div className="flex items-center gap-3 pl-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className={cn('text-[30px] font-semibold leading-none', item.valueClass)}>
+                      {item.value}
+                    </p>
+                    <p className="mt-2 text-[13px] font-bold text-[#21005d]/75">
+                      {item.label}
+                    </p>
+                    <p className="mt-1 text-xs leading-snug text-[#21005d]/55">
+                      {item.note}
+                    </p>
+                  </div>
                   <div
                     className={cn(
-                      'flex size-10 shrink-0 items-center justify-center rounded-xl border',
+                      'flex size-10 shrink-0 items-center justify-center rounded-2xl',
                       item.iconWrap
                     )}
                   >
                     <item.Icon className="h-5 w-5" strokeWidth={1.75} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {item.label}
-                    </p>
-                    <p className={cn('text-2xl font-semibold leading-tight', item.valueClass)}>
-                      {item.value}
-                    </p>
                   </div>
                 </div>
               </div>
@@ -808,21 +804,20 @@ const PRDPage: React.FC = () => {
           </div>
         </section>
 
-        {/* 筛选栏 — 与需求中心页同一套 rd-surface */}
         <section className="w-full">
-          <div className="rd-surface-card rd-surface-card-hover px-4 py-4 sm:px-5 sm:py-4">
-            <div className="flex flex-wrap items-center gap-4">
+          <div className="rounded-[24px] bg-[#fffbff] px-4 py-4 shadow-[0_8px_22px_rgba(29,27,32,0.045)] sm:px-5 dark:bg-card/90">
+            <div className="flex flex-wrap items-center gap-3">
               <div className="relative flex min-w-[280px] flex-1">
                 <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   placeholder="搜索PRD标题或关联需求..."
                   value={searchKeyword}
                   onChange={(e) => setSearchKeyword(e.target.value)}
-                  className="rd-input-glass h-12 rounded-xl pl-11"
+                  className="h-12 rounded-[24px] border-0 bg-[#f5eff7] pl-11 shadow-none focus-visible:bg-[#f1eaf4] focus-visible:ring-1 focus-visible:ring-ring dark:bg-muted"
                 />
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="rd-select-glass h-12 w-40 rounded-xl">
+                <SelectTrigger className="h-12 w-40 rounded-[24px] border-0 bg-[#f5eff7] shadow-none dark:bg-muted">
                   <SelectValue placeholder="状态筛选" />
                 </SelectTrigger>
                 <SelectContent className="rd-select-content">
@@ -837,44 +832,43 @@ const PRDPage: React.FC = () => {
           </div>
         </section>
 
-        {/* PRD列表 — 与需求中心页同一表头条 + 内容区 */}
         <section className="w-full">
-          <div className="rd-surface-card overflow-hidden">
-            <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+          <div className="overflow-hidden rounded-[24px] bg-[#fffbff] shadow-[0_8px_22px_rgba(29,27,32,0.045)] dark:bg-card/90">
+            <div className="flex items-center justify-between border-b border-[#e8def8]/70 px-5 py-4 dark:border-border/25">
               <div className="flex items-center gap-3">
                 <div className="rd-list-section-icon">
                   <FileText className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold text-foreground">智能文档列表</h2>
+                  <h2 className="text-xl font-semibold tracking-normal text-foreground">智能文档列表</h2>
                   <p className="text-sm text-muted-foreground">
                     共 <span className="font-bold text-primary">{filteredPRDList.length}</span> 个PRD文档
                   </p>
                 </div>
               </div>
             </div>
-            <div className="overflow-x-auto px-4 pb-5 pt-2 sm:px-5">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="pl-4">PRD标题</TableHead>
-                    <TableHead>关联需求</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>版本</TableHead>
-                    <TableHead>负责人</TableHead>
-                    <TableHead>更新时间</TableHead>
-                    <TableHead className="pr-4 text-right">操作</TableHead>
+            <div className="overflow-x-auto px-4 pb-5 pt-3 sm:px-5">
+              <Table className="min-w-[1120px]">
+                <TableHeader className="rounded-2xl bg-[#f5eff7] dark:bg-muted">
+                  <TableRow className="border-border/25 hover:bg-transparent">
+                    <TableHead className="h-11 rounded-l-2xl pl-4 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">PRD标题</TableHead>
+                    <TableHead className="h-11 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">关联需求</TableHead>
+                    <TableHead className="h-11 w-[120px] text-[10px] font-bold uppercase tracking-widest text-muted-foreground">状态</TableHead>
+                    <TableHead className="h-11 w-[84px] text-[10px] font-bold uppercase tracking-widest text-muted-foreground">版本</TableHead>
+                    <TableHead className="h-11 w-[140px] text-[10px] font-bold uppercase tracking-widest text-muted-foreground">负责人</TableHead>
+                    <TableHead className="h-11 w-[160px] text-[10px] font-bold uppercase tracking-widest text-muted-foreground">更新时间</TableHead>
+                    <TableHead className="h-11 w-[100px] rounded-r-2xl pr-4 text-right text-[10px] font-bold uppercase tracking-widest text-muted-foreground">操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredPRDList.map((prd) => (
-                    <TableRow key={prd.id}>
-                      <TableCell className="max-w-[220px] pl-4">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-muted-foreground" />
+                    <TableRow key={prd.id} className="border-[#e8def8]/55 transition-colors hover:bg-[#f5eff7]/70 dark:border-border/25 dark:hover:bg-secondary/35">
+                      <TableCell className="max-w-[260px] pl-4">
+                        <div className="flex items-start gap-2">
+                          <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                           <button
                             type="button"
-                            className="font-medium hover:underline text-left"
+                            className="line-clamp-2 text-left text-sm font-semibold leading-relaxed text-foreground hover:text-primary"
                             onClick={() => handleView(prd.id)}
                           >
                             {prd.displayTitle}
@@ -882,18 +876,18 @@ const PRDPage: React.FC = () => {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="text-sm">
-                          <p className="text-foreground">{prd.requirementTitle}</p>
+                        <div className="max-w-[360px] text-sm">
+                          <p className="line-clamp-1 text-foreground">{prd.requirementTitle}</p>
                           <p className="text-xs text-muted-foreground">
                             {getRequirementStatusPresentation(prd.requirementStatus).label}
                           </p>
                           {prd.latestReviewComment && (
-                            <p className="text-xs text-muted-foreground mt-1">
+                            <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
                               审核意见：{prd.latestReviewComment}
                             </p>
                           )}
                           {prd.latestReviewMeta && (
-                            <p className="text-xs text-muted-foreground">
+                            <p className="line-clamp-1 text-xs text-muted-foreground">
                               {prd.latestReviewMeta}
                             </p>
                           )}
@@ -901,12 +895,14 @@ const PRDPage: React.FC = () => {
                       </TableCell>
                       <TableCell>{getStatusBadge(prd.status)}</TableCell>
                       <TableCell>
-                        <Badge variant="outline">v{prd.version}</Badge>
+                        <Badge variant="outline" className="rounded-xl border-0 bg-[#f5eff7] px-3 py-1 text-xs font-bold text-muted-foreground dark:bg-muted">
+                          v{prd.version}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
-                          <Avatar className="h-6 w-6">
-                            <AvatarFallback className="text-xs">
+                          <Avatar className="h-6 w-6 border-0">
+                            <AvatarFallback className="bg-primary/15 text-xs font-bold text-primary">
                               {prd.author.slice(0, 1)}
                             </AvatarFallback>
                           </Avatar>
@@ -916,12 +912,13 @@ const PRDPage: React.FC = () => {
                       <TableCell>
                         <div className="inline-flex max-w-[11rem] items-center gap-1.5 text-xs">
                           <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                          <span className="font-mono text-foreground/90">{formatPrdDateTime(prd.updatedAt)}</span>
+                          <span className="font-mono text-muted-foreground">{formatPrdDateTime(prd.updatedAt)}</span>
                         </div>
                       </TableCell>
                       <TableCell className="pr-4 text-right">
                         <div className="flex items-center justify-end">
                           <ListRowActionsMenu
+                            triggerClassName="text-muted-foreground hover:bg-secondary/70 hover:text-foreground"
                             onView={() => handleView(prd.id)}
                             onEdit={() => handleEdit(prd.id)}
                             onDelete={() => handleDelete(prd.id)}
@@ -961,7 +958,7 @@ const PRDPage: React.FC = () => {
                   ))}
                   {filteredPRDList.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
                         暂无PRD文档
                       </TableCell>
                     </TableRow>

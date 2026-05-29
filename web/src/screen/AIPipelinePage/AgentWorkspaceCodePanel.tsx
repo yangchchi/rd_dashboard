@@ -92,8 +92,8 @@ function TreeRow({
         <button
           type="button"
           className={cn(
-            'flex w-full items-center gap-0.5 py-0.5 text-left text-[12px] text-foreground hover:bg-accent/70',
-            activePath?.startsWith(`${node.path}/`) && 'bg-primary/10',
+            'flex w-full items-center gap-0.5 rounded-[12px] py-1 text-left text-[12px] text-foreground transition-colors hover:bg-[#fffbff]',
+            activePath?.startsWith(`${node.path}/`) && 'bg-[#fffbff] text-[#21005d]',
           )}
           style={{ paddingLeft: 6 + depth * 10 }}
           onClick={() => toggle(node.path)}
@@ -126,13 +126,13 @@ function TreeRow({
     <button
       type="button"
       className={cn(
-        'flex w-full items-center gap-1 py-0.5 text-left text-[12px] text-foreground hover:bg-accent/70',
-        activePath === node.path && 'bg-primary/15 font-medium text-primary dark:bg-primary/20',
+        'flex w-full items-center gap-1 rounded-[12px] py-1 text-left text-[12px] text-foreground transition-colors hover:bg-[#fffbff]',
+        activePath === node.path && 'bg-[#6750a4] font-medium text-white shadow-[0_4px_10px_rgba(103,80,164,0.18)] dark:bg-primary',
       )}
       style={{ paddingLeft: 18 + depth * 10 }}
       onClick={() => onFile(node.path)}
     >
-      <FileCode2 className="size-3.5 shrink-0 text-blue-600 dark:text-blue-400" />
+      <FileCode2 className={cn('size-3.5 shrink-0 text-blue-600 dark:text-blue-400', activePath === node.path && 'text-white')} />
       <span className="min-w-0 truncate">{node.name}</span>
     </button>
   );
@@ -182,14 +182,14 @@ function CodeEditorBody({ path, content }: { path: string; content: string }) {
   }
 
   return (
-    <div className="flex min-h-[200px] bg-background font-mono text-[13px] leading-6">
+    <div className="flex min-h-[200px] bg-[#fffbff] font-mono text-[13px] leading-6 dark:bg-card">
       <div className={lineGutterClass}>
         {lines.map((_, i) => (
           <div key={i}>{i + 1}</div>
         ))}
       </div>
       <div
-        className="min-w-0 flex-1 overflow-x-auto bg-background p-2 dark:bg-transparent [&_pre]:m-0 [&_pre]:max-w-none [&_pre]:rounded-none [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-[13px] [&_pre]:leading-6 [&_code]:font-mono"
+        className="min-w-0 flex-1 overflow-x-auto bg-[#fffbff] p-3 dark:bg-transparent [&_pre]:m-0 [&_pre]:max-w-none [&_pre]:rounded-none [&_pre]:p-0 [&_pre]:font-mono [&_pre]:text-[13px] [&_pre]:leading-6 [&_code]:font-mono"
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </div>
@@ -319,7 +319,7 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
 
   if (!sessionId) {
     return (
-      <p className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
+      <p className="rounded-[22px] border border-dashed border-[#d0c4d5] bg-[#f5eff7] px-4 py-10 text-center text-sm text-muted-foreground dark:border-border dark:bg-muted">
         请先完成 Agent 工作台步骤 1 创建会话；代码浏览依赖已绑定的 Workspace。
       </p>
     );
@@ -327,27 +327,33 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
 
   if (!browseWorkspace?.worktreePath?.trim()) {
     return (
-      <p className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground">
+      <p className="rounded-[22px] border border-dashed border-[#d0c4d5] bg-[#f5eff7] px-4 py-10 text-center text-sm text-muted-foreground dark:border-border dark:bg-muted">
         Workspace 尚未就绪。请在 Agent 工作台完成「准备 Workspace」后再查看代码。
       </p>
     );
   }
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-[22px] bg-[#f5eff7] px-4 py-3 text-xs text-muted-foreground dark:bg-muted">
         <span className="font-mono break-all">
           根目录：<span className="text-foreground">{treeData?.worktreePath ?? browseWorkspace.worktreePath}</span>
         </span>
         <div className="flex shrink-0 items-center gap-2">
-          <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => void refetch()}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 rounded-[16px] border-0 bg-[#fffbff] text-xs shadow-none hover:bg-[#fff7ff] dark:bg-card/90"
+            onClick={() => void refetch()}
+          >
             刷新
           </Button>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="h-7 gap-1 text-xs"
+            className="h-8 gap-1 rounded-[16px] border-0 bg-[#fffbff] text-xs shadow-none hover:bg-[#fff7ff] dark:bg-card/90"
             disabled={browseWorkspace.status !== 'ready' || commitPushMutation.isPending}
             onClick={() => setGitDialogOpen(true)}
           >
@@ -361,7 +367,7 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
         </div>
       </div>
       <Dialog open={gitDialogOpen} onOpenChange={setGitDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md rounded-[24px] border-0 bg-[#fffbff] shadow-[0_18px_48px_rgba(29,27,32,0.14)] dark:bg-card">
           <DialogHeader>
             <DialogTitle>提交并推送到远程</DialogTitle>
             <DialogDescription className="text-xs leading-relaxed">
@@ -385,7 +391,7 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
               />
             </div>
             {isHttpsRepo ? (
-              <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3">
+                <div className="space-y-2 rounded-[20px] bg-[#f5eff7] p-3 dark:bg-muted">
                 <p className="text-[11px] text-muted-foreground">
                   当前仓库为 HTTPS，需 Personal Access Token 才能推送（也可由运维配置服务端环境变量
                   <span className="font-mono"> RD_AGENT_GIT_PUSH_PAT</span>）。
@@ -438,13 +444,13 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
           目录条目较多，已截断展示；可在本地 worktree 查看完整仓库。
         </p>
       ) : null}
-      <div className="flex h-[min(75vh,680px)] min-h-[400px] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm md:flex-row">
-        <aside className="flex w-full max-h-[38vh] shrink-0 flex-col border-b border-border bg-muted/50 md:h-auto md:max-h-none md:w-56 md:shrink-0 md:border-b-0 md:border-r">
-          <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
+      <div className="flex h-[min(75vh,680px)] min-h-[400px] flex-col overflow-hidden rounded-[24px] bg-[#f5eff7] p-2 shadow-inner shadow-black/5 dark:bg-muted md:flex-row">
+        <aside className="flex w-full max-h-[38vh] shrink-0 flex-col overflow-hidden rounded-[20px] bg-[#f5eff7] md:h-auto md:max-h-none md:w-60 md:shrink-0">
+          <div className="flex items-center justify-between px-3 py-2">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">资源管理器</span>
           </div>
           <ScrollArea className="min-h-0 flex-1">
-            <div className="py-1 pr-1">
+            <div className="space-y-0.5 px-2 pb-2">
               {treeLoading ? (
                 <p className="px-2 py-4 text-xs text-muted-foreground">加载目录…</p>
               ) : treeError ? (
@@ -467,8 +473,8 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
             </div>
           </ScrollArea>
         </aside>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-card">
-          <div className="flex shrink-0 items-center gap-0 overflow-x-auto border-b border-border bg-muted/40 px-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] bg-[#fffbff] dark:bg-card">
+          <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-[#e8def8]/70 bg-[#fffbff] px-2 py-2 dark:border-border/25 dark:bg-card">
             {openTabs.length === 0 ? (
               <span className="px-3 py-2 text-xs text-muted-foreground">在左侧选择文件打开</span>
             ) : (
@@ -476,10 +482,10 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
                 <div
                   key={tab.path}
                   className={cn(
-                    'flex max-w-[200px] shrink-0 items-center gap-0.5 border-r border-border px-2 py-1.5 text-[12px]',
+                    'flex max-w-[200px] shrink-0 items-center gap-1 rounded-[14px] px-3 py-1.5 text-[12px] transition-colors',
                     activePath === tab.path
-                      ? 'border-b-2 border-b-primary bg-card text-foreground shadow-sm'
-                      : 'cursor-pointer text-muted-foreground hover:bg-muted/60',
+                      ? 'bg-[#6750a4] text-white shadow-[0_4px_10px_rgba(103,80,164,0.18)]'
+                      : 'cursor-pointer bg-[#f5eff7] text-muted-foreground hover:bg-[#f1eaf4]',
                   )}
                   role="button"
                   tabIndex={0}
@@ -494,7 +500,7 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
                   <span className="min-w-0 truncate">{tab.title}</span>
                   <button
                     type="button"
-                    className="rounded p-0.5 hover:bg-muted"
+                    className="rounded p-0.5 hover:bg-white/20"
                     aria-label={`关闭 ${tab.title}`}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -509,7 +515,7 @@ export function AgentWorkspaceCodePanel({ task }: IAgentWorkspaceCodePanelProps)
           </div>
           {activePath ? (
             <>
-              <div className="shrink-0 border-b border-border px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
+              <div className="shrink-0 border-b border-[#e8def8]/70 px-3 py-2 font-mono text-[11px] text-muted-foreground dark:border-border/25">
                 {breadcrumb.map((seg, i) => (
                   <span key={`${seg}-${i}`}>
                     {i > 0 ? <span className="mx-0.5 text-muted-foreground/35">›</span> : null}

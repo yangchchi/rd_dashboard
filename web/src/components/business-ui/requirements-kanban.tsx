@@ -2,17 +2,9 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useCurrentUserProfile } from '@/hooks/useCurrentUserProfile';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Filter, Plus, Calendar, ChevronDown } from 'lucide-react';
+import { Calendar } from 'lucide-react';
 import { rdAuditUpdate } from '@/lib/rd-actor';
 import { useUpsertRequirement, useDeleteRequirement } from '@/lib/rd-hooks';
 import type { IRequirement } from '@/lib/rd-types';
@@ -30,50 +22,27 @@ const priorityConfig: Record<string, { bg: string; text: string; dot: string }> 
   P3: { bg: 'bg-zinc-500/10', text: 'text-zinc-400', dot: 'bg-zinc-500' },
 };
 
-export type RequirementsKanbanFilter = 'all' | 'mine' | 'submitted';
-
 export interface RequirementsKanbanProps {
   /** 已按筛选条件过滤后的需求 */
   filteredRequirements: IRequirement[];
   isLoading?: boolean;
-  showToolbar?: boolean;
-  /** 嵌入列表页时隐藏左侧大标题，仅保留筛选与新建 */
-  hidePageHeading?: boolean;
-  pageTitle?: string;
-  pageIcon?: React.ReactNode;
   allowDragStatusChange?: boolean;
 }
 
 export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
   filteredRequirements,
   isLoading = false,
-  showToolbar = true,
-  hidePageHeading = false,
-  pageTitle = '智研看板',
-  pageIcon,
   allowDragStatusChange = false,
 }) => {
   const router = useRouter();
-  const currentProfile = useCurrentUserProfile();
   const upsertRequirement = useUpsertRequirement();
   const deleteRequirement = useDeleteRequirement();
-  const [filter, setFilter] = useState<RequirementsKanbanFilter>('all');
   const [draggedItem, setDraggedItem] = useState<IRequirement | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmActionState | null>(null);
 
-  const scoped = filteredRequirements.filter((req) => {
-    if (filter === 'mine') {
-      return req.pm === currentProfile.user_id || req.tm === currentProfile.user_id;
-    }
-    if (filter === 'submitted') {
-      return req.submitter === currentProfile.user_id;
-    }
-    return true;
-  });
-
   const getColumnRequirements = (status: IRequirement['status']) =>
-    scoped.filter((r) => r.status === status);
+    filteredRequirements.filter((r) => r.status === status);
 
   const handleDragStart = (req: IRequirement) => {
     if (!allowDragStatusChange) return;
@@ -126,12 +95,6 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
     });
   };
 
-  const filterLabels: Record<RequirementsKanbanFilter, string> = {
-    all: '全部需求',
-    mine: '我负责的',
-    submitted: '我提交的',
-  };
-
   if (isLoading) {
     return (
       <div className="w-full flex items-center justify-center min-h-[320px] text-muted-foreground text-sm">
@@ -159,8 +122,8 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
           to { opacity: 1; transform: translateY(0); }
         }
         .column-drop-active {
-          background-color: hsl(217 91% 60% / 0.06);
-          box-shadow: inset 0 0 0 2px hsl(217 91% 60% / 0.45);
+          background-color: hsl(268 100% 94% / 0.72);
+          box-shadow: inset 0 0 0 1px hsl(259 34% 48% / 0.32);
         }
         .card-dragging {
           opacity: 0.5;
@@ -173,20 +136,11 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
           0%, 100% { opacity: 1; transform: scale(1); }
           50% { opacity: 0.6; transform: scale(0.9); }
         }
-        .glow-orb {
-          position: absolute;
-          width: 256px;
-          height: 256px;
-          background: hsl(217 91% 60% / 0.12);
-          filter: blur(100px);
-          pointer-events: none;
-        }
         .card-hover {
-          transition: all 0.3s ease;
+          transition: background-color 0.2s ease, box-shadow 0.2s ease;
         }
         .card-hover:hover {
-          border-color: hsl(217 91% 60% / 0.35);
-          transform: translateY(-2px);
+          background-color: hsl(268 100% 94% / 0.36);
         }
       `}</style>
 
@@ -197,191 +151,129 @@ export const RequirementsKanban: React.FC<RequirementsKanbanProps> = ({
             if (!open) setConfirmAction(null);
           }}
         />
-        <div className="glow-orb top-0 right-0 opacity-50" />
-
-        {/* {showToolbar ? (
-          <section
-            className={`w-full flex items-center mb-8 ${hidePageHeading ? 'justify-end' : 'justify-between'}`}
-          >
-            {!hidePageHeading ? (
-              <div className="flex items-center gap-4">
-                {pageIcon ? (
-                  <div className="flex items-center justify-center w-12 h-12 rounded-2xl border border-white/[0.08] bg-primary/10 backdrop-blur-sm">
-                    {pageIcon}
-                  </div>
-                ) : null}
-                <div>
-                  <h1 className="text-xl font-bold tracking-tight text-foreground">{pageTitle}</h1>
-                  <p className="text-sm text-muted-foreground">
-                    共 <span className="font-medium text-primary">{scoped.length}</span> 个需求
-                  </p>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="flex items-center gap-3">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2 border-white/[0.1] bg-white/[0.05] text-muted-foreground backdrop-blur-sm transition-all duration-300 hover:border-white/[0.14] hover:bg-white/[0.08] hover:text-foreground"
-                  >
-                    <Filter className="w-4 h-4" />
-                    {filterLabels[filter]}
-                    <ChevronDown className="w-3 h-3" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="border-white/[0.1] bg-[hsl(222_47%_11%_/_0.92)] text-foreground backdrop-blur-xl">
-                  <DropdownMenuItem
-                    onClick={() => setFilter('all')}
-                    className="focus:bg-white/[0.08] focus:text-foreground"
-                  >
-                    全部需求
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => setFilter('mine')}
-                    className="focus:bg-white/[0.08] focus:text-foreground"
-                  >
-                    我负责的
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => setFilter('submitted')}
-                    className="focus:bg-white/[0.08] focus:text-foreground"
-                  >
-                    我提交的
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          </section>
-        ) : null} */}
-
         <section className="mb-2 w-full">
-            <div className="grid grid-cols-1 gap-5 pb-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-              {REQUIREMENT_KANBAN_COLUMNS.map((column) => {
-                const columnReqs = getColumnRequirements(column.status);
-                const isDropTarget = dragOverColumn === column.id;
+          <div className="grid grid-cols-1 gap-5 pb-4 lg:grid-cols-2 2xl:grid-cols-3">
+            {REQUIREMENT_KANBAN_COLUMNS.map((column) => {
+              const columnReqs = getColumnRequirements(column.status);
+              const isDropTarget = dragOverColumn === column.id;
 
-                return (
-                  <div
-                    key={column.id}
-                    className={`rd-surface-card rd-surface-card-hover flex min-w-0 flex-col p-4 transition-all duration-300 ${
-                      isDropTarget ? 'column-drop-active' : ''
-                    }`}
-                    onDragOver={(e) => handleDragOver(e, column.id)}
-                    onDragLeave={handleDragLeave}
-                    onDrop={(e) => handleDrop(e, column.status)}
-                  >
-                    <div className="flex items-center justify-between border-b border-border/80 pb-3 mb-3 px-0.5">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-2.5 h-2.5 rounded-full ${column.dotColor} ${column.id === 'ai_developing' ? 'pulse-indicator' : ''}`}
-                        />
-                        <span className={`font-semibold text-sm uppercase tracking-wider ${column.color}`}>
-                          {column.title}
-                        </span>
-                      </div>
-                      <Badge
-                        variant="outline"
-                        className="rounded-full border border-white/[0.08] bg-card/80 px-2.5 py-0.5 text-xs font-bold text-muted-foreground backdrop-blur-sm"
-                      >
-                        {columnReqs.length}
-                      </Badge>
+              return (
+                <div
+                  key={column.id}
+                  className={`flex min-w-0 flex-col overflow-hidden rounded-[24px] bg-card/90 p-4 shadow-[0_8px_22px_rgba(29,27,32,0.045)] transition-colors duration-200 hover:bg-secondary/35 ${
+                    isDropTarget ? 'column-drop-active' : ''
+                  }`}
+                  onDragOver={(e) => handleDragOver(e, column.id)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, column.status)}
+                >
+                  <div className="mb-3 flex items-center justify-between border-b border-border/35 px-0.5 pb-3">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-2.5 h-2.5 rounded-full ${column.dotColor} ${column.id === 'ai_developing' ? 'pulse-indicator' : ''}`}
+                      />
+                      <span className={`font-semibold text-sm uppercase tracking-wider ${column.color}`}>
+                        {column.title}
+                      </span>
                     </div>
+                    <Badge
+                      variant="outline"
+                      className="rounded-xl border-0 bg-muted px-2.5 py-0.5 text-xs font-bold text-muted-foreground"
+                    >
+                      {columnReqs.length}
+                    </Badge>
+                  </div>
 
-                    <div className="flex flex-col gap-4 min-h-[280px]">
-                      {columnReqs.map((req, cardIndex) => (
-                        <div
-                          key={req.id}
-                          draggable={allowDragStatusChange}
-                          onDragStart={() => handleDragStart(req)}
-                          onClick={() => handleCardClick(req.id)}
-                          className={`
-                            relative overflow-hidden rounded-2xl border border-white/[0.08] bg-card/80 p-5 
-                            cursor-pointer card-hover group kanban-card backdrop-blur-xl supports-[backdrop-filter]:bg-card/70
-                            ${draggedItem?.id === req.id ? 'card-dragging' : ''}
-                          `}
-                          style={{
-                            animationDelay: `${cardIndex * 50}ms`,
-                          }}
-                        >
-                          <div className="absolute -top-8 -right-8 w-32 h-32 rounded-full bg-primary/10 opacity-0 blur-[60px] transition-opacity duration-500 group-hover:opacity-100" />
+                  <div className="flex min-h-[320px] flex-col gap-4">
+                    {columnReqs.map((req, cardIndex) => (
+                      <div
+                        key={req.id}
+                        draggable={allowDragStatusChange}
+                        onDragStart={() => handleDragStart(req)}
+                        onClick={() => handleCardClick(req.id)}
+                        className={`
+                          relative overflow-hidden rounded-2xl border-0 bg-card p-5 
+                          cursor-pointer card-hover group kanban-card shadow-sm
+                          ${draggedItem?.id === req.id ? 'card-dragging' : ''}
+                        `}
+                        style={{
+                          animationDelay: `${cardIndex * 50}ms`,
+                        }}
+                      >
+                        <div className={`absolute left-0 top-4 bottom-4 w-1 rounded-r-full ${column.dotColor}`} />
 
-                          <div className={`absolute left-0 top-4 bottom-4 w-1 rounded-r-full ${column.dotColor}`} />
-
-                          <div className="pl-3">
-                            <div className="flex items-center justify-between mb-3">
-                              <Badge
-                                className={`text-xs font-bold rounded-full px-2.5 py-0.5 ${priorityConfig[req.priority].bg} ${priorityConfig[req.priority].text} border-0`}
-                              >
-                                <span
-                                  className={`w-1.5 h-1.5 rounded-full mr-1.5 ${priorityConfig[req.priority].dot}`}
-                                />
-                                {req.priority}
-                              </Badge>
-                              {req.status === 'ai_developing' && (
-                                <div className="flex items-center gap-1.5 text-xs text-purple-400">
-                                  <div className="w-2 h-2 rounded-full bg-purple-500 pulse-indicator" />
-                                  <span>AI生成中</span>
-                                </div>
-                              )}
-                            </div>
-
-                            <h3 className="mb-2 line-clamp-2 text-sm font-bold tracking-tight text-foreground transition-colors group-hover:text-primary">
-                              {req.title}
-                            </h3>
-                            {req.product ? (
-                              <p className="mb-1 line-clamp-1 text-[11px] font-medium uppercase tracking-wide text-primary/90">
-                                {req.product}
-                              </p>
-                            ) : null}
-                            <p className="mb-4 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                              {req.description}
-                            </p>
-
-                            <div className="flex items-center justify-between text-xs text-muted-foreground">
-                              <div className="flex flex-col gap-0.5">
-                                <div className="flex items-center gap-1">
-                                  <Calendar className="w-3.5 h-3.5" />
-                                  <span>{req.expectedDate}</span>
-                                </div>
-                                {req.bountyPoints != null && req.bountyPoints > 0 ? (
-                                  <span className="font-mono text-[10px] tabular-nums text-amber-500/90">
-                                    金币 {req.bountyPoints}
-                                  </span>
-                                ) : null}
-                              </div>
-                              <Avatar className="h-6 w-6 border border-white/[0.1]">
-                                <AvatarFallback className="text-[10px] font-bold bg-primary/15 text-primary">
-                                  {req.pm?.charAt(0) || req.submitter?.charAt(0) || '?'}
-                                </AvatarFallback>
-                              </Avatar>
-                            </div>
-
-                            <div className="mt-4 flex items-center justify-end border-t border-white/[0.08] pt-3">
-                              <ListRowActionsMenu
-                                stopPropagation
-                                triggerClassName="text-muted-foreground hover:bg-white/10 hover:text-foreground"
-                                onView={() => router.push(`/requirements/${req.id}`)}
-                                onEdit={() => router.push(`/requirements/${req.id}/edit`)}
-                                onDelete={() => handleDeleteRequirement(req.id)}
+                        <div className="pl-3">
+                          <div className="flex items-center justify-between mb-3">
+                            <Badge
+                              className={`text-xs font-bold rounded-full px-2.5 py-0.5 ${priorityConfig[req.priority].bg} ${priorityConfig[req.priority].text} border-0`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full mr-1.5 ${priorityConfig[req.priority].dot}`}
                               />
+                              {req.priority}
+                            </Badge>
+                            {req.status === 'ai_developing' && (
+                              <div className="flex items-center gap-1.5 text-xs text-primary">
+                                <div className="w-2 h-2 rounded-full bg-purple-500 pulse-indicator" />
+                                <span>AI生成中</span>
+                              </div>
+                            )}
+                          </div>
+
+                          <h3 className="mb-2 line-clamp-2 text-sm font-bold tracking-tight text-foreground transition-colors group-hover:text-primary">
+                            {req.title}
+                          </h3>
+                          {req.product ? (
+                            <p className="mb-1 line-clamp-1 text-[11px] font-medium uppercase tracking-wide text-primary/90">
+                              {req.product}
+                            </p>
+                          ) : null}
+                          <p className="mb-4 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                            {req.description}
+                          </p>
+
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <div className="flex flex-col gap-0.5">
+                              <div className="flex items-center gap-1">
+                                <Calendar className="w-3.5 h-3.5" />
+                                <span>{req.expectedDate}</span>
+                              </div>
+                              {req.bountyPoints != null && req.bountyPoints > 0 ? (
+                                <span className="font-mono text-[10px] tabular-nums text-amber-500/90">
+                                  金币 {req.bountyPoints}
+                                </span>
+                              ) : null}
                             </div>
+                            <Avatar className="h-6 w-6 border-0">
+                              <AvatarFallback className="text-[10px] font-bold bg-primary/15 text-primary">
+                                {req.pm?.charAt(0) || req.submitter?.charAt(0) || '?'}
+                              </AvatarFallback>
+                            </Avatar>
+                          </div>
+
+                          <div className="mt-4 flex items-center justify-end border-t border-border/35 pt-3">
+                            <ListRowActionsMenu
+                              stopPropagation
+                              triggerClassName="text-muted-foreground hover:bg-secondary/70 hover:text-foreground"
+                              onView={() => router.push(`/requirements/${req.id}`)}
+                              onEdit={() => router.push(`/requirements/${req.id}/edit`)}
+                              onDelete={() => handleDeleteRequirement(req.id)}
+                            />
                           </div>
                         </div>
-                      ))}
+                      </div>
+                    ))}
 
-                      {columnReqs.length === 0 && (
-                        <div className="flex h-40 flex-col items-center justify-center rounded-2xl border border-dashed border-white/[0.12] text-muted-foreground">
-                          <p className="text-xs uppercase tracking-widest font-medium">暂无需求</p>
-                        </div>
-                      )}
-                    </div>
+                    {columnReqs.length === 0 && (
+                      <div className="flex h-40 flex-col items-center justify-center rounded-2xl border border-dashed border-border/45 text-muted-foreground">
+                        <p className="text-xs uppercase tracking-widest font-medium">暂无需求</p>
+                      </div>
+                    )}
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })}
+          </div>
         </section>
       </div>
     </>
