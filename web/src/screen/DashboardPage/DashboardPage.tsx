@@ -142,9 +142,9 @@ function DashboardCardHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-5 px-6 pb-4 pt-6">
+    <div className="flex items-start justify-between gap-5 px-6 pb-3.5 pt-5">
       <div>
-        <h2 className="text-xl font-semibold leading-tight tracking-normal text-foreground">{title}</h2>
+        <h2 className="text-lg font-semibold leading-tight tracking-normal text-foreground">{title}</h2>
         {description ? (
           <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{description}</p>
         ) : null}
@@ -165,7 +165,7 @@ function LeaderboardGroupCard({ group }: { group: LeaderboardGroup }) {
     <div className="flex min-h-[360px] flex-col rounded-[20px] bg-[#f5eff7]/90 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] dark:bg-[#11192b]/90 dark:shadow-[inset_0_1px_0_rgba(116,139,190,0.10)]">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-base font-bold text-foreground">{group.title}</h3>
+          <h3 className="text-sm font-bold text-foreground">{group.title}</h3>
           <p className="mt-1 text-xs text-muted-foreground">{group.subtitle}</p>
         </div>
         <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-extrabold text-[#21005d] dark:text-foreground">
@@ -403,12 +403,12 @@ const DashboardPage: React.FC = () => {
   return (
     <>
       <div className="w-full animate-in fade-in slide-in-from-bottom-2 duration-300">
-        <header className="mb-7 flex min-h-[72px] flex-wrap items-center justify-between gap-6">
+        <header className="mb-4 flex min-h-[44px] flex-wrap items-center justify-between gap-6">
           <div className="min-w-0">
-            <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
+            <p className="text-[10px] font-bold uppercase tracking-[0.09em] text-muted-foreground">
               Research Dashboard
             </p>
-            <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
+            <h1 className="mt-0.5 text-2xl font-semibold leading-tight tracking-normal text-foreground">
               智研工作台
             </h1>
           </div>
@@ -468,26 +468,34 @@ const DashboardPage: React.FC = () => {
           </div>
         </header>
 
-        <DashboardSurface className="mb-6 min-h-[236px] bg-[linear-gradient(135deg,rgba(234,221,255,0.96),rgba(159,242,230,0.72))] p-7 text-[#21005d] shadow-[0_10px_28px_rgba(103,80,164,0.08)]">
-          <div className="flex flex-wrap items-start justify-between gap-6">
-            <div>
-              <h2 className="max-w-[860px] text-[42px] font-medium leading-[1.08] tracking-normal">
+        <DashboardSurface className="mb-6 min-h-[98px] bg-[linear-gradient(135deg,rgba(234,221,255,0.96),rgba(159,242,230,0.72))] p-4 text-[#21005d] shadow-[0_10px_28px_rgba(103,80,164,0.08)]">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[560px]">
+              {summaryItems.map((item) => (
+                <div key={item.label} className="min-h-16 rounded-2xl bg-white/60 p-3">
+                  <div className="text-[20px] font-semibold leading-none">{item.value}</div>
+                  <div className="mt-1.5 text-[12px] font-bold text-[#21005d]/75">{item.label}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex min-w-[220px] flex-1 flex-col items-start gap-2 lg:items-end lg:text-right">
+              <h2 className="max-w-[420px] text-[16px] font-semibold leading-snug tracking-normal">
                 研发效能监控与 AI 交付协同
               </h2>
-            </div>
-            <div className="inline-flex h-8 items-center gap-2 rounded-2xl bg-white/55 px-3.5 text-[13px] font-bold">
-              <Sparkles className="h-4 w-4" />
-              AI 摘要已更新
+              <div className="inline-flex h-7 items-center gap-1.5 rounded-2xl bg-white/55 px-3 text-[11px] font-bold">
+                <Sparkles className="h-3.5 w-3.5" />
+                AI 摘要已更新
+              </div>
             </div>
           </div>
+        </DashboardSurface>
 
-          <div className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {summaryItems.map((item) => (
-              <div key={item.label} className="min-h-28 rounded-2xl bg-white/60 p-[18px]">
-                <div className="text-[32px] font-semibold leading-none">{item.value}</div>
-                <div className="mt-2.5 text-[13px] font-bold text-[#21005d]/75">{item.label}</div>
-                <div className="mt-1.5 text-xs leading-snug text-[#21005d]/55">{item.note}</div>
-              </div>
+        <DashboardSurface className="mb-6">
+          <DashboardCardHeader title="需求排行榜" description="金主 / 产品经理 / 技术经理" />
+          <div className="grid grid-cols-1 gap-3.5 px-6 pb-6 lg:grid-cols-3">
+            {leaderboardGroups.map((group) => (
+              <LeaderboardGroupCard key={`${group.title}-${group.subtitle}`} group={group} />
             ))}
           </div>
         </DashboardSurface>
@@ -495,15 +503,6 @@ const DashboardPage: React.FC = () => {
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
           <div className="min-w-0">
             <DashboardSurface>
-              <DashboardCardHeader title="需求排行榜" description="金主 / 产品经理 / 技术经理" />
-              <div className="grid grid-cols-1 gap-3.5 px-6 pb-6 lg:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
-                {leaderboardGroups.map((group) => (
-                  <LeaderboardGroupCard key={`${group.title}-${group.subtitle}`} group={group} />
-                ))}
-              </div>
-            </DashboardSurface>
-
-            <DashboardSurface className="mt-6">
               <DashboardCardHeader
                 title="需求流程看板"
                 description="从原始多列看板收敛为三个主要阶段，保留代表性需求。"
