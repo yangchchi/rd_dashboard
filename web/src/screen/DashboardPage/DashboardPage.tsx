@@ -496,7 +496,7 @@ const DashboardPage: React.FC = () => {
           <div className="min-w-0">
             <DashboardSurface>
               <DashboardCardHeader title="需求排行榜" description="金主 / 产品经理 / 技术经理" />
-              <div className="grid grid-cols-1 gap-3.5 px-6 pb-6 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3.5 px-6 pb-6 lg:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
                 {leaderboardGroups.map((group) => (
                   <LeaderboardGroupCard key={`${group.title}-${group.subtitle}`} group={group} />
                 ))}
