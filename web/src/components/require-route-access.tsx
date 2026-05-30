@@ -6,6 +6,7 @@ import { ShieldAlert } from 'lucide-react';
 
 import { isAuthOnlyPath, requiredRoutePermission } from '@/lib/access-catalog';
 import { useAccessControl } from '@/hooks/useAccessControl';
+import { getAuthToken } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 
 export function RequireRouteAccess({
@@ -16,6 +17,11 @@ export function RequireRouteAccess({
   children: ReactNode;
 }) {
   const { can } = useAccessControl();
+
+  // 未登录时不展示「无权访问」，交由 RequireAuth 跳转登录页
+  if (!getAuthToken()) {
+    return null;
+  }
 
   if (isAuthOnlyPath(pathname)) {
     return <>{children}</>;

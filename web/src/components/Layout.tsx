@@ -233,23 +233,19 @@ const LayoutContent = ({ children }: { children: ReactNode }) => {
                     title={!isMobile && state === "collapsed" ? "点击展开侧边栏" : undefined}
                     className="min-w-0 gap-3 items-center"
                   >
-                    <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-sidebar-accent text-primary">
+                    <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl bg-sidebar-accent text-primary dark:text-white">
                       <ShipWheel
-                        className="h-6 w-6"
+                        className="h-8 w-8"
                         aria-hidden
                       />
                     </span>
-                    <div className="grid min-w-0 flex-1 gap-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
-                      <span className="truncate text-lg font-semibold leading-none tracking-normal text-sidebar-foreground">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1 text-left leading-tight group-data-[collapsible=icon]:hidden">
+                      <span className="text-lg font-semibold leading-none tracking-wider text-sidebar-foreground">
                         HAI智研平台
                       </span>
-                      <div className="flex min-w-0 max-w-full items-center gap-1.5">
-                        <span className="h-px w-4 shrink-0 bg-sidebar-border" />
-                        <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/58">
-                          AI-Driven SDLC
-                        </span>
-                        <span className="h-px w-4 shrink-0 bg-sidebar-border" />
-                      </div>
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/58">
+                        AI-Driven SDLC
+                      </span>
                     </div>
                   </Link>
                 </SidebarMenuButton>

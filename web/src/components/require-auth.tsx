@@ -2,17 +2,23 @@
 
 import { useEffect, useState } from 'react';
 
-import { forceRedirectToLogin, getAuthToken } from '@/lib/auth';
+import { forceRedirectToLogin, getAuthToken, onStoredUserUpdated } from '@/lib/auth';
 
 export function RequireAuth({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!getAuthToken()) {
-      forceRedirectToLogin();
-      return;
-    }
-    setReady(true);
+    const ensureAuth = () => {
+      if (!getAuthToken()) {
+        setReady(false);
+        forceRedirectToLogin();
+        return;
+      }
+      setReady(true);
+    };
+
+    ensureAuth();
+    return onStoredUserUpdated(ensureAuth);
   }, []);
 
   if (!ready) {

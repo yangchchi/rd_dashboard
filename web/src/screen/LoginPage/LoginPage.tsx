@@ -80,22 +80,22 @@ const LoginPage: React.FC = () => {
     <div className="app-shell flex min-h-screen items-center justify-center px-4 text-foreground">
       <div className="w-full max-w-md space-y-3">
         <div className="px-1">
-          <div className="flex items-start gap-3">
-            <ShipWheel
-              className="h-10 w-10 shrink-0 text-blue-700 dark:text-cyan-100"
-              aria-hidden
-            />
-            <div className="min-w-0 flex-1 space-y-2 pt-1">
-              <span className="bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-600 bg-clip-text text-3xl font-extrabold leading-none tracking-widest text-transparent drop-shadow-[0_2px_4px_rgba(59,130,246,0.35)] dark:from-cyan-200 dark:via-blue-200 dark:to-purple-200 dark:drop-shadow-[0_2px_6px_rgba(125,211,252,0.45)]">
+          <div className="inline-flex flex-col gap-2.5">
+            <div className="flex items-center gap-3">
+              <ShipWheel
+                className="h-10 w-10 shrink-0 text-blue-600 dark:text-blue-400"
+                aria-hidden
+              />
+              <span className="bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 bg-clip-text text-3xl font-extrabold leading-none text-transparent drop-shadow-[0_0_12px_rgba(59,130,246,0.35)] dark:from-cyan-200 dark:via-blue-200 dark:to-purple-200 dark:drop-shadow-[0_0_14px_rgba(125,211,252,0.4)]">
                 HAI智研平台
               </span>
-              <div className="flex w-full max-w-[240px] items-center gap-2">
-                <span className="h-px w-10 bg-gradient-to-r from-transparent via-blue-500/70 to-blue-500/30 dark:via-cyan-300/80 dark:to-cyan-300/30" />
-                <span className="shrink-0 text-xs font-semibold uppercase tracking-[0.2em] text-blue-700/90 dark:text-cyan-100/90">
-                  AI-Driven SDLC
-                </span>
-                <span className="h-px w-10 bg-gradient-to-l from-transparent via-blue-500/70 to-blue-500/30 dark:via-cyan-300/80 dark:to-cyan-300/30" />
-              </div>
+            </div>
+            <div className="flex items-center justify-center gap-3">
+              <span className="h-px w-14 bg-gradient-to-r from-transparent via-blue-500/40 to-blue-500/80 dark:via-cyan-300/40 dark:to-cyan-300/80" />
+              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.22em] text-blue-600 dark:text-cyan-100/90">
+                AI-DRIVEN SDLC
+              </span>
+              <span className="h-px w-14 bg-gradient-to-l from-transparent via-blue-500/40 to-blue-500/80 dark:via-cyan-300/40 dark:to-cyan-300/80" />
             </div>
           </div>
         </div>

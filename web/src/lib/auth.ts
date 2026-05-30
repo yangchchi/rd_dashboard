@@ -137,6 +137,8 @@ export function clearAuthSession(): void {
   safeStorageRemove(localStorage, USER_KEY);
   safeStorageRemove(sessionStorage, TOKEN_KEY);
   safeStorageRemove(sessionStorage, USER_KEY);
+  safeStorageRemove(sessionStorage, '__global_rd_userRoles');
+  safeStorageRemove(sessionStorage, '__global_rd_userRole');
   clearCookieValue(TOKEN_KEY);
   clearCookieValue(USER_KEY);
   clearAiSkillCache();
