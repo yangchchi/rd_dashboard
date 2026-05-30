@@ -30,6 +30,7 @@ import type { IProduct } from '@/lib/rd-types';
 import { toast } from 'sonner';
 import { toastApiError } from '@/lib/api-error';
 import Link from 'next/link';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { ExternalLink, Package, Pencil, Plus, Trash2 } from 'lucide-react';
 
 const PRODUCT_PRIMARY_BUTTON =
@@ -190,17 +191,13 @@ const ProductManagementPage: React.FC = () => {
 
   return (
     <div className="flex w-full flex-col gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-6">
-        <div className="min-w-0">
-          <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
-            Product Master Data
-          </p>
-          <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
-            产品主数据
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            维护产品线、环境地址、仓库与责任人元数据。
-          </p>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="rd-page-header-lead">
+          <RdPageModuleHeading
+            icon={Package}
+            title="产品主数据"
+            description="维护产品线、环境地址、仓库与责任人元数据，作为需求、规格与交付流水线的归属上下文。"
+          />
         </div>
         <Button
           type="button"

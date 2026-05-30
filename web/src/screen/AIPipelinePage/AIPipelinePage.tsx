@@ -39,6 +39,7 @@ import {
   Play,
   FlaskConical,
 } from 'lucide-react';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import {
   ConfirmActionDialog,
@@ -1152,33 +1153,35 @@ const AIPipelinePage: React.FC<AIPipelinePageProps> = ({
             if (!open) setPromptAction(null);
           }}
         />
-        <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-6">
-          <div className="flex min-w-0 items-center gap-3">
-            {isDetail ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10 rounded-[20px] bg-[#f5eff7] text-muted-foreground shadow-none hover:bg-[#f1eaf4] hover:text-foreground dark:bg-muted"
-                onClick={() => router.push('/ai-pipeline')}
-                aria-label="返回交付引擎列表"
-              >
-                <ArrowLeft className="size-4" />
-              </Button>
-            ) : null}
-            <div className="min-w-0">
-              <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
-                Delivery Engine
-              </p>
-              <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
-                {isDetail ? '交付引擎详情' : '交付引擎'}
-              </h1>
-              {isDetail ? (
-                <p className="mt-1 truncate text-sm text-muted-foreground">
-                  {tasksLoading ? '加载交付任务…' : selectedTask ? resolveTaskCardTitle(selectedTask) : '交付引擎详情'}
-                </p>
-              ) : null}
-            </div>
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="rd-page-header-lead">
+            <RdPageModuleHeading
+              icon={Cpu}
+              title={isDetail ? '交付引擎详情' : '交付引擎'}
+              description={
+                isDetail
+                  ? tasksLoading
+                    ? '加载交付任务…'
+                    : selectedTask
+                      ? resolveTaskCardTitle(selectedTask)
+                      : '交付引擎详情'
+                  : '创建并监控 AI 研发流水线，查看生成日志、测试报告与质量指标；支持暂停、重试与回滚。'
+              }
+              leading={
+                isDetail ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-10 w-10 rounded-[20px] bg-[#f5eff7] text-muted-foreground shadow-none hover:bg-[#f1eaf4] hover:text-foreground dark:bg-muted"
+                    onClick={() => router.push('/ai-pipeline')}
+                    aria-label="返回交付引擎列表"
+                  >
+                    <ArrowLeft className="size-4" />
+                  </Button>
+                ) : undefined
+              }
+            />
           </div>
             {isList ? (
               <div className="flex shrink-0 flex-wrap items-center gap-3">

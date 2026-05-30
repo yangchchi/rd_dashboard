@@ -24,6 +24,7 @@ import {
   ListChecks,
   Layers3,
 } from 'lucide-react';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import { Streamdown } from '@/components/ui/streamdown';
 import { capabilityClient } from '@/lib/capability-client';
@@ -240,14 +241,13 @@ Machine-Readable JSON: ${spec.machineReadableJson ? '已生成' : '未生成'}
   return (
     <>
       <div className="flex w-full flex-col gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-        <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-6">
-          <div className="min-w-0">
-            <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
-              Technical Baseline
-            </p>
-            <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
-              技术基准
-            </h1>
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="rd-page-header-lead">
+            <RdPageModuleHeading
+              icon={Settings2}
+              title="技术基准"
+              description="按 PRD 维护 FS/TS 规格，AI 预评审冲突检测，校验并导出 Machine-Readable 标准格式。"
+            />
           </div>
           <Button
             onClick={handleCreateSpec}

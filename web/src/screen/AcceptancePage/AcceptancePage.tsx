@@ -15,6 +15,7 @@ import { Slider } from '@/components/ui/slider';
 import { Streamdown } from '@/components/ui/streamdown';
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from '@/components/ui/empty';
 import { FileSearch, CheckCircle, XCircle, RotateCcw, ExternalLink, MessageSquare, History, AlertCircle, Star, Send } from 'lucide-react';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import { toast } from 'sonner';
 import { toastApiError } from '@/lib/api-error';
@@ -363,14 +364,13 @@ const AcceptancePage: React.FC<IAcceptancePageProps> = () => {
   return (
     <>
       <div className="flex w-full animate-in fade-in slide-in-from-bottom-2 flex-col gap-6 duration-300">
-        <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-6">
-          <div className="min-w-0">
-            <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
-              Acceptance Center
-            </p>
-            <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
-              验收中心
-            </h1>
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="rd-page-header-lead">
+            <RdPageModuleHeading
+              icon={CheckCircle}
+              title="验收中心"
+              description="对比原始需求与实现进行多维度评分；不通过可一键发起 RFC，自动回退至 PRD 并通知产品经理。"
+            />
           </div>
         </header>
 

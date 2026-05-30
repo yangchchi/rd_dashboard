@@ -79,9 +79,9 @@ const LoginPage: React.FC = () => {
   return (
     <div className="app-shell flex min-h-screen items-center justify-center px-4 text-foreground">
       <div className="w-full max-w-md space-y-3">
-        <div className="px-1">
-          <div className="inline-flex flex-col gap-2.5">
-            <div className="flex items-center gap-3">
+        <div className="flex justify-center px-1">
+          <div className="flex flex-col items-center gap-2.5">
+            <div className="flex items-center justify-center gap-3">
               <ShipWheel
                 className="h-10 w-10 shrink-0 text-blue-600 dark:text-blue-400"
                 aria-hidden

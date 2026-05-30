@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { Search, Plus, Filter, FileDown, List, LayoutGrid } from 'lucide-react';
 import { UserDisplay } from '@/components/business-ui/user-display';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
@@ -145,14 +146,13 @@ const RequirementsPage: React.FC = () => {
   return (
     <>
       <div className="flex w-full flex-col gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-        <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-6">
-          <div className="min-w-0">
-            <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
-              Requirement Center
-            </p>
-            <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
-              需求中心
-            </h1>
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="rd-page-header-lead">
+            <RdPageModuleHeading
+              icon={List}
+              title="需求中心"
+              description="看板与列表统一管理需求，支持搜索、高级筛选、批量导出与跳转需求采集。"
+            />
           </div>
 
           <div className="flex flex-wrap items-center gap-3 sm:shrink-0">

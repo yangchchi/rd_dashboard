@@ -17,12 +17,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import {
   ArrowUpRight,
   Bot,
   ChevronDown,
   FileText,
   Filter,
+  LayoutDashboard,
   Plus,
   Rocket,
   Search,
@@ -403,14 +405,13 @@ const DashboardPage: React.FC = () => {
   return (
     <>
       <div className="w-full animate-in fade-in slide-in-from-bottom-2 duration-300">
-        <header className="mb-4 flex min-h-[44px] flex-wrap items-center justify-between gap-6">
-          <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-[0.09em] text-muted-foreground">
-              Research Dashboard
-            </p>
-            <h1 className="mt-0.5 text-2xl font-semibold leading-tight tracking-normal text-foreground">
-              智研工作台
-            </h1>
+        <header className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="rd-page-header-lead">
+            <RdPageModuleHeading
+              icon={LayoutDashboard}
+              title="智研看板"
+              description="六阶段泳道全局视图，拖拽变更状态；按角色快速筛选我提交的、我负责或全部需求。"
+            />
           </div>
 
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-3">

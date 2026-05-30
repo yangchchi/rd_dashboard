@@ -31,6 +31,7 @@ import {
   X,
   ChevronsUpDown,
 } from 'lucide-react';
+import { RdPageModuleHeading } from '@/components/rd-page-module-heading';
 import { ListRowActionsMenu } from '@/components/business-ui/list-row-actions-menu';
 import { toast } from 'sonner';
 import {
@@ -708,14 +709,13 @@ const PRDPage: React.FC = () => {
   return (
     <>
       <div className="flex w-full flex-col gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
-        <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-6">
-          <div className="min-w-0">
-            <p className="text-xs font-bold uppercase tracking-[0.09em] text-muted-foreground">
-              Smart Documents
-            </p>
-            <h1 className="mt-1 text-[34px] font-medium leading-tight tracking-normal text-foreground">
-              智能文档
-            </h1>
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="rd-page-header-lead">
+            <RdPageModuleHeading
+              icon={FileText}
+              title="智能文档"
+              description="管理 PRD 全生命周期，支持 AI 一键生成草稿、结构化编辑、评审流转与版本对比。"
+            />
           </div>
 
           <Button
